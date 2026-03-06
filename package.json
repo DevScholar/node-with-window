@@ -1,0 +1,30 @@
+{
+  "name": "@devscholar/node-with-window",
+  "version": "1.0.0",
+  "description": "Cross-platform window library with WebView support",
+  "main": "dist/index.js",
+  "type": "module",
+  "files": [
+    "dist",
+    "runtimes",
+    "scripts"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^25.3.3",
+    "typescript": "^5.9.3",
+    "esbuild": "^0.25.0"
+  },
+  "dependencies": {
+    "@devscholar/node-ps1-dotnet": "^0.0.6"
+  },
+  "optionalDependencies": {
+    "@devscholar/node-with-gjs": "^0.0.5"
+  }
+}
