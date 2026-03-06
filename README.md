@@ -104,8 +104,9 @@ The API mirrors [Electron](https://www.electronjs.org/docs/latest/) — replace
 `import ... from 'electron'` with `import ... from '@devscholar/node-with-window'`.
 
 **Platform note:** on Windows the Node.js event loop is blocked while the window
-is open, so `async` `ipcMain.handle()` handlers will never resolve. Use sync
-handlers on Windows; async handlers work normally on Linux.
+is open. Any `await` inside an `ipcMain.handle()` callback will deadlock — handlers
+must return their value synchronously. On Linux the event loop stays alive and
+`async` handlers work normally.
 
 ## Writing your own app
 
