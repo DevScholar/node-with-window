@@ -1,8 +1,5 @@
-import { EventEmitter } from 'events';
+import { EventEmitter } from 'node:events';
 import * as nodeWorker from 'node:worker_threads';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import * as os from 'node:os';
 
 type IpcHandler = (event: IpcMainEvent, ...args: unknown[]) => unknown;
 

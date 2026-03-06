@@ -2,7 +2,7 @@
 
 ⚠️ This project is still in pre-alpha stage, expect breaking changes.
 
-A cross-platform windowing library for Node.js with an Electron-compatible API. Uses [node-ps1-dotnet](../node-ps1-dotnet) (WPF + WebView2) on Windows and [node-with-gjs](../node-with-gjs) (GTK + WebKitGTK) on Linux.
+A cross-platform windowing library for Node.js/Deno/Bun with an Electron-compatible API. Uses [node-ps1-dotnet](../node-ps1-dotnet) (WPF + WebView2) on Windows and [node-with-gjs](../node-with-gjs) (GTK + WebKitGTK) on Linux.
 
 ## Prerequisites
 

@@ -1,4 +1,4 @@
-import { EventEmitter } from 'events';
+import { EventEmitter } from 'node:events';
 import { IWindowProvider, BrowserWindowOptions, MenuItemOptions, OpenDialogOptions, SaveDialogOptions } from './interfaces';
 import { WindowsWindow } from './providers/windows/index';
 import { LinuxWindow } from './providers/linux/index';
@@ -40,10 +40,10 @@ export class BrowserWindow extends EventEmitter {
             throw new Error(`Platform ${platform} is not currently supported by node-with-window.`);
         }
 
-        this._createdPromise = this._init(options);
+        this._createdPromise = this._init();
     }
 
-    private async _init(options?: BrowserWindowOptions): Promise<void> {
+    private async _init(): Promise<void> {
         try {
             await this.provider.createWindow();
             this._isCreated = true;
