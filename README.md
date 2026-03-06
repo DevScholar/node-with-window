@@ -9,8 +9,8 @@ A cross-platform windowing library for Node.js/Deno/Bun with an Electron-compati
 ### Windows
 
 - Node.js 18+
-- PowerShell 7+ (pwsh)
-- .NET 6+ runtime
+- PowerShell 5.1
+- .NET Framework 4.8
 - **WebView2 runtime** (pre-installed on Windows 11; install from [Microsoft](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) on Windows 10)
 - WebView2 SDK DLLs in `runtimes/webview2/`:
   - `Microsoft.Web.WebView2.Core.dll`
