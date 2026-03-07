@@ -49,6 +49,8 @@ export interface BrowserWindowOptions {
     kiosk?: boolean;
     /** Absolute or relative path to the window icon image (PNG or JPG). */
     icon?: string;
+    /** Backend to use for this window. Defaults to the app-level backend or platform default. */
+    backend?: string;
     webPreferences?: WebPreferences;
 }
 

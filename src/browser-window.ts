@@ -1,13 +1,12 @@
 import { EventEmitter } from 'node:events';
 import { IWindowProvider, BrowserWindowOptions, MenuItemOptions, OpenDialogOptions, SaveDialogOptions } from './interfaces';
-import { WindowsWindow } from './providers/windows/index';
-import { LinuxWindow } from './providers/linux/index';
+import { resolveBackend, ensureBackendInitialized } from './backends.js';
 
 /**
  * BrowserWindow - Cross-platform window with WebView support
  *
- * - Windows: WebView2 + WPF
- * - Linux: WebKitGTK + GTK4
+ * - Windows (default): netfx-wpf  (WebView2 + WPF via .NET)
+ * - Linux (default):   gjs-gtk4   (WebKitGTK + GTK4 via GJS)
  *
  * Use the static create() method instead of the constructor:
  *
@@ -17,6 +16,7 @@ import { LinuxWindow } from './providers/linux/index';
  */
 export class BrowserWindow extends EventEmitter {
     private provider: IWindowProvider;
+    private _backendName: string;
     private _id: number;
     private static _allWindows: Map<number, BrowserWindow> = new Map();
     private static _lastId = 0;
@@ -25,26 +25,21 @@ export class BrowserWindow extends EventEmitter {
 
     constructor(options?: BrowserWindowOptions) {
         super();
-        const platform = process.platform;
 
         BrowserWindow._lastId++;
         this._id = BrowserWindow._lastId;
         BrowserWindow._allWindows.set(this._id, this);
 
-        if (platform === 'win32') {
-            this.provider = new WindowsWindow(options);
-        } else if (platform === 'linux') {
-            this.provider = new LinuxWindow(options);
-        } else {
-            BrowserWindow._allWindows.delete(this._id);
-            throw new Error(`Platform ${platform} is not currently supported by node-with-window.`);
-        }
+        const backend = resolveBackend(options?.backend);
+        this._backendName = backend.name;
+        this.provider = backend.createProvider(options);
 
         this._createdPromise = this._init();
     }
 
     private async _init(): Promise<void> {
         try {
+            await ensureBackendInitialized(this._backendName);
             await this.provider.createWindow();
             this._isCreated = true;
             this.emit('created');

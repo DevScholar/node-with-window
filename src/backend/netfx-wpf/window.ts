@@ -49,7 +49,7 @@ export function setDotNetInstance(instance: unknown): void {
  * discovered through node_modules automatically.
  */
 function findWebView2Runtime(): string {
-    // __dirname of this compiled file is dist/providers/windows/
+    // __dirname of this compiled file is dist/backend/netfx-wpf/
     // Runtimes are at <package-root>/runtimes/webview2/
     const thisDir = path.dirname(fileURLToPath(import.meta.url));
     const packageRootRuntimes = path.resolve(thisDir, '..', '..', '..', 'runtimes', 'webview2');

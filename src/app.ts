@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { setDotNetInstance } from './providers/windows/index';
+import { resolveBackend, ensureBackendInitialized, setAppBackendName } from './backends.js';
 
 /**
  * App - Main Application Controller
@@ -80,46 +80,20 @@ class App extends EventEmitter {
 
     /**
      * Initializes the platform-specific runtime (lazy initialization).
-     * 
-     * On Windows:
-     * - Imports @devscholar/node-ps1-dotnet
-     * - Sets the .NET instance globally via setDotNetInstance()
-     * - This makes .NET available to the Windows window provider
-     * 
-     * Why is this needed?
-     * - node-ps1-dotnet spawns a hidden PowerShell process
-     * - This process hosts .NET and handles our calls
-     * - The communication is synchronous (stdin/stdout JSON)
-     * 
+     *
+     * Resolves the active backend (app-level override or platform default) and
+     * calls its initialize() method exactly once. On Windows this starts the
+     * .NET/PowerShell bridge; on Linux no global setup is needed.
+     *
      * Why lazy initialization?
-     * - Previously we initialized in the constructor, which caused issues:
-     *   1. Module-level side effects (bad for testing)
-     *   2. 50ms magic delay to avoid race conditions
-     *   3. No way to handle initialization errors gracefully
-     * - Now initialization starts when whenReady() is called
-     * - This gives users control and proper error handling
+     * - No module-level side effects (good for testing)
+     * - Proper error handling via promise rejection
+     * - Users control when initialization starts
      */
     private async initializePlatform(): Promise<void> {
-        if (process.platform === 'win32') {
-            try {
-                // Import the .NET bridge package
-                // This spawns a PowerShell process with .NET hosting
-                // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-                // @ts-ignore — no type declarations for this package
-                const nodePs1Dotnet = await import('@devscholar/node-ps1-dotnet');
-                const dotnet = nodePs1Dotnet.default || nodePs1Dotnet;
-                
-                // Set the .NET instance globally
-                // This makes it available to WindowsWindow.createWindow()
-                // which uses it to access WPF classes
-                setDotNetInstance(dotnet);
-            } catch (e) {
-                // Emit error event so users can handle it
-                this.emit('error', e);
-                throw e; // Re-throw to reject the promise
-            }
-        }
-        
+        const backend = resolveBackend();
+        await ensureBackendInitialized(backend.name);
+
         // Mark the app as ready and emit the event
         this.readyResolve();
         this.emit('ready');
@@ -127,8 +101,6 @@ class App extends EventEmitter {
 
     /**
      * Returns a promise that resolves when the app is ready.
-     * 
-     * This is the recommended way to wait for the app to initialize:
      * 
      * ```javascript
      * await app.whenReady();
@@ -153,6 +125,18 @@ class App extends EventEmitter {
         });
         
         return this.readyPromise;
+    }
+
+    /**
+     * Override the default backend for this platform.
+     * Must be called before app.whenReady().
+     *
+     * Example: app.setBackend('netfx-wpf');
+     */
+    public setBackend(name: string): void {
+        if (this.initializationStarted)
+            throw new Error('Cannot change backend after app.whenReady() has been called.');
+        setAppBackendName(name);
     }
 
     /**
