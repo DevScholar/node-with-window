@@ -103,11 +103,6 @@ The WebKit sandbox is disabled automatically by the library (see
 The API mirrors [Electron](https://www.electronjs.org/docs/latest/) — replace
 `import ... from 'electron'` with `import ... from '@devscholar/node-with-window'`.
 
-**Platform note:** on Windows the Node.js event loop is blocked while the window
-is open. Any `await` inside an `ipcMain.handle()` callback will deadlock — handlers
-must return their value synchronously. On Linux the event loop stays alive and
-`async` handlers work normally.
-
 ## Writing your own app
 
 1. Create a new project and install `node-with-window`:
@@ -172,14 +167,37 @@ app.whenReady().then(() => {
 node /path/to/node-with-window/start.js main.ts
 ```
 
+## Developing
+
+This library depends on [node-ps1-dotnet](../node-ps1-dotnet) (Windows) and
+[node-with-gjs](../node-with-gjs) (Linux), both installed as `file:` symlinks in
+`node_modules`. After changing either dependency, rebuild in order:
+
+```bash
+# From the repo root (c:/amateur-programming or ~/amateur-programming):
+node rebuild.js          # incremental rebuild
+node rebuild.js --clean  # wipe all dist/ folders first, then rebuild
+```
+
+The script builds `node-ps1-dotnet` then `node-with-window`. Because
+`node-with-window-examples` resolves both via `file:` symlinks, no copy step
+is needed — the rebuilt `dist/` is picked up immediately.
+
+If you only changed `node-with-window` itself:
+
+```bash
+cd node-with-window && npm run build
+```
+
 ## How it works
 
 ### Windows (WPF + WebView2)
 
 - The main process communicates with a PowerShell-hosted .NET runtime over a Windows Named Pipe via the [node-ps1-dotnet](../node-ps1-dotnet) bridge
-- `app.Run(window)` blocks the .NET PowerShell thread in the WPF message loop; events (like `CoreWebView2InitializationCompleted` and `WebMessageReceived`) are delivered to Node.js via re-entrant IPC callbacks
-- When `loadFile` is called before `show()`, the HTML is read, the `ipcRenderer` bridge is injected into `<head>`, and the modified HTML is written to a temp file. `webView.Source` is set to this temp file URL **before** `app.Run()` — identical to the one-navigation pattern in the reference [`webview2-browser.ts`](../node-ps1-dotnet-examples/src/wpf/webview2-browser/webview2-browser.ts) example, which avoids any Task-returning methods inside re-entrant callbacks (those deadlock because `task.Wait()` blocks the WPF STA thread while it waits for a continuation that also needs the same thread)
-- The `WebMessageReceived` handler runs **synchronously** inside `RunProcessNestedCommands()`. IPC replies to `invoke` calls are sent synchronously via `PostWebMessageAsString` (which delivers a JSON string as `event.data` to the renderer, unlike `PostWebMessageAsJson` which delivers a parsed object)
+- `show()` sends a `StartApplication` command to the .NET host, which immediately acknowledges and then calls `Application.Run(window)` — blocking the .NET thread in the WPF message loop without blocking the Node.js event loop
+- Node.js polls for events every 16 ms with a `Poll` command that drains a thread-safe queue. WPF event handlers (like `WebMessageReceived`) enqueue their payload instead of blocking on synchronous IPC, so `async ipcMain.handle()` callbacks work normally
+- When `loadFile` is called before `show()`, the HTML is read, the `ipcRenderer` bridge is injected into `<head>`, and the modified HTML is written to a temp file. `webView.Source` is set to this temp file URL before `Application.Run()` — identical to the one-navigation pattern in the reference [`webview2-browser.ts`](../node-ps1-dotnet-examples/src/wpf/webview2-browser/webview2-browser.ts) example
+- The `WebMessageReceived` handler enqueues the raw JSON payload. The next `Poll` delivers it to Node.js, which dispatches it to the registered `ipcMain` handler and sends the reply via `PostWebMessageAsString`
 - Node integration uses `NODE_WITH_WINDOW:` prefixed messages via `chrome.webview.postMessage()` to provide access to Node.js APIs in the renderer
 
 ### Linux (GJS + GTK 4 + WebKitGTK)

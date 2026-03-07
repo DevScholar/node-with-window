@@ -91,6 +91,9 @@ function findWebView2Runtime(): string {
     throw new Error(`WebView2 DLLs not found. Searched in: ${possibleBasePaths.join(', ')}`);
 }
 
+/** How often (ms) Node.js polls the .NET host for queued events. */
+const POLL_INTERVAL_MS = 16;
+
 /**
  * WindowsWindow implements the IWindowProvider interface for Windows using WPF + WebView2.
  *
@@ -104,9 +107,11 @@ function findWebView2Runtime(): string {
  *    WebView2 initialization is asynchronous. loadURL()/loadFile() calls
  *    before CoreWebView2 is ready are queued and replayed on init.
  *
- * 3. SYNCHRONOUS IPC ONLY:
- *    node-ps1-dotnet blocks Node's event loop with fs.readSync(). Async
- *    IPC handlers cannot resolve while the window is open — use sync handlers.
+ * 3. POLLING-BASED IPC:
+ *    show() calls StartApplication which pre-sends an ok response and then
+ *    calls Application.Run() on the .NET side, keeping Node's event loop free.
+ *    Node.js polls for queued events every POLL_INTERVAL_MS, exactly like the
+ *    Linux backend. This means async ipcMain.handle() callbacks work on Windows.
  */
 export class WindowsWindow implements IWindowProvider {
     public options: BrowserWindowOptions;
@@ -121,7 +126,8 @@ export class WindowsWindow implements IWindowProvider {
     public tempHtmlFile: string | null = null;
     public userDataPath: string;
     public pendingMenu: MenuItemOptions[] | null = null;
-    private isCleanedUp = false;
+    private isClosed = false;
+    private _pollTimer: ReturnType<typeof setInterval> | null = null;
 
     constructor(options?: BrowserWindowOptions) {
         this.options = options || {};
@@ -207,11 +213,7 @@ export class WindowsWindow implements IWindowProvider {
 
     /**
      * Sets up the IPC bridge and document title sync.
-     *
-     * IMPORTANT: Async IPC handlers are NOT supported on Windows.
-     * node-ps1-dotnet blocks Node's event loop with fs.readSync() while the
-     * window is open, so Promise microtasks can never run. Always use
-     * synchronous handlers with ipcMain.handle().
+     * Both sync and async ipcMain.handle() callbacks are supported.
      */
     private setupIpcBridge(): void {
         const handlers = (ipcMain as unknown as { handlers: Map<string, (event: unknown, ...args: unknown[]) => unknown> }).handlers;
@@ -242,10 +244,10 @@ export class WindowsWindow implements IWindowProvider {
                     if (handler) {
                         try {
                             const result = handler(event, ...args);
-
                             if (result && typeof (result as unknown as { then: unknown }).then === 'function') {
-                                console.warn(`[node-with-window] Handler for "${channel}" returned a Promise. Async handlers are not supported — use synchronous handlers only.`);
-                                this.sendIpcReply(id, null, `Channel "${channel}": async handlers are not supported.`);
+                                (result as Promise<unknown>)
+                                    .then(r  => this.sendIpcReply(id, r, null))
+                                    .catch(err => this.sendIpcReply(id, null, (err as Error).message || String(err)));
                             } else {
                                 this.sendIpcReply(id, result, null);
                             }
@@ -330,31 +332,73 @@ export class WindowsWindow implements IWindowProvider {
         (this.webView as unknown as { Source: unknown }).Source = new System.Uri(initialUri);
         this.app = new Windows.Application();
 
-        const keepAlive = setInterval(() => {}, 1000);
-
         (this.browserWindow as unknown as { add_Closed: (cb: () => void) => void }).add_Closed(() => {
-            clearInterval(keepAlive);
-            if (this.tempHtmlFile) {
-                try { fs.unlinkSync(this.tempHtmlFile); } catch {}
-            }
-            this.cleanupUserData();
-            process.exit(0);
+            this._onWindowClosed();
         });
 
-        setImmediate(() => (this.app as unknown as { Run: (w: unknown) => void }).Run(this.browserWindow));
+        // StartApplication pre-sends {type:'ok'} immediately, then calls Application.Run()
+        // on the .NET side — the Node.js event loop is never blocked.
+        dotnetAny.startApplication(this.app, this.browserWindow);
+
+        // Poll for queued .NET events (WebMessageReceived, CoreWebView2InitializationCompleted, …)
+        // exactly like the Linux backend polls its GJS host.
+        this._pollTimer = setInterval(() => this._poll(), POLL_INTERVAL_MS);
     }
 
     public close(): void {
-        if (this.isCleanedUp) return;
-        this.isCleanedUp = true;
-
+        if (this.isClosed) return;
+        this.isClosed = true;
+        if (this._pollTimer) { clearInterval(this._pollTimer); this._pollTimer = null; }
         if (this.browserWindow) {
-            (this.browserWindow as unknown as { Close: () => void }).Close();
+            try { (this.browserWindow as unknown as { Close: () => void }).Close(); } catch { /* ignore */ }
         }
-
         if (this.tempHtmlFile) {
             try { fs.unlinkSync(this.tempHtmlFile); } catch {}
             this.tempHtmlFile = null;
+        }
+        this.cleanupUserData();
+        process.exit(0);
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal helpers
+    // -------------------------------------------------------------------------
+
+    /** Called when the WPF window has been closed (via poll or direct close()). */
+    private _onWindowClosed(): void {
+        if (this.isClosed) return;
+        this.isClosed = true;
+        if (this._pollTimer) { clearInterval(this._pollTimer); this._pollTimer = null; }
+        if (this.tempHtmlFile) {
+            try { fs.unlinkSync(this.tempHtmlFile); } catch {}
+            this.tempHtmlFile = null;
+        }
+        this.cleanupUserData();
+        process.exit(0);
+    }
+
+    /** Poll the .NET host for one queued event and dispatch it. */
+    private _poll(): void {
+        if (this.isClosed) return;
+        let resp: { type: string; message?: string };
+        try {
+            resp = (dotnet as any).pollEvent() as typeof resp;
+        } catch {
+            // Pipe closed — .NET process exited unexpectedly
+            this._onWindowClosed();
+            return;
+        }
+        if (resp.type === 'ipc' && resp.message) {
+            try {
+                const result = (dotnet as any).dispatchEvent(resp.message);
+                // If the callback is async, silently swallow the promise (errors logged inside)
+                if (result && typeof (result as Promise<unknown>).then === 'function') {
+                    (result as Promise<unknown>).catch((e: unknown) =>
+                        console.error('[node-with-window] async event handler error:', e));
+                }
+            } catch (e) {
+                console.error('[node-with-window] event dispatch error:', e);
+            }
         }
     }
 
