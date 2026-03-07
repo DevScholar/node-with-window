@@ -47,6 +47,8 @@ export interface BrowserWindowOptions {
     alwaysOnTop?: boolean;
     skipTaskbar?: boolean;
     kiosk?: boolean;
+    /** Absolute or relative path to the window icon image (PNG or JPG). */
+    icon?: string;
     webPreferences?: WebPreferences;
 }
 

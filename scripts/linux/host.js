@@ -14,6 +14,7 @@ import Gtk from 'gi://Gtk?version=4.0';
 import WebKit from 'gi://WebKit?version=6.0';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import Gdk from 'gi://Gdk?version=4.0';
 import System from 'system';
 
 // ---------------------------------------------------------------------------
@@ -48,6 +49,7 @@ let gtkWindow   = null;  // Gtk.Window
 let webView     = null;  // WebKit.WebView
 let mainLoop    = null;  // GLib.MainLoop
 let windowBox   = null;  // Gtk.Box (root child of window)
+let iconPath    = null;  // icon file path (set during CreateWindow)
 let isClosed    = false;
 
 // Queue of JSON strings posted by the HTML renderer (webkit.messageHandlers.ipc)
@@ -295,6 +297,7 @@ function executeCommand(cmd) {
 
             if (opts.resizable === false) gtkWindow.set_resizable(false);
             if (opts.alwaysOnTop)         gtkWindow.set_keep_above(true);
+            if (opts.icon)               iconPath = opts.icon;
 
             // Exit cleanly when the user closes the window
             gtkWindow.connect('close-request', () => {
@@ -318,6 +321,15 @@ function executeCommand(cmd) {
 
         case 'Show': {
             if (gtkWindow) gtkWindow.present();
+            if (iconPath) {
+                try {
+                    const texture = Gdk.Texture.new_from_filename(iconPath);
+                    const surface = gtkWindow.get_surface();
+                    if (surface) surface.set_icon_list([texture]);
+                } catch (_e) {
+                    // Icon loading is best-effort; ignore failures
+                }
+            }
             return { type: 'void' };
         }
 

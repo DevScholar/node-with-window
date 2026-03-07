@@ -170,6 +170,22 @@ export class WindowsWindow implements IWindowProvider {
         (this.browserWindow as unknown as { Height: number }).Height = this.options.height || 600;
         (this.browserWindow as unknown as { WindowStartupLocation: unknown }).WindowStartupLocation = Windows.WindowStartupLocation.CenterScreen;
 
+        if (this.options.icon) {
+            try {
+                const absIcon = path.isAbsolute(this.options.icon)
+                    ? this.options.icon
+                    : path.resolve(process.cwd(), this.options.icon);
+                if (fs.existsSync(absIcon)) {
+                    const fileUri = 'file:///' + absIcon.replace(/\\/g, '/');
+                    const Imaging = Windows.Media.Imaging;
+                    const bitmap = new Imaging.BitmapImage(new System.Uri(fileUri));
+                    (this.browserWindow as unknown as { Icon: unknown }).Icon = bitmap;
+                }
+            } catch (_e) {
+                // Icon loading is best-effort; ignore failures
+            }
+        }
+
         const grid = new Controls.Grid();
         (this.browserWindow as unknown as { Content: unknown }).Content = grid;
         (grid as unknown as { Children: { Add: (w: unknown) => void } }).Children.Add(this.webView);

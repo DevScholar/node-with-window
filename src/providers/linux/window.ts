@@ -206,8 +206,16 @@ export class LinuxWindow implements IWindowProvider {
         process.once('exit',       () => this._cleanup());
         process.once('SIGINT',     () => { this._cleanup(); process.exit(0); });
 
+        // Resolve icon path to absolute before sending to GJS
+        const options = { ...this.options };
+        if (options.icon) {
+            options.icon = path.isAbsolute(options.icon)
+                ? options.icon
+                : path.resolve(process.cwd(), options.icon);
+        }
+
         // Tell GJS to create the window (but not show it yet)
-        this._send('CreateWindow', { options: this.options });
+        this._send('CreateWindow', { options });
     }
 
     public show(): void {
