@@ -22,7 +22,7 @@
     "esbuild": "^0.25.0"
   },
   "dependencies": {
-    "@devscholar/node-ps1-dotnet": "latest"
+    "@devscholar/node-ps1-dotnet": "file:../node-ps1-dotnet"
   },
   "optionalDependencies": {
     "@devscholar/node-with-gjs": "latest"

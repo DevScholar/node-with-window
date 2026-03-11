@@ -1,6 +1,26 @@
 import { EventEmitter } from 'node:events';
+import { createRequire } from 'node:module';
 import { IWindowProvider, BrowserWindowOptions, MenuItemOptions, OpenDialogOptions, SaveDialogOptions } from './interfaces';
 import { resolveBackend, ensureBackendInitialized } from './backends.js';
+import { ipcMain } from './ipc-main.js';
+
+/** Registered once per process when the first nodeIntegration window is created. */
+let _nodeIntegrationHandlerRegistered = false;
+
+function registerNodeIntegrationHandler() {
+    if (_nodeIntegrationHandlerRegistered) return;
+    _nodeIntegrationHandlerRegistered = true;
+    const _require = createRequire(import.meta.url);
+    ipcMain.handle('__nww:require__', (_event, moduleName, methodName, args) => {
+        console.log(`[requireAsync] ${moduleName}.${methodName}()`);
+        const mod = _require(moduleName as string);
+        const fn = (mod as Record<string, unknown>)[methodName as string];
+        if (typeof fn !== 'function') {
+            throw new Error(`${moduleName}.${methodName} is not a function`);
+        }
+        return (fn as (...a: unknown[]) => unknown).apply(mod, args as unknown[]);
+    });
+}
 
 /**
  * BrowserWindow - Cross-platform window with WebView support
@@ -61,6 +81,9 @@ export class BrowserWindow extends EventEmitter {
      * ```
      */
     public static async create(options?: BrowserWindowOptions): Promise<BrowserWindow> {
+        if (options?.webPreferences?.nodeIntegration) {
+            registerNodeIntegrationHandler();
+        }
         const win = new BrowserWindow(options);
         await win._createdPromise;
         return win;
