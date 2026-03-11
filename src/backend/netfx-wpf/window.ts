@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { IWindowProvider, BrowserWindowOptions, WebPreferences, OpenDialogOptions, SaveDialogOptions, MenuItemOptions } from '../../interfaces';
 import { ipcMain } from '../../ipc-main';
-import { injectBridgeScript } from './bridge.js';
+import { injectBridgeScript, generateBridgeScript } from './bridge.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 import { buildWpfMenu } from './menu.js';
 
@@ -123,7 +123,7 @@ export class WindowsWindow implements IWindowProvider {
     public isWebViewReady = false;
     public navigationQueue: Array<() => void> = [];
     public pendingFilePath: string | null = null;
-    public tempHtmlFile: string | null = null;
+    private _pendingFileUri: string | null = null;
     public userDataPath: string;
     public pendingMenu: MenuItemOptions[] | null = null;
     private isClosed = false;
@@ -218,6 +218,21 @@ export class WindowsWindow implements IWindowProvider {
     private setupIpcBridge(): void {
         const handlers = (ipcMain as unknown as { handlers: Map<string, (event: unknown, ...args: unknown[]) => unknown> }).handlers;
 
+        // Register the bridge script and navigate in one atomic C# operation.
+        // AddScriptToExecuteOnDocumentCreatedAsync returns a Task<string> that completes
+        // only after the WebView2 browser process confirms the script registration.
+        // In polling mode we cannot Task.Wait() on the UI thread (deadlock), so the
+        // dedicated AddScriptAndNavigate action uses Task.ContinueWith to call Navigate()
+        // only after the ack arrives — guaranteeing the script runs on the first document.
+        const bridgeScript = generateBridgeScript(this.webPreferences);
+        if (this._pendingFileUri) {
+            (dotnet as any).addScriptAndNavigate(this.coreWebView2, bridgeScript, this._pendingFileUri);
+            this._pendingFileUri = null;
+        } else {
+            (this.coreWebView2 as unknown as { AddScriptToExecuteOnDocumentCreatedAsync: (s: string) => unknown })
+                .AddScriptToExecuteOnDocumentCreatedAsync(bridgeScript);
+        }
+
         // Automatically sync document.title changes to the WPF window title bar
         (this.coreWebView2 as unknown as { add_DocumentTitleChanged: (cb: (_sender: unknown, _e: unknown) => void) => void }).add_DocumentTitleChanged((_sender, _e) => {
             const title = (this.coreWebView2 as unknown as { DocumentTitle: string }).DocumentTitle;
@@ -296,9 +311,8 @@ export class WindowsWindow implements IWindowProvider {
             this.pendingFilePath = absolutePath;
             return;
         }
-        const html = fs.readFileSync(absolutePath, 'utf-8');
-        const injectedHtml = injectBridgeScript(html, this.webPreferences);
-        (this.coreWebView2 as unknown as { NavigateToString: (s: string) => void }).NavigateToString(injectedHtml);
+        const fileUri = 'file:///' + absolutePath.replace(/\\/g, '/');
+        (this.coreWebView2 as unknown as { Navigate: (url: string) => void }).Navigate(fileUri);
     }
 
     public show(): void {
@@ -315,21 +329,15 @@ export class WindowsWindow implements IWindowProvider {
             buildWpfMenu({ browserWindow: this.browserWindow, webView: this.webView, pendingMenu: this.pendingMenu });
         }
 
-        let initialUri: string;
-
         if (this.pendingFilePath) {
-            const rawHtml = fs.readFileSync(this.pendingFilePath, 'utf-8');
-            const injectedHtml = injectBridgeScript(rawHtml, this.webPreferences);
-
-            this.tempHtmlFile = path.join(os.tmpdir(), `node-with-window-${Date.now()}.html`);
-            fs.writeFileSync(this.tempHtmlFile, injectedHtml, 'utf-8');
-            initialUri = this.tempHtmlFile;
+            // Store for setupIpcBridge to navigate AFTER script registration
+            this._pendingFileUri = 'file:///' + this.pendingFilePath.replace(/\\/g, '/');
             this.pendingFilePath = null;
-        } else {
-            initialUri = 'about:blank';
         }
 
-        (this.webView as unknown as { Source: unknown }).Source = new System.Uri(initialUri);
+        // Always start with about:blank so WebView2 doesn't auto-navigate before we can
+        // register AddScriptToExecuteOnDocumentCreated in setupIpcBridge().
+        (this.webView as unknown as { Source: unknown }).Source = new System.Uri('about:blank');
         this.app = new Windows.Application();
 
         (this.browserWindow as unknown as { add_Closed: (cb: () => void) => void }).add_Closed(() => {
@@ -352,10 +360,6 @@ export class WindowsWindow implements IWindowProvider {
         if (this.browserWindow) {
             try { (this.browserWindow as unknown as { Close: () => void }).Close(); } catch { /* ignore */ }
         }
-        if (this.tempHtmlFile) {
-            try { fs.unlinkSync(this.tempHtmlFile); } catch {}
-            this.tempHtmlFile = null;
-        }
         this.cleanupUserData();
         process.exit(0);
     }
@@ -369,10 +373,6 @@ export class WindowsWindow implements IWindowProvider {
         if (this.isClosed) return;
         this.isClosed = true;
         if (this._pollTimer) { clearInterval(this._pollTimer); this._pollTimer = null; }
-        if (this.tempHtmlFile) {
-            try { fs.unlinkSync(this.tempHtmlFile); } catch {}
-            this.tempHtmlFile = null;
-        }
         this.cleanupUserData();
         process.exit(0);
     }
