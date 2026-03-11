@@ -533,6 +533,40 @@ export class LinuxWindow implements IWindowProvider {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Unsupported on GTK4/GNOME — warn and return safe defaults
+  // -------------------------------------------------------------------------
+
+  public blur(): void {
+    console.warn('[node-with-window] win.blur() is not supported on GTK4/GNOME: the compositor controls focus.');
+  }
+
+  public setPosition(_x: number, _y: number): void {
+    console.warn('[node-with-window] win.setPosition() is not supported on GTK4/GNOME: GTK4 removed window.move() and placement is managed by the window manager.');
+  }
+
+  public getPosition(): [number, number] {
+    console.warn('[node-with-window] win.getPosition() is not supported on GTK4/GNOME: window position is managed by the window manager.');
+    return [0, 0];
+  }
+
+  public setOpacity(_opacity: number): void {
+    console.warn('[node-with-window] win.setOpacity() is not supported on GTK4/GNOME: gtk_widget_set_opacity() was removed in GTK4.');
+  }
+
+  public getOpacity(): number {
+    console.warn('[node-with-window] win.getOpacity() is not supported on GTK4/GNOME.');
+    return 1.0;
+  }
+
+  public center(): void {
+    console.warn('[node-with-window] win.center() is not supported on GTK4/GNOME: GTK4 removed gtk_window_set_position().');
+  }
+
+  public flashFrame(_flag: boolean): void {
+    console.warn('[node-with-window] win.flashFrame() is not supported on GTK4/GNOME.');
+  }
+
   public onNavigationCompleted(callback: () => void): void {
     this._navCompletedCallback = callback;
   }

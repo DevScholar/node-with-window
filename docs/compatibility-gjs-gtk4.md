@@ -90,7 +90,7 @@
 | `win.close()` | ✅ | Sends `Close` command to GJS host; cleans up FIFOs; exits process |
 | `win.destroy()` | ✅ | Alias for `close()` |
 | `win.focus()` | ✅ | `Window.present()` |
-| `win.blur()` | ❌ | Not implemented |
+| `win.blur()` | ⚠️ | No-op + console warning; GNOME compositor controls focus |
 | `win.minimize()` | ✅ | `Window.minimize()` |
 | `win.maximize()` | ✅ | `Window.maximize()` |
 | `win.unmaximize()` / `win.restore()` | ✅ | `Window.unmaximize()` |
@@ -100,15 +100,15 @@
 | `win.getTitle()` | ✅ | Round-trip query to GJS host |
 | `win.setSize(w, h)` | ✅ | `Window.set_default_size()`; takes effect on next layout pass |
 | `win.getSize()` | ✅ | `Window.get_width()` / `get_height()` — returns `[0,0]` before first show |
-| `win.setPosition(x, y)` | ❌ | GTK4 removed `window.move()`; placement is WM-controlled |
-| `win.getPosition()` | ❌ | Not implemented |
-| `win.setOpacity(opacity)` | ❌ | Not implemented |
-| `win.getOpacity()` | ❌ | Not implemented |
+| `win.setPosition(x, y)` | ⚠️ | No-op + console warning; GTK4 removed `window.move()`, placement is WM-controlled |
+| `win.getPosition()` | ⚠️ | Returns `[0, 0]` + console warning |
+| `win.setOpacity(opacity)` | ⚠️ | No-op + console warning; `gtk_widget_set_opacity()` removed in GTK4 |
+| `win.getOpacity()` | ⚠️ | Returns `1.0` + console warning |
 | `win.setResizable(flag)` | ✅ | `Window.set_resizable()`; works at runtime |
 | `win.isResizable()` | ✅ | Tracks local state (constructor default + `setResizable()` calls) |
 | `win.setAlwaysOnTop(flag)` | ✅ | `Window.set_keep_above()` |
-| `win.center()` | ❌ | Not implemented |
-| `win.flashFrame(flag)` | ❌ | Not implemented |
+| `win.center()` | ⚠️ | No-op + console warning; GTK4 removed `gtk_window_set_position()` |
+| `win.flashFrame(flag)` | ⚠️ | No-op + console warning |
 | `win.setMenu(menu)` | ✅ | GTK4 `PopoverMenuBar`; menu items flattened and mapped to `Gio.SimpleAction` |
 | `win.removeMenu()` | ✅ | Calls `setMenu([])` |
 | `win.showOpenDialog(options)` | ✅ | `Gtk.FileChooserDialog`; synchronous via nested GLib main loop |
