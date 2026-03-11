@@ -62,6 +62,8 @@ export function startSyncServer(): Promise<number> {
             let body = '';
             req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
             req.on('end', () => {
+                const sendOk  = (result: unknown) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ result })); };
+                const sendErr = (e: unknown)      => { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: (e as Error).message ?? String(e) })); };
                 try {
                     const { moduleName, methodName, args } = JSON.parse(body) as {
                         moduleName: string;
@@ -79,11 +81,16 @@ export function startSyncServer(): Promise<number> {
 
                     const result = (fn as (...a: unknown[]) => unknown).apply(mod, args);
 
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ result }));
+                    // If the function returns a Promise (e.g. fs/promises.readFile),
+                    // wait for it to settle before responding.  The renderer's sync XHR
+                    // keeps blocking until the HTTP response arrives, so this is safe.
+                    if (result !== null && typeof result === 'object' && typeof (result as Promise<unknown>).then === 'function') {
+                        (result as Promise<unknown>).then(sendOk).catch(sendErr);
+                    } else {
+                        sendOk(result);
+                    }
                 } catch (e: unknown) {
-                    res.writeHead(500, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: (e as Error).message ?? String(e) }));
+                    sendErr(e);
                 }
             });
         });

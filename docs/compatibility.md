@@ -85,7 +85,7 @@ This document tracks which Electron APIs are implemented in `node-with-window`, 
 
 | Option | Status | Notes |
 |---|---|---|
-| `nodeIntegration` | ✅ | Enables `window.requireAsync`, `window.process` |
+| `nodeIntegration` | ✅ | Enables `window.require` (sync), `window.requireAsync` (async), `window.process` |
 | `contextIsolation` | ✅ | When `false`, `window.ipcRenderer` is injected |
 | `partition` | ✅ | `persist:<name>` or `temp:` |
 | `preload` | ❌ | Use `nodeIntegration` + `ipcMain`/`ipcRenderer` instead |
@@ -298,10 +298,10 @@ Electron's `nodeIntegration: true` gives the renderer process full access to Nod
 
 | Feature | Status | Notes |
 |---|---|---|
-| `window.require('fs')` | ⚠️ Stub only | Returns stub object that warns on use; does not call Node.js |
-| `window.require('path')` | ⚠️ Stub only | Same as above |
-| `window.require('os')` | ⚠️ Stub only | Same as above |
-| `window.requireAsync('fs')` | ✅ | **node-with-window specific** — proxy that routes calls to main process via IPC |
+| `window.require('fs')` | ✅ | Synchronous — sync XHR to local HTTP server; blocks renderer JS thread until Node.js responds |
+| `window.require('path')` | ✅ | Same as above |
+| `window.require('os')` | ✅ | Same as above |
+| `window.requireAsync('fs')` | ✅ | **node-with-window specific** — async variant; routes calls to main process via IPC, returns `Promise` |
 | `window.process.platform` | ✅ | `'win32'` or `'linux'` |
 | `window.process.arch` | ✅ | `'x64'` |
 | `window.process.version` | ✅ | Injected from main process |
@@ -312,18 +312,28 @@ Electron's `nodeIntegration: true` gives the renderer process full access to Nod
 
 ### Migration Pattern
 
-Replace direct `fs` calls in the renderer:
+Replace direct `fs` calls in the renderer — `window.require` is synchronous, just like Electron's `nodeIntegration: true`:
 
 ```js
 // Electron (nodeIntegration: true)
 const fs = require('fs');
 const content = fs.readFileSync(path, 'utf-8');
 
-// node-with-window
+// node-with-window — window.require is also synchronous
+const fs = window.require('fs');
+const content = fs.readFileSync(path, 'utf-8');
+```
+
+> **How it works:** `window.require(moduleName).methodName(...args)` sends a synchronous XMLHttpRequest to a local HTTP server (Node.js, `127.0.0.1:<random port>`). The renderer JS thread blocks until the response arrives, then returns the result — no `await` needed. Chromium's network stack runs on a background thread, so there is no deadlock.
+
+For an async alternative (e.g. in a Worker context), use `window.requireAsync`:
+
+```js
+// node-with-window async variant
 const content = await window.requireAsync('fs').readFileSync(path, 'utf-8');
 ```
 
-Or route through explicit IPC:
+Or route through explicit IPC for full control:
 
 ```js
 // main process
@@ -373,7 +383,7 @@ const content = await ipcRenderer.invoke('read-file', path);
 
 4. **`ipcMain.on()` is absent.** Use `ipcMain.handle()` for all IPC from the renderer. For fire-and-forget semantics, handle the message and return `undefined`.
 
-5. **`window.requireAsync()` instead of `window.require()`.** Real Node.js module access from the renderer requires async IPC; `window.require()` only returns stubs.
+5. **`window.require()` is synchronous via local HTTP server.** Unlike a real Node.js environment (where `require` is a C++ binding), `window.require` in node-with-window uses a synchronous XHR to a loopback HTTP server started by the main process. The API is identical to Electron's `nodeIntegration: true`. `window.requireAsync` is an async variant that routes through IPC and returns a `Promise`.
 
 6. **Dialogs are synchronous internally.** The `dialog.*` API returns Promises for Electron compatibility, but the underlying platform dialog blocks until the user responds.
 
