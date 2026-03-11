@@ -132,4 +132,24 @@ export interface IWindowProvider {
     cleanupUserData?(): void;
     reload?(): void;
     openDevTools?(): void;
+    focus?(): void;
+    blur?(): void;
+    minimize?(): void;
+    maximize?(): void;
+    unmaximize?(): void;
+    setFullScreen?(flag: boolean): void;
+    isFullScreen?(): boolean;
+    setTitle?(title: string): void;
+    getTitle?(): string;
+    setSize?(width: number, height: number): void;
+    getSize?(): [number, number];
+    setPosition?(x: number, y: number): void;
+    getPosition?(): [number, number];
+    setOpacity?(opacity: number): void;
+    getOpacity?(): number;
+    setResizable?(resizable: boolean): void;
+    isResizable?(): boolean;
+    setAlwaysOnTop?(flag: boolean): void;
+    center?(): void;
+    flashFrame?(flag: boolean): void;
 }

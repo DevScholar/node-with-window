@@ -1,7 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { IWindowProvider, BrowserWindowOptions, MenuItemOptions, OpenDialogOptions, SaveDialogOptions } from './interfaces';
 import { resolveBackend, ensureBackendInitialized } from './backends.js';
-import { ipcMain } from './ipc-main.js';
 import { app } from './app.js';
 import { startSyncServer } from './node-integration.js';
 import type { Menu } from './menu.js';
@@ -174,14 +173,46 @@ export class BrowserWindow extends EventEmitter {
     }
 
     public reload(): void {
-        if (this.provider.reload) {
-            this.provider.reload();
-        }
+        if (this.provider.reload) this.provider.reload();
     }
 
     public openDevTools(): void {
-        if (this.provider.openDevTools) {
-            this.provider.openDevTools();
-        }
+        if (this.provider.openDevTools) this.provider.openDevTools();
     }
+
+    /** Alias for close(). */
+    public destroy(): void { this.close(); }
+
+    public focus(): void { this.provider.focus?.(); }
+    public blur(): void  { this.provider.blur?.(); }
+
+    public minimize(): void    { this.provider.minimize?.(); }
+    public maximize(): void    { this.provider.maximize?.(); }
+    public unmaximize(): void  { this.provider.unmaximize?.(); }
+    /** Alias for unmaximize(). */
+    public restore(): void     { this.provider.unmaximize?.(); }
+
+    public setFullScreen(flag: boolean): void  { this.provider.setFullScreen?.(flag); }
+    public isFullScreen(): boolean             { return this.provider.isFullScreen?.() ?? false; }
+
+    public setTitle(title: string): void  { this.provider.setTitle?.(title); }
+    public getTitle(): string             { return this.provider.getTitle?.() ?? ''; }
+
+    public setSize(width: number, height: number): void { this.provider.setSize?.(width, height); }
+    public getSize(): [number, number]                  { return this.provider.getSize?.() ?? [0, 0]; }
+
+    public setPosition(x: number, y: number): void { this.provider.setPosition?.(x, y); }
+    public getPosition(): [number, number]          { return this.provider.getPosition?.() ?? [0, 0]; }
+
+    public setOpacity(opacity: number): void { this.provider.setOpacity?.(opacity); }
+    public getOpacity(): number              { return this.provider.getOpacity?.() ?? 1; }
+
+    public setResizable(resizable: boolean): void { this.provider.setResizable?.(resizable); }
+    public isResizable(): boolean                 { return this.provider.isResizable?.() ?? true; }
+
+    public setAlwaysOnTop(flag: boolean): void { this.provider.setAlwaysOnTop?.(flag); }
+
+    public center(): void { this.provider.center?.(); }
+
+    public flashFrame(flag: boolean): void { this.provider.flashFrame?.(flag); }
 }

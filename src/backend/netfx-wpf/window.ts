@@ -129,10 +129,13 @@ export class WindowsWindow implements IWindowProvider {
     public pendingMenu: MenuItemOptions[] | null = null;
     private isClosed = false;
     private _pollTimer: ReturnType<typeof setInterval> | null = null;
+    private _isFullScreen = false;
+    private _isResizable = true;
 
     constructor(options?: BrowserWindowOptions) {
         this.options = options || {};
         this.webPreferences = this.options.webPreferences || {};
+        this._isResizable = this.options.resizable ?? true;
 
         const partition = this.webPreferences.partition;
 
@@ -196,6 +199,23 @@ export class WindowsWindow implements IWindowProvider {
         const grid = new Controls.Grid();
         (this.browserWindow as unknown as { Content: unknown }).Content = grid;
         (grid as unknown as { Children: { Add: (w: unknown) => void } }).Children.Add(this.webView);
+
+        // Apply constructor options that map directly to WPF window properties.
+        if (this.options.resizable === false) {
+            (this.browserWindow as unknown as { ResizeMode: unknown }).ResizeMode = Windows.ResizeMode.NoResize;
+        }
+        if (this.options.minWidth)  (this.browserWindow as unknown as { MinWidth:  number }).MinWidth  = this.options.minWidth;
+        if (this.options.minHeight) (this.browserWindow as unknown as { MinHeight: number }).MinHeight = this.options.minHeight;
+        if (this.options.maxWidth)  (this.browserWindow as unknown as { MaxWidth:  number }).MaxWidth  = this.options.maxWidth;
+        if (this.options.maxHeight) (this.browserWindow as unknown as { MaxHeight: number }).MaxHeight = this.options.maxHeight;
+        if (this.options.alwaysOnTop) {
+            (this.browserWindow as unknown as { Topmost: boolean }).Topmost = true;
+        }
+        if (this.options.x !== undefined && this.options.y !== undefined) {
+            (this.browserWindow as unknown as { WindowStartupLocation: unknown }).WindowStartupLocation = Windows.WindowStartupLocation.Manual;
+            (this.browserWindow as unknown as { Left: number }).Left = this.options.x;
+            (this.browserWindow as unknown as { Top: number  }).Top  = this.options.y;
+        }
 
         (this.webView as unknown as { add_CoreWebView2InitializationCompleted: (cb: (s: unknown, e: unknown) => void) => void }).add_CoreWebView2InitializationCompleted((sender, e) => {
             const evt = e as unknown as { IsSuccess: boolean; InitializationException?: { Message?: string } };
@@ -443,6 +463,127 @@ export class WindowsWindow implements IWindowProvider {
         if (!this.coreWebView2) return;
         (this.coreWebView2 as unknown as { OpenDevToolsWindow: () => void }).OpenDevToolsWindow();
     }
+
+    /** Alias for close() — Electron compat. */
+    public destroy(): void { this.close(); }
+
+    /** Bring window to the foreground and give it input focus. */
+    public focus(): void {
+        if (!this.browserWindow) return;
+        (this.browserWindow as unknown as { Activate: () => void }).Activate();
+    }
+
+    /** Remove input focus (no direct WPF equivalent — no-op). */
+    public blur(): void { /* WPF has no direct blur API */ }
+
+    public minimize(): void {
+        if (!this.browserWindow) return;
+        (this.browserWindow as unknown as { WindowState: unknown }).WindowState =
+            (dotnet as any).System.Windows.WindowState.Minimized;
+    }
+
+    public maximize(): void {
+        if (!this.browserWindow) return;
+        (this.browserWindow as unknown as { WindowState: unknown }).WindowState =
+            (dotnet as any).System.Windows.WindowState.Maximized;
+    }
+
+    public unmaximize(): void {
+        if (!this.browserWindow) return;
+        (this.browserWindow as unknown as { WindowState: unknown }).WindowState =
+            (dotnet as any).System.Windows.WindowState.Normal;
+    }
+
+    public setFullScreen(flag: boolean): void {
+        if (!this.browserWindow) return;
+        this._isFullScreen = flag;
+        const Windows = (dotnet as any).System.Windows;
+        const win = this.browserWindow as unknown as { WindowStyle: unknown; WindowState: unknown; Topmost: boolean };
+        if (flag) {
+            win.WindowStyle = Windows.WindowStyle.None;
+            win.WindowState = Windows.WindowState.Maximized;
+            win.Topmost = true;
+        } else {
+            win.WindowStyle = Windows.WindowStyle.SingleBorderWindow;
+            win.WindowState = Windows.WindowState.Normal;
+            win.Topmost = false;
+        }
+    }
+
+    public isFullScreen(): boolean { return this._isFullScreen; }
+
+    public setTitle(title: string): void {
+        if (!this.browserWindow) return;
+        (this.browserWindow as unknown as { Title: string }).Title = title;
+    }
+
+    public getTitle(): string {
+        if (!this.browserWindow) return this.options.title ?? '';
+        return (this.browserWindow as unknown as { Title: string }).Title;
+    }
+
+    public setSize(width: number, height: number): void {
+        if (!this.browserWindow) return;
+        const win = this.browserWindow as unknown as { Width: number; Height: number };
+        win.Width = width;
+        win.Height = height;
+    }
+
+    public getSize(): [number, number] {
+        if (!this.browserWindow) return [this.options.width ?? 0, this.options.height ?? 0];
+        const win = this.browserWindow as unknown as { ActualWidth: number; ActualHeight: number };
+        return [Math.round(win.ActualWidth), Math.round(win.ActualHeight)];
+    }
+
+    public setPosition(x: number, y: number): void {
+        if (!this.browserWindow) return;
+        const win = this.browserWindow as unknown as { Left: number; Top: number };
+        win.Left = x;
+        win.Top = y;
+    }
+
+    public getPosition(): [number, number] {
+        if (!this.browserWindow) return [0, 0];
+        const win = this.browserWindow as unknown as { Left: number; Top: number };
+        return [Math.round(win.Left), Math.round(win.Top)];
+    }
+
+    public setOpacity(opacity: number): void {
+        if (!this.browserWindow) return;
+        (this.browserWindow as unknown as { Opacity: number }).Opacity = opacity;
+    }
+
+    public getOpacity(): number {
+        if (!this.browserWindow) return 1;
+        return (this.browserWindow as unknown as { Opacity: number }).Opacity;
+    }
+
+    public setResizable(resizable: boolean): void {
+        this._isResizable = resizable;
+        if (!this.browserWindow) return;
+        const Windows = (dotnet as any).System.Windows;
+        (this.browserWindow as unknown as { ResizeMode: unknown }).ResizeMode =
+            resizable ? Windows.ResizeMode.CanResize : Windows.ResizeMode.NoResize;
+    }
+
+    public isResizable(): boolean { return this._isResizable; }
+
+    public setAlwaysOnTop(flag: boolean): void {
+        if (!this.browserWindow) return;
+        (this.browserWindow as unknown as { Topmost: boolean }).Topmost = flag;
+    }
+
+    /** Center the window on the primary screen. */
+    public center(): void {
+        if (!this.browserWindow) return;
+        const sp = (dotnet as any).System.Windows.SystemParameters;
+        const win = this.browserWindow as unknown as { Left: number; Top: number; Width: number; Height: number };
+        win.Left = (sp.PrimaryScreenWidth  - win.Width)  / 2;
+        win.Top  = (sp.PrimaryScreenHeight - win.Height) / 2;
+    }
+
+    /** Flash the taskbar button to attract user attention (no-op — requires P/Invoke). */
+    public flashFrame(_flag: boolean): void { /* P/Invoke not implemented */ }
 
     public showOpenDialog(options: OpenDialogOptions): string[] | undefined {
         return showOpenDialog(options);
