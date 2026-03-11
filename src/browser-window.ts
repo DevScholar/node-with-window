@@ -89,7 +89,11 @@ export class BrowserWindow extends EventEmitter {
         const win = new BrowserWindow(options);
         await win._createdPromise;
         if (options?.show !== false) {
-            win.show();
+            // Defer show() to the next event-loop tick so the caller's synchronous
+            // code (loadFile, setMenu, ipcMain.handle, …) runs first — just like
+            // Electron's new BrowserWindow() which shows after construction but lets
+            // you configure the window before the message loop processes events.
+            setImmediate(() => win.show());
         }
         return win;
     }

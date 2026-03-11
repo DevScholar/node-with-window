@@ -125,6 +125,10 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
         return new Proxy({}, {
             get: function(target, methodName) {
                 if (typeof methodName !== 'string') return undefined;
+                // Prevent the proxy from being treated as a thenable by await/Promise.resolve.
+                // If 'then' is intercepted and returns a function, await would call it as
+                // proxy.then(resolve, reject) — triggering infinite IPC calls.
+                if (methodName === 'then') return undefined;
                 return function() {
                     var args = Array.prototype.slice.call(arguments);
                     return window.ipcRenderer.invoke('__nww:require__', moduleName, methodName, args);

@@ -225,6 +225,13 @@ export class WindowsWindow implements IWindowProvider {
         // dedicated AddScriptAndNavigate action uses Task.ContinueWith to call Navigate()
         // only after the ack arrives — guaranteeing the script runs on the first document.
         const bridgeScript = generateBridgeScript(this.webPreferences);
+        // _pendingFileUri is set when loadFile() was called before show().
+        // pendingFilePath is set when loadFile() was called after show() but before
+        // CoreWebView2 was ready (e.g. async user code between create() and loadFile()).
+        if (!this._pendingFileUri && this.pendingFilePath) {
+            this._pendingFileUri = 'file:///' + this.pendingFilePath.replace(/\\/g, '/');
+            this.pendingFilePath = null;
+        }
         if (this._pendingFileUri) {
             (dotnet as any).addScriptAndNavigate(this.coreWebView2, bridgeScript, this._pendingFileUri);
             this._pendingFileUri = null;
@@ -307,7 +314,9 @@ export class WindowsWindow implements IWindowProvider {
 
     public async loadFile(filePath: string): Promise<void> {
         const absolutePath = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
-        if (!this.app) {
+        if (!this.isWebViewReady) {
+            // Queue whether show() hasn't been called yet OR has been called but
+            // CoreWebView2 isn't ready yet; setupIpcBridge() will pick this up.
             this.pendingFilePath = absolutePath;
             return;
         }
@@ -411,7 +420,11 @@ export class WindowsWindow implements IWindowProvider {
     }
 
     public setMenu(menu: MenuItemOptions[]): void {
-        this.pendingMenu = menu;
+        if (this.app && this.browserWindow) {
+            buildWpfMenu({ browserWindow: this.browserWindow, webView: this.webView, pendingMenu: menu });
+        } else {
+            this.pendingMenu = menu;
+        }
     }
 
     /**
