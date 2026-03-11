@@ -4,6 +4,7 @@ import { resolveBackend, ensureBackendInitialized } from './backends.js';
 import { app } from './app.js';
 import { startSyncServer } from './node-integration.js';
 import type { Menu } from './menu.js';
+import { WebContents } from './web-contents.js';
 
 /**
  * BrowserWindow - Cross-platform window with WebView support
@@ -33,6 +34,9 @@ export class BrowserWindow extends EventEmitter {
     private _isCreated = false;
     private _createdPromise: Promise<void>;
 
+    /** Electron-compatible webContents object. */
+    public readonly webContents: WebContents;
+
     constructor(options?: BrowserWindowOptions) {
         super();
 
@@ -43,6 +47,16 @@ export class BrowserWindow extends EventEmitter {
         const backend = resolveBackend(options?.backend);
         this._backendName = backend.name;
         this.provider = backend.createProvider(options);
+
+        this.webContents = new WebContents({
+            sendToRenderer: (channel, ...args) => {
+                if (this.provider.sendToRenderer) this.provider.sendToRenderer(channel, ...args);
+            },
+            openDevTools: () => { if (this.provider.openDevTools) this.provider.openDevTools(); },
+            reload: () => { if (this.provider.reload) this.provider.reload(); },
+            loadURL: (url) => this.loadURL(url),
+            loadFile: (filePath) => this.loadFile(filePath),
+        });
 
         this._createdPromise = this._init(options);
 
@@ -153,12 +167,6 @@ export class BrowserWindow extends EventEmitter {
         return this.provider.showMessageBox(options);
     }
 
-    public send(channel: string, ...args: unknown[]): void {
-        if (this.provider.sendToRenderer) {
-            this.provider.sendToRenderer(channel, ...args);
-        }
-    }
-
     public getUserDataPath(): string | undefined {
         if ('userDataPath' in this.provider) {
             return (this.provider as { userDataPath: string }).userDataPath;
@@ -170,14 +178,6 @@ export class BrowserWindow extends EventEmitter {
         if (this.provider.cleanupUserData) {
             this.provider.cleanupUserData();
         }
-    }
-
-    public reload(): void {
-        if (this.provider.reload) this.provider.reload();
-    }
-
-    public openDevTools(): void {
-        if (this.provider.openDevTools) this.provider.openDevTools();
     }
 
     /** Alias for close(). */

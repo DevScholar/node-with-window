@@ -4,6 +4,7 @@ import './backend/gjs-gtk4/index.js';
 
 export * from './app.js';
 export * from './browser-window.js';
+export * from './web-contents.js';
 export * from './interfaces.js';
 export * from './ipc-main.js';
 export * from './backends.js';
