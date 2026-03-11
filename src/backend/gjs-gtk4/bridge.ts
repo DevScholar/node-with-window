@@ -12,15 +12,15 @@ import { WebPreferences } from '../../interfaces';
  */
 
 export function generateBridgeScript(webPreferences: WebPreferences): string {
-    const nodeIntegration = webPreferences.nodeIntegration;
+  const nodeIntegration = webPreferences.nodeIntegration;
 
-    let nodeBridge = '';
-    if (nodeIntegration) {
-        const injectedCwd     = JSON.stringify(process.cwd());
-        const injectedVersion = JSON.stringify(process.version);
-        const injectedEnv     = JSON.stringify(process.env);
+  let nodeBridge = '';
+  if (nodeIntegration) {
+    const injectedCwd = JSON.stringify(process.cwd());
+    const injectedVersion = JSON.stringify(process.version);
+    const injectedEnv = JSON.stringify(process.env);
 
-        nodeBridge = `
+    nodeBridge = `
 (function() {
     if (window.__nodeBridge) return;
     window.__nodeBridge = true;
@@ -68,26 +68,26 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
         }
     };
 })();`;
-    }
+  }
 
-    let ipcBridge = '';
-    if (webPreferences.contextIsolation !== true) {
-        /**
-         * WebKit IPC bridge.
-         *
-         * Outgoing (renderer -> main):
-         *   window.webkit.messageHandlers.ipc.postMessage(jsonString)
-         *
-         * Incoming (main -> renderer):
-         *   window.__ipcDispatch(jsonString)  — called by evaluate_javascript() in the host
-         *
-         * Message format (same as Windows):
-         *   { type: 'send',    channel, args }
-         *   { type: 'invoke',  channel, id, args }
-         *   { type: 'reply',   id, result, error }
-         *   { type: 'message', channel, args }
-         */
-        ipcBridge = `
+  let ipcBridge = '';
+  if (webPreferences.contextIsolation !== true) {
+    /**
+     * WebKit IPC bridge.
+     *
+     * Outgoing (renderer -> main):
+     *   window.webkit.messageHandlers.ipc.postMessage(jsonString)
+     *
+     * Incoming (main -> renderer):
+     *   window.__ipcDispatch(jsonString)  — called by evaluate_javascript() in the host
+     *
+     * Message format (same as Windows):
+     *   { type: 'send',    channel, args }
+     *   { type: 'invoke',  channel, id, args }
+     *   { type: 'reply',   id, result, error }
+     *   { type: 'message', channel, args }
+     */
+    ipcBridge = `
 (function() {
     if (window.ipcRenderer) return;
 
@@ -176,22 +176,20 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
     };
     window.ipcRenderer.removeListener = window.ipcRenderer.off;
 })();`;
-    }
+  }
 
-    return nodeBridge + ipcBridge;
+  return nodeBridge + ipcBridge;
 }
 
 /**
  * Injects the bridge script into HTML, mirroring the Windows implementation.
  */
 export function injectBridgeScript(html: string, webPreferences: WebPreferences): string {
-    const script = `<script>${generateBridgeScript(webPreferences)}</script>`;
+  const script = `<script>${generateBridgeScript(webPreferences)}</script>`;
 
-    if (/<head[^>]*>/i.test(html))
-        return html.replace(/(<head[^>]*>)/i, `$1${script}`);
+  if (/<head[^>]*>/i.test(html)) return html.replace(/(<head[^>]*>)/i, `$1${script}`);
 
-    if (/<body[^>]*>/i.test(html))
-        return html.replace(/(<body[^>]*>)/i, `$1${script}`);
+  if (/<body[^>]*>/i.test(html)) return html.replace(/(<body[^>]*>)/i, `$1${script}`);
 
-    return script + html;
+  return script + html;
 }

@@ -53,15 +53,19 @@ const refRegistry = new Map<string, unknown>();
 
 /** Returns the port once startSyncServer() has resolved, 0 otherwise. */
 export function getSyncServerPort(): number {
-    return _port;
+  return _port;
 }
 
 /** Push a callback invocation to every connected SSE client. */
 function pushSseCallback(id: string, args: unknown[]): void {
-    const data = `data: ${JSON.stringify({ id, args: serializeValue(args) })}\n\n`;
-    for (const client of sseClients) {
-        try { client.write(data); } catch { /* client disconnected */ }
+  const data = `data: ${JSON.stringify({ id, args: serializeValue(args) })}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(data);
+    } catch {
+      /* client disconnected */
     }
+  }
 }
 
 /**
@@ -70,17 +74,17 @@ function pushSseCallback(id: string, args: unknown[]): void {
  * Class instances (Buffer, FSWatcher, Stream, etc.) are not.
  */
 function isNeedsRef(val: unknown): boolean {
-    if (val === null || typeof val !== 'object') return false;
-    if (Array.isArray(val)) return false;
-    if (Object.getPrototypeOf(val) === Object.prototype) return false;
-    return true;
+  if (val === null || typeof val !== 'object') return false;
+  if (Array.isArray(val)) return false;
+  if (Object.getPrototypeOf(val) === Object.prototype) return false;
+  return true;
 }
 
 /** Store an object in the ref registry and return its id. */
 function storeRef(obj: unknown): string {
-    const id = Math.random().toString(36).substring(2, 11);
-    refRegistry.set(id, obj);
-    return id;
+  const id = Math.random().toString(36).substring(2, 11);
+  refRegistry.set(id, obj);
+  return id;
 }
 
 /**
@@ -88,9 +92,9 @@ function storeRef(obj: unknown): string {
  * Non-serializable objects are replaced with { __nww_ref: id }.
  */
 function serializeValue(val: unknown): unknown {
-    if (Array.isArray(val)) return val.map(serializeValue);
-    if (isNeedsRef(val)) return { __nww_ref: storeRef(val) };
-    return val;
+  if (Array.isArray(val)) return val.map(serializeValue);
+  if (isNeedsRef(val)) return { __nww_ref: storeRef(val) };
+  return val;
 }
 
 /**
@@ -100,16 +104,16 @@ function serializeValue(val: unknown): unknown {
  * Anything else     → unchanged
  */
 function resolveArg(a: unknown): unknown {
-    if (a === null || typeof a !== 'object') return a;
-    const obj = a as Record<string, unknown>;
-    if (typeof obj.__nww_cb === 'string') {
-        const id = obj.__nww_cb;
-        return (...cbArgs: unknown[]) => pushSseCallback(id, cbArgs);
-    }
-    if (typeof obj.__nww_ref === 'string') {
-        return refRegistry.get(obj.__nww_ref);
-    }
-    return a;
+  if (a === null || typeof a !== 'object') return a;
+  const obj = a as Record<string, unknown>;
+  if (typeof obj.__nww_cb === 'string') {
+    const id = obj.__nww_cb;
+    return (...cbArgs: unknown[]) => pushSseCallback(id, cbArgs);
+  }
+  if (typeof obj.__nww_ref === 'string') {
+    return refRegistry.get(obj.__nww_ref);
+  }
+  return a;
 }
 
 /**
@@ -117,129 +121,135 @@ function resolveArg(a: unknown): unknown {
  * Resolves with the chosen port once the server is listening.
  */
 export function startSyncServer(): Promise<number> {
-    if (_ready) return _ready;
+  if (_ready) return _ready;
 
-    // Resolve modules relative to this file so Node.js builtins always work.
-    // npm packages installed in the user's project are NOT on this path;
-    // that is a known limitation (builtins cover the common Electron use cases).
-    const _require = createRequire(import.meta.url);
+  // Resolve modules relative to this file so Node.js builtins always work.
+  // npm packages installed in the user's project are NOT on this path;
+  // that is a known limitation (builtins cover the common Electron use cases).
+  const _require = createRequire(import.meta.url);
 
-    _ready = new Promise<number>((resolve, reject) => {
-        const server = http.createServer((req, res) => {
-            // Add CORS headers so file:// pages in WebView2 can reach us.
-            res.setHeader('Access-Control-Allow-Origin', '*');
-            res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-            res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  _ready = new Promise<number>((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      // Add CORS headers so file:// pages in WebView2 can reach us.
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-            if (req.method === 'OPTIONS') {
-                res.writeHead(204);
-                res.end();
-                return;
-            }
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
 
-            // ── SSE endpoint ─────────────────────────────────────────────────
-            // The renderer opens a persistent EventSource here so that callbacks
-            // registered via window.require can fire multiple times (fs.watch,
-            // EventEmitter.on, etc.).
-            if (req.method === 'GET' && req.url === '/__nww_events__') {
-                res.writeHead(200, {
-                    'Content-Type': 'text/event-stream',
-                    'Cache-Control': 'no-cache',
-                    'Connection': 'keep-alive',
-                });
-                res.write('\n'); // initial flush so EventSource fires 'open'
-                sseClients.add(res);
-                req.on('close', () => sseClients.delete(res));
-                return;
-            }
-
-            if (req.method !== 'POST') {
-                res.writeHead(405);
-                res.end();
-                return;
-            }
-
-            let body = '';
-            req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-            req.on('end', () => {
-                const respond = (result: unknown) => {
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ result: serializeValue(result) }));
-                };
-                const sendErr = (e: unknown) => {
-                    res.writeHead(500, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: (e as Error).message ?? String(e) }));
-                };
-
-                try {
-                    const parsed = JSON.parse(body) as Record<string, unknown>;
-
-                    // Resolve the target object and method from the request.
-                    // Two forms are supported:
-                    //   { moduleName, methodName, args } — fresh module call
-                    //   { ref, methodName, args }        — method on a stored ref
-                    let target: unknown;
-                    let methodName: string;
-                    let rawArgs: unknown[];
-
-                    if (typeof parsed.ref === 'string') {
-                        target = refRegistry.get(parsed.ref);
-                        if (target === undefined) throw new Error(`Unknown ref: ${parsed.ref}`);
-                        methodName = parsed.methodName as string;
-                        rawArgs = (parsed.args as unknown[]) ?? [];
-                        console.log(`[require] <ref>.${methodName}()`);
-                    } else {
-                        const moduleName = parsed.moduleName as string;
-                        methodName = parsed.methodName as string;
-                        rawArgs = (parsed.args as unknown[]) ?? [];
-                        console.log(`[require] ${moduleName}.${methodName}()`);
-                        target = _require(moduleName);
-                    }
-
-                    const fn = (target as Record<string, unknown>)[methodName];
-                    if (typeof fn !== 'function') {
-                        throw new Error(`${methodName} is not a function`);
-                    }
-
-                    // Resolve {__nww_cb} and {__nww_ref} markers in args.
-                    let hasCallbacks = false;
-                    const resolvedArgs = rawArgs.map(a => {
-                        if (a !== null && typeof a === 'object') {
-                            const o = a as Record<string, unknown>;
-                            if (typeof o.__nww_cb === 'string') { hasCallbacks = true; }
-                        }
-                        return resolveArg(a);
-                    });
-
-                    const rawResult = (fn as (...a: unknown[]) => unknown).apply(target, resolvedArgs);
-
-                    if (!hasCallbacks && rawResult !== null && typeof rawResult === 'object' &&
-                        typeof (rawResult as Promise<unknown>).then === 'function') {
-                        // Promise-returning function (e.g. fs.promises.readFile):
-                        // wait for the Promise to resolve, then respond.
-                        (rawResult as Promise<unknown>)
-                            .then(r => respond(r))
-                            .catch(sendErr);
-                    } else {
-                        // Sync return value, or callback-style function.
-                        // Callbacks will arrive via SSE — respond right away.
-                        respond(rawResult);
-                    }
-                } catch (e: unknown) {
-                    sendErr(e);
-                }
-            });
+      // ── SSE endpoint ─────────────────────────────────────────────────
+      // The renderer opens a persistent EventSource here so that callbacks
+      // registered via window.require can fire multiple times (fs.watch,
+      // EventEmitter.on, etc.).
+      if (req.method === 'GET' && req.url === '/__nww_events__') {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
         });
+        res.write('\n'); // initial flush so EventSource fires 'open'
+        sseClients.add(res);
+        req.on('close', () => sseClients.delete(res));
+        return;
+      }
 
-        server.on('error', reject);
+      if (req.method !== 'POST') {
+        res.writeHead(405);
+        res.end();
+        return;
+      }
 
-        // Port 0 → OS picks a free port automatically.
-        server.listen(0, '127.0.0.1', () => {
-            _port = (server.address() as { port: number }).port;
-            console.log(`[node-integration] sync require server on 127.0.0.1:${_port}`);
-            resolve(_port);
-        });
+      let body = '';
+      req.on('data', (chunk: Buffer) => {
+        body += chunk.toString();
+      });
+      req.on('end', () => {
+        const respond = (result: unknown) => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ result: serializeValue(result) }));
+        };
+        const sendErr = (e: unknown) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: (e as Error).message ?? String(e) }));
+        };
+
+        try {
+          const parsed = JSON.parse(body) as Record<string, unknown>;
+
+          // Resolve the target object and method from the request.
+          // Two forms are supported:
+          //   { moduleName, methodName, args } — fresh module call
+          //   { ref, methodName, args }        — method on a stored ref
+          let target: unknown;
+          let methodName: string;
+          let rawArgs: unknown[];
+
+          if (typeof parsed.ref === 'string') {
+            target = refRegistry.get(parsed.ref);
+            if (target === undefined) throw new Error(`Unknown ref: ${parsed.ref}`);
+            methodName = parsed.methodName as string;
+            rawArgs = (parsed.args as unknown[]) ?? [];
+            console.log(`[require] <ref>.${methodName}()`);
+          } else {
+            const moduleName = parsed.moduleName as string;
+            methodName = parsed.methodName as string;
+            rawArgs = (parsed.args as unknown[]) ?? [];
+            console.log(`[require] ${moduleName}.${methodName}()`);
+            target = _require(moduleName);
+          }
+
+          const fn = (target as Record<string, unknown>)[methodName];
+          if (typeof fn !== 'function') {
+            throw new Error(`${methodName} is not a function`);
+          }
+
+          // Resolve {__nww_cb} and {__nww_ref} markers in args.
+          let hasCallbacks = false;
+          const resolvedArgs = rawArgs.map(a => {
+            if (a !== null && typeof a === 'object') {
+              const o = a as Record<string, unknown>;
+              if (typeof o.__nww_cb === 'string') {
+                hasCallbacks = true;
+              }
+            }
+            return resolveArg(a);
+          });
+
+          const rawResult = (fn as (...a: unknown[]) => unknown).apply(target, resolvedArgs);
+
+          if (
+            !hasCallbacks &&
+            rawResult !== null &&
+            typeof rawResult === 'object' &&
+            typeof (rawResult as Promise<unknown>).then === 'function'
+          ) {
+            // Promise-returning function (e.g. fs.promises.readFile):
+            // wait for the Promise to resolve, then respond.
+            (rawResult as Promise<unknown>).then(r => respond(r)).catch(sendErr);
+          } else {
+            // Sync return value, or callback-style function.
+            // Callbacks will arrive via SSE — respond right away.
+            respond(rawResult);
+          }
+        } catch (e: unknown) {
+          sendErr(e);
+        }
+      });
     });
 
-    return _ready;
+    server.on('error', reject);
+
+    // Port 0 → OS picks a free port automatically.
+    server.listen(0, '127.0.0.1', () => {
+      _port = (server.address() as { port: number }).port;
+      console.log(`[node-integration] sync require server on 127.0.0.1:${_port}`);
+      resolve(_port);
+    });
+  });
+
+  return _ready;
 }

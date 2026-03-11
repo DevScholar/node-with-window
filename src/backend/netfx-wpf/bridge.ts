@@ -2,74 +2,74 @@ import { WebPreferences } from '../../interfaces';
 
 /**
  * Windows Bridge - WebView2 JavaScript Injection
- * 
+ *
  * This file generates the JavaScript code that's injected into the renderer's
  * HTML page. It provides:
- * 
+ *
  * 1. Node.js compatibility layer (optional, when nodeIntegration is enabled)
  *    - window.require() stub that warns about unavailable modules
  *    - window.process object with platform, arch, version, cwd, exit
- * 
+ *
  * 2. IPC bridge (when contextIsolation is NOT enabled)
  *    - window.ipcRenderer.send() - fire-and-forget messages
  *    - window.ipcRenderer.invoke() - request-response with Promises
  *    - window.ipcRenderer.on() - receive messages from main process
- * 
+ *
  * WHY THIS APPROACH?
- * 
+ *
  * WebView2 doesn't have Electron's "preload script" concept. Instead, we:
  * 1. Read the user's HTML file
  * 2. Inject our bridge script as a <script> tag
  * 3. Load the modified HTML into WebView2
- * 
+ *
  * This is simpler than Electron's approach but has security implications:
  * - If nodeIntegration is enabled, the renderer has access to Node.js APIs
  * - The bridge runs in the same context as user code (no isolation)
- * 
+ *
  * For better security, leave nodeIntegration: false and use contextIsolation.
  * The IPC bridge will still work - it's just exposed as ipcRenderer.
  */
 
 /**
  * Generates the complete bridge script as a JavaScript string.
- * 
+ *
  * @param webPreferences - Configuration that determines what features to enable
  * @returns JavaScript code that will be injected into the HTML
  */
 export function generateBridgeScript(webPreferences: WebPreferences, syncServerPort = 0): string {
-    const nodeIntegration = webPreferences.nodeIntegration;
+  const nodeIntegration = webPreferences.nodeIntegration;
+
+  /**
+   * NODE BRIDGE
+   *
+   * When nodeIntegration is enabled, we provide limited Node.js compatibility.
+   *
+   * Why stub out the modules?
+   * - We can't actually give the renderer access to Node.js modules in WebView2
+   * - Instead, we provide stub functions that warn the user and return null
+   * - This helps users understand they should use IPC instead
+   *
+   * What we provide:
+   * - window.require() - returns stubs for fs, path, os modules
+   * - window.process - object with platform, arch, version, env, cwd, exit
+   *
+   * The exit() function is special - it sends a message to the main process
+   * which can then handle it appropriately.
+   */
+  let nodeBridge = '';
+  if (nodeIntegration) {
+    const injectedCwd = JSON.stringify(process.cwd());
+    const injectedVersion = JSON.stringify(process.version);
+    const injectedEnv = JSON.stringify(process.env);
+    const injectedPort = syncServerPort;
 
     /**
-     * NODE BRIDGE
-     * 
-     * When nodeIntegration is enabled, we provide limited Node.js compatibility.
-     * 
-     * Why stub out the modules?
-     * - We can't actually give the renderer access to Node.js modules in WebView2
-     * - Instead, we provide stub functions that warn the user and return null
-     * - This helps users understand they should use IPC instead
-     * 
-     * What we provide:
-     * - window.require() - returns stubs for fs, path, os modules
-     * - window.process - object with platform, arch, version, env, cwd, exit
-     * 
-     * The exit() function is special - it sends a message to the main process
-     * which can then handle it appropriately.
+     * IIFE (Immediately Invoked Function Expression) pattern:
+     * - Prevents our variables from polluting the global scope
+     * - The leading semicolon handles cases where our script is concatenated
+     *   with other scripts that don't end with a semicolon
      */
-    let nodeBridge = '';
-    if (nodeIntegration) {
-        const injectedCwd     = JSON.stringify(process.cwd());
-        const injectedVersion = JSON.stringify(process.version);
-        const injectedEnv     = JSON.stringify(process.env);
-        const injectedPort    = syncServerPort;
-        
-        /**
-         * IIFE (Immediately Invoked Function Expression) pattern:
-         * - Prevents our variables from polluting the global scope
-         * - The leading semicolon handles cases where our script is concatenated
-         *   with other scripts that don't end with a semicolon
-         */
-        nodeBridge = `
+    nodeBridge = `
 (function() {
     // Guard - only initialize once even if script is injected multiple times
     if (window.__nodeBridge) return;
@@ -227,38 +227,38 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
         exit: function(code) { window.chrome.webview.postMessage({ type: 'send', channel: 'process:exit', args: [code] }); }
     };
 })();`;
-    }
+  }
 
+  /**
+   * IPC BRIDGE
+   *
+   * Provides Electron-compatible ipcRenderer API for communicating with main process.
+   *
+   * Only included when contextIsolation is NOT enabled (for compatibility with
+   * existing code that expects ipcRenderer to be available).
+   *
+   * Why no contextIsolation by default?
+   * - Electron defaults to contextIsolation: true, but this library defaults to false
+   * - This makes migration from Electron easier (less configuration needed)
+   * - Users who want security can enable contextIsolation themselves
+   */
+  let ipcBridge = '';
+  if (webPreferences.contextIsolation !== true) {
     /**
-     * IPC BRIDGE
-     * 
-     * Provides Electron-compatible ipcRenderer API for communicating with main process.
-     * 
-     * Only included when contextIsolation is NOT enabled (for compatibility with
-     * existing code that expects ipcRenderer to be available).
-     * 
-     * Why no contextIsolation by default?
-     * - Electron defaults to contextIsolation: true, but this library defaults to false
-     * - This makes migration from Electron easier (less configuration needed)
-     * - Users who want security can enable contextIsolation themselves
+     * The IPC bridge uses WebView2's webview.postMessage API:
+     *
+     * window.chrome.webview.postMessage({...}) sends to the native side
+     * window.chrome.webview.addEventListener('message', ...) receives from native
+     *
+     * Message format:
+     * {
+     *   type: 'send' | 'invoke' | 'message' | 'reply',
+     *   channel: string,
+     *   id?: string,        // for request-response correlation
+     *   args?: any[]
+     * }
      */
-    let ipcBridge = '';
-    if (webPreferences.contextIsolation !== true) {
-        /**
-         * The IPC bridge uses WebView2's webview.postMessage API:
-         * 
-         * window.chrome.webview.postMessage({...}) sends to the native side
-         * window.chrome.webview.addEventListener('message', ...) receives from native
-         * 
-         * Message format:
-         * {
-         *   type: 'send' | 'invoke' | 'message' | 'reply',
-         *   channel: string,
-         *   id?: string,        // for request-response correlation
-         *   args?: any[]
-         * }
-         */
-        ipcBridge = `
+    ipcBridge = `
 (function(){
 if(window.ipcRenderer)return;
 
@@ -323,41 +323,41 @@ window.ipcRenderer={
 };
 window.ipcRenderer.removeListener=window.ipcRenderer.off;
 })();`;
-    }
+  }
 
-    return nodeBridge + ipcBridge;
+  return nodeBridge + ipcBridge;
 }
 
 /**
  * Injects the bridge script into HTML.
- * 
+ *
  * We insert a <script> tag with our bridge code. The position matters:
  * 1. If <head> exists, insert at the start of head
- * 2. If <body> exists, insert at the start of body  
+ * 2. If <body> exists, insert at the start of body
  * 3. Otherwise, prepend to the document
- * 
+ *
  * Why at the start?
  * - We want our APIs (ipcRenderer, require, process) available ASAP
  * - Scripts in <head> without async/defer block HTML parsing until loaded
  * - Inserting at the start of body ensures DOM is ready
- * 
+ *
  * @param html - Original HTML content
  * @param webPreferences - Configuration for what to inject
  * @returns Modified HTML with bridge script inserted
  */
 export function injectBridgeScript(html: string, webPreferences: WebPreferences): string {
-    const script = `<script>${generateBridgeScript(webPreferences)}</script>`;
-    
-    // Try to insert after <head> tag
-    if (/<head[^>]*>/i.test(html)) {
-        return html.replace(/(<head[^>]*>)/i, `$1${script}`);
-    }
-    
-    // Try to insert after <body> tag
-    if (/<body[^>]*>/i.test(html)) {
-        return html.replace(/(<body[^>]*>)/i, `$1${script}`);
-    }
-    
-    // Fallback: prepend to document
-    return script + html;
+  const script = `<script>${generateBridgeScript(webPreferences)}</script>`;
+
+  // Try to insert after <head> tag
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/(<head[^>]*>)/i, `$1${script}`);
+  }
+
+  // Try to insert after <body> tag
+  if (/<body[^>]*>/i.test(html)) {
+    return html.replace(/(<body[^>]*>)/i, `$1${script}`);
+  }
+
+  // Fallback: prepend to document
+  return script + html;
 }

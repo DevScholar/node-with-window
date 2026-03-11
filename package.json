@@ -3,23 +3,34 @@
   "version": "0.0.0",
   "description": "Cross-platform window library with WebView support",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "type": "module",
   "files": [
     "dist",
+    "dist/*.d.ts",
+    "dist/**/*.d.ts",
     "runtimes",
     "scripts"
   ],
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write src"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^25.3.3",
-    "typescript": "^5.9.3",
-    "esbuild": "^0.25.0"
+    "@typescript-eslint/eslint-plugin": "^8.57.0",
+    "@typescript-eslint/parser": "^8.57.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.4.0",
+    "prettier": "^3.8.1",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@devscholar/node-ps1-dotnet": "file:../node-ps1-dotnet"

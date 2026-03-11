@@ -6,8 +6,12 @@ import { LinuxWindow } from './window.js';
 import type { BrowserWindowOptions } from '../../interfaces.js';
 
 registerBackend({
-    name: 'gjs-gtk4',
-    defaultPlatforms: ['linux'],
-    async initialize() { /* GJS is spawned per-window; no global init needed */ },
-    createProvider(options?: BrowserWindowOptions) { return new LinuxWindow(options); },
+  name: 'gjs-gtk4',
+  defaultPlatforms: ['linux'],
+  async initialize() {
+    /* GJS is spawned per-window; no global init needed */
+  },
+  createProvider(options?: BrowserWindowOptions) {
+    return new LinuxWindow(options);
+  },
 });
