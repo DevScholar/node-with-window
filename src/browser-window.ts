@@ -88,6 +88,9 @@ export class BrowserWindow extends EventEmitter {
         }
         const win = new BrowserWindow(options);
         await win._createdPromise;
+        if (options?.show !== false) {
+            win.show();
+        }
         return win;
     }
 
