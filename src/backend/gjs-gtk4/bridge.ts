@@ -54,20 +54,6 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
 
     window.require = function(module) { return nodeRequire(module); };
 
-    // Async require: returns a Proxy where every method call is routed to the
-    // main process via IPC and returns a Promise.
-    // Usage: const content = await window.requireAsync('fs').readFileSync(path, 'utf-8');
-    window.requireAsync = function(moduleName) {
-        return new Proxy({}, {
-            get: function(target, methodName) {
-                if (typeof methodName !== 'string') return undefined;
-                return function() {
-                    var args = Array.prototype.slice.call(arguments);
-                    return window.ipcRenderer.invoke('__nww:require__', moduleName, methodName, args);
-                };
-            }
-        });
-    };
 
     window.process = {
         platform: 'linux',
