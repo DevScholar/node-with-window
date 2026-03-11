@@ -4,6 +4,7 @@ import { IWindowProvider, BrowserWindowOptions, MenuItemOptions, OpenDialogOptio
 import { resolveBackend, ensureBackendInitialized } from './backends.js';
 import { ipcMain } from './ipc-main.js';
 import { app } from './app.js';
+import { startSyncServer } from './node-integration.js';
 import type { Menu } from './menu.js';
 
 /** Registered once per process when the first nodeIntegration window is created. */
@@ -85,6 +86,7 @@ export class BrowserWindow extends EventEmitter {
     public static async create(options?: BrowserWindowOptions): Promise<BrowserWindow> {
         if (options?.webPreferences?.nodeIntegration) {
             registerNodeIntegrationHandler();
+            await startSyncServer();
         }
         const win = new BrowserWindow(options);
         await win._createdPromise;

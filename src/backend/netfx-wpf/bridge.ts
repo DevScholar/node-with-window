@@ -36,7 +36,7 @@ import { WebPreferences } from '../../interfaces';
  * @param webPreferences - Configuration that determines what features to enable
  * @returns JavaScript code that will be injected into the HTML
  */
-export function generateBridgeScript(webPreferences: WebPreferences): string {
+export function generateBridgeScript(webPreferences: WebPreferences, syncServerPort = 0): string {
     const nodeIntegration = webPreferences.nodeIntegration;
 
     /**
@@ -58,8 +58,9 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
      */
     let nodeBridge = '';
     if (nodeIntegration) {
-        const injectedCwd = JSON.stringify(process.cwd());
+        const injectedCwd     = JSON.stringify(process.cwd());
         const injectedVersion = JSON.stringify(process.version);
+        const injectedPort    = syncServerPort;
         
         /**
          * IIFE (Immediately Invoked Function Expression) pattern:
@@ -113,9 +114,33 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
         return null;
     };
 
-    // Expose require globally (stubs only - use requireAsync for real calls)
-    window.require = function(module) {
-        return nodeRequire(module);
+    // Synchronous require via local HTTP server.
+    // window.require(moduleName).methodName(...args) blocks the renderer JS
+    // thread with a synchronous XMLHttpRequest to the Node.js HTTP server
+    // started on loopback at the injected port.  This works because:
+    //   - sync XHR only freezes the renderer's JS thread
+    //   - Chromium's C++ network stack keeps running on a background thread
+    //   - Node.js (separate OS process) handles the TCP request normally
+    //   - the JS thread unblocks once the TCP response arrives
+    // This is fundamentally different from a spin-wait, which would block the
+    // same thread that needs to fire the IPC reply callback (deadlock).
+    window.require = function(moduleName) {
+        return new Proxy({}, {
+            get: function(target, methodName) {
+                if (typeof methodName !== 'string') return undefined;
+                if (methodName === 'then') return undefined;
+                return function() {
+                    var args = Array.prototype.slice.call(arguments);
+                    var xhr = new XMLHttpRequest();
+                    xhr.open('POST', 'http://127.0.0.1:${injectedPort}/__nww_sync__', false);
+                    xhr.setRequestHeader('Content-Type', 'application/json');
+                    xhr.send(JSON.stringify({ moduleName: moduleName, methodName: methodName, args: args }));
+                    var resp = JSON.parse(xhr.responseText);
+                    if (xhr.status !== 200) throw new Error(resp.error || 'require failed');
+                    return resp.result;
+                };
+            }
+        });
     };
 
     // Async require: returns a Proxy where every method call is routed to the

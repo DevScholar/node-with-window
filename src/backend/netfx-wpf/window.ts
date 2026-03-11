@@ -7,6 +7,7 @@ import { ipcMain } from '../../ipc-main';
 import { injectBridgeScript, generateBridgeScript } from './bridge.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 import { buildWpfMenu } from './menu.js';
+import { getSyncServerPort } from '../../node-integration.js';
 
 /**
  * This library bridges Node.js with platform-specific GUI frameworks.
@@ -224,7 +225,7 @@ export class WindowsWindow implements IWindowProvider {
         // In polling mode we cannot Task.Wait() on the UI thread (deadlock), so the
         // dedicated AddScriptAndNavigate action uses Task.ContinueWith to call Navigate()
         // only after the ack arrives — guaranteeing the script runs on the first document.
-        const bridgeScript = generateBridgeScript(this.webPreferences);
+        const bridgeScript = generateBridgeScript(this.webPreferences, getSyncServerPort());
         // _pendingFileUri is set when loadFile() was called before show().
         // pendingFilePath is set when loadFile() was called after show() but before
         // CoreWebView2 was ready (e.g. async user code between create() and loadFile()).
