@@ -131,6 +131,8 @@ export class WindowsWindow implements IWindowProvider {
     private _pollTimer: ReturnType<typeof setInterval> | null = null;
     private _isFullScreen = false;
     private _isResizable = true;
+    private _navCompletedCallback: (() => void) | null = null;
+    private _pendingExecs = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 
     constructor(options?: BrowserWindowOptions) {
         this.options = options || {};
@@ -280,7 +282,14 @@ export class WindowsWindow implements IWindowProvider {
                     reply: (ch: string, ...a: unknown[]) => this.send(ch, ...a)
                 };
 
-                if (type === 'send') {
+                if (type === 'execResult') {
+                    const pending = this._pendingExecs.get(id);
+                    if (pending) {
+                        this._pendingExecs.delete(id);
+                        if (message.error) pending.reject(new Error(message.error));
+                        else pending.resolve(message.result);
+                    }
+                } else if (type === 'send') {
                     ipcMain.emit(channel, event, ...args);
                 } else if (type === 'invoke') {
                     const handler = handlers.get(channel);
@@ -306,6 +315,26 @@ export class WindowsWindow implements IWindowProvider {
                 const error = err as { message?: string };
                 console.error('[WebView2] WebMessageReceived error:', error.message);
             }
+        });
+
+        // Fire 'did-finish-load' through the registered callback when navigation completes.
+        if (this._navCompletedCallback) {
+            (this.coreWebView2 as unknown as { add_NavigationCompleted: (cb: (_s: unknown, _e: unknown) => void) => void })
+                .add_NavigationCompleted((_s, _e) => { this._navCompletedCallback?.(); });
+        }
+    }
+
+    public onNavigationCompleted(callback: () => void): void {
+        this._navCompletedCallback = callback;
+    }
+
+    public executeJavaScript(code: string): Promise<unknown> {
+        return new Promise((resolve, reject) => {
+            if (!this.coreWebView2) { reject(new Error('WebView2 not ready')); return; }
+            const id = Math.random().toString(36).substring(2, 11);
+            this._pendingExecs.set(id, { resolve, reject });
+            const payload = JSON.stringify({ type: 'exec', id, code });
+            (this.coreWebView2 as unknown as { PostWebMessageAsString: (s: string) => void }).PostWebMessageAsString(payload);
         });
     }
 

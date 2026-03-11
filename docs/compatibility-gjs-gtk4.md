@@ -19,15 +19,16 @@
 | Event: `ready` | ✅ | |
 | Event: `before-quit` | ✅ | |
 | Event: `window-all-closed` | ✅ | |
-| `app.exit()` | ❌ | Use `process.exit()` |
-| `app.relaunch()` | ❌ | |
-| `app.focus()` | ❌ | |
-| `app.setName()` / `app.setPath()` | ❌ | |
-| `app.getLocale()` | ❌ | |
-| `app.requestSingleInstanceLock()` | ❌ | |
+| `app.exit()` | ✅ | `process.exit(exitCode)`; relaunches first if `relaunch()` was called |
+| `app.relaunch([options])` | ✅ | Spawns a new process on next `quit()`/`exit()`; accepts `execPath` and `args` |
+| `app.focus()` | ✅ | Calls `present()` on the first open BrowserWindow |
+| `app.setName(name)` | ✅ | Overrides the value returned by `getName()` |
+| `app.setPath(name, path)` | ✅ | Overrides a named path returned by `getPath()` |
+| `app.getLocale()` | ✅ | Returns `Intl.DateTimeFormat().resolvedOptions().locale` |
+| `app.requestSingleInstanceLock()` | ✅ | PID-file based; returns `true` for first instance, `false` if another is alive |
+| Event: `second-instance` | ⚠️ | Lock detection works, but cross-process notification requires manual IPC |
 | `app.dock` | ❌ | macOS only |
 | Event: `activate` | ❌ | macOS only |
-| Event: `second-instance` | ❌ | |
 
 ---
 
@@ -48,7 +49,7 @@
 | `alwaysOnTop` | ✅ | `Window.set_keep_above(true)` |
 | `show` | ✅ | Pass `false` to prevent auto-show |
 | `webPreferences` | ✅ | See WebPreferences section |
-| `x`, `y` | ❌ | Not forwarded to GTK |
+| `x`, `y` | ❌ | Not forwarded to GTK; placement is WM-controlled |
 | `minWidth`, `minHeight` | ❌ | Not forwarded to GTK |
 | `maxWidth`, `maxHeight` | ❌ | Not forwarded to GTK |
 | `movable`, `minimizable`, `maximizable`, `closable` | ⚠️ | Accepted, not applied |
@@ -76,8 +77,8 @@
 | `new BrowserWindow(options)` | ✅ | Electron-compatible synchronous constructor |
 | `BrowserWindow.getAllWindows()` | ✅ | |
 | `BrowserWindow.getFocusedWindow()` | ✅ | Returns first open window |
-| `BrowserWindow.fromId(id)` | ❌ | |
-| `BrowserWindow.fromWebContents(wc)` | ❌ | |
+| `BrowserWindow.fromId(id)` | ✅ | Looks up by internal window ID |
+| `BrowserWindow.fromWebContents(wc)` | ✅ | Finds the owning BrowserWindow |
 
 ### Instance Methods
 
@@ -88,24 +89,24 @@
 | `win.show()` | ✅ | `Window.present()` |
 | `win.close()` | ✅ | Sends `Close` command to GJS host; cleans up FIFOs; exits process |
 | `win.destroy()` | ✅ | Alias for `close()` |
-| `win.focus()` | ❌ | Not implemented |
+| `win.focus()` | ✅ | `Window.present()` |
 | `win.blur()` | ❌ | Not implemented |
-| `win.minimize()` | ❌ | Not implemented |
-| `win.maximize()` | ❌ | Not implemented |
-| `win.unmaximize()` / `win.restore()` | ❌ | Not implemented |
-| `win.setFullScreen(flag)` | ❌ | Not implemented |
-| `win.isFullScreen()` | ❌ | Not implemented |
-| `win.setTitle(title)` | ❌ | Not implemented |
-| `win.getTitle()` | ❌ | Not implemented |
-| `win.setSize(w, h)` | ❌ | Not implemented |
-| `win.getSize()` | ❌ | Not implemented |
-| `win.setPosition(x, y)` | ❌ | Not implemented |
+| `win.minimize()` | ✅ | `Window.minimize()` |
+| `win.maximize()` | ✅ | `Window.maximize()` |
+| `win.unmaximize()` / `win.restore()` | ✅ | `Window.unmaximize()` |
+| `win.setFullScreen(flag)` | ✅ | `Window.fullscreen()` / `Window.unfullscreen()` |
+| `win.isFullScreen()` | ✅ | Tracks local state set by `setFullScreen()` |
+| `win.setTitle(title)` | ✅ | `Window.set_title()` |
+| `win.getTitle()` | ✅ | Round-trip query to GJS host |
+| `win.setSize(w, h)` | ✅ | `Window.set_default_size()`; takes effect on next layout pass |
+| `win.getSize()` | ✅ | `Window.get_width()` / `get_height()` — returns `[0,0]` before first show |
+| `win.setPosition(x, y)` | ❌ | GTK4 removed `window.move()`; placement is WM-controlled |
 | `win.getPosition()` | ❌ | Not implemented |
 | `win.setOpacity(opacity)` | ❌ | Not implemented |
 | `win.getOpacity()` | ❌ | Not implemented |
-| `win.setResizable(flag)` | ❌ | Not implemented at runtime (only constructor option) |
-| `win.isResizable()` | ❌ | Not implemented |
-| `win.setAlwaysOnTop(flag)` | ❌ | Not implemented at runtime (only constructor option) |
+| `win.setResizable(flag)` | ✅ | `Window.set_resizable()`; works at runtime |
+| `win.isResizable()` | ✅ | Tracks local state (constructor default + `setResizable()` calls) |
+| `win.setAlwaysOnTop(flag)` | ✅ | `Window.set_keep_above()` |
 | `win.center()` | ❌ | Not implemented |
 | `win.flashFrame(flag)` | ❌ | Not implemented |
 | `win.setMenu(menu)` | ✅ | GTK4 `PopoverMenuBar`; menu items flattened and mapped to `Gio.SimpleAction` |
@@ -124,9 +125,9 @@
 | `win.webContents.reload()` | ✅ | Sends `Reload` command to GJS host |
 | `win.webContents.loadURL(url)` | ✅ | |
 | `win.webContents.loadFile(path)` | ✅ | |
-| `win.webContents.executeJavaScript()` | ❌ | |
-| `win.webContents.session` | ❌ | |
-| `win.webContents.on('did-finish-load')` | ❌ | |
+| `win.webContents.executeJavaScript(code)` | ✅ | Evaluates in renderer via `__ipcDispatch`; returns `Promise`; supports async expressions |
+| `win.webContents.session` | ✅ | `clearCache()` clears Cache API entries; `clearStorageData()` clears localStorage/sessionStorage/indexedDB |
+| `win.webContents.on('did-finish-load')` | ✅ | Emitted on WebKit `load-changed` (`FINISHED`) signal |
 
 ---
 
@@ -217,7 +218,7 @@ const content = await ipcRenderer.invoke('read-file', '/path/to/file');
 | `window.process.platform` | ✅ | `'linux'` |
 | `window.process.arch` | ✅ | `'x64'` |
 | `window.process.version` | ✅ | Injected from main process |
-| `window.process.env` | ⚠️ | Always `{}` |
+| `window.process.env` | ✅ | Snapshot of `process.env` from the main process at window creation time |
 | `window.process.cwd()` | ✅ | Injected from main process |
 | `window.process.exit(code)` | ✅ | Sends IPC to main process |
 
@@ -227,16 +228,14 @@ const content = await ipcRenderer.invoke('read-file', '/path/to/file');
 
 1. **`window.require` is not functional.** Only stubs are injected. All Node.js access from the renderer must go through `ipcMain.handle` + `ipcRenderer.invoke`.
 
-2. **Many `BrowserWindow` window-state methods are not implemented.** `minimize`, `maximize`, `setFullScreen`, `setTitle`, `setSize`, `setPosition`, `setOpacity`, `setResizable`, `setAlwaysOnTop`, `center`, `flashFrame`, `focus`, `blur` all have no effect. Implement them via GJS host commands if needed.
+2. **`x`, `y`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` constructor options are ignored.** GTK window placement is managed by the window manager; GTK4 removed `window.move()`.
 
-3. **`x`, `y`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` constructor options are ignored.** GTK window placement is managed by the window manager.
+3. **No preload scripts.** The IPC bridge is injected by prepending a `<script>` tag to the HTML source. There is no `webPreferences.preload` path.
 
-4. **No preload scripts.** The IPC bridge is injected by prepending a `<script>` tag to the HTML source. There is no `webPreferences.preload` path.
+4. **`ipcMain.on()` is absent.** Use `ipcMain.handle()` for all renderer→main communication.
 
-5. **`ipcMain.on()` is absent.** Use `ipcMain.handle()` for all renderer→main communication.
+5. **`Menu.setApplicationMenu()` is absent.** Use `win.setMenu(menu)` on the `BrowserWindow` instance.
 
-6. **`Menu.setApplicationMenu()` is absent.** Use `win.setMenu(menu)` on the `BrowserWindow` instance.
+6. **`webPreferences.partition` is ignored.** WebKitGTK uses a single default profile; per-window session isolation is not supported.
 
-7. **`webPreferences.partition` is ignored.** WebKitGTK uses a single default profile; per-window session isolation is not supported.
-
-8. **WebKit sandbox must be disabled.** The GJS host sets `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` at spawn time. This is a known limitation of embedding WebKitGTK outside its default sandbox environment.
+7. **WebKit sandbox must be disabled.** The GJS host sets `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` at spawn time. This is a known limitation of embedding WebKitGTK outside its default sandbox environment.

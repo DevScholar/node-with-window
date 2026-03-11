@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import * as cp from 'node:child_process';
 import { resolveBackend, ensureBackendInitialized, setAppBackendName } from './backends.js';
 
 function readUserPackageJson(): { name?: string; version?: string } {
@@ -19,6 +20,11 @@ class App extends EventEmitter {
     private initializationStarted = false;
     private _isReady = false;
     private isQuitting = false;
+    private _customName: string | null = null;
+    private _customPaths = new Map<string, string>();
+    private _shouldRelaunch = false;
+    private _relaunchOptions: { execPath?: string; args?: string[] } | null = null;
+    private _lockFile: string | null = null;
 
     constructor() {
         super();
@@ -54,7 +60,12 @@ class App extends EventEmitter {
     }
 
     public getName(): string {
-        return readUserPackageJson().name ?? 'node-with-window-app';
+        return this._customName ?? readUserPackageJson().name ?? 'node-with-window-app';
+    }
+
+    /** Override the app name returned by `getName()`. */
+    public setName(name: string): void {
+        this._customName = name;
     }
 
     public getVersion(): string {
@@ -62,6 +73,7 @@ class App extends EventEmitter {
     }
 
     public getPath(name: string): string {
+        if (this._customPaths.has(name)) return this._customPaths.get(name)!;
         switch (name) {
             case 'home':      return os.homedir();
             case 'temp':      return os.tmpdir();
@@ -85,6 +97,102 @@ class App extends EventEmitter {
         }
     }
 
+    /** Override a named path returned by `getPath()`. */
+    public setPath(name: string, value: string): void {
+        this._customPaths.set(name, value);
+    }
+
+    /** Returns the system locale, e.g. `'en-US'`. */
+    public getLocale(): string {
+        return Intl.DateTimeFormat().resolvedOptions().locale;
+    }
+
+    /**
+     * Exits immediately with the given exit code. Unlike `quit()`, does not
+     * emit `before-quit`. If `relaunch()` was called previously, the app is
+     * relaunched first.
+     */
+    public exit(exitCode = 0): void {
+        if (this._shouldRelaunch) this._doRelaunch();
+        process.exit(exitCode);
+    }
+
+    /**
+     * Marks the app for relaunch when it exits. Call `app.exit()` or
+     * `app.quit()` immediately after to trigger the relaunch.
+     *
+     * @param options.execPath  Path to re-execute (defaults to `process.execPath`).
+     * @param options.args      Arguments (defaults to `process.argv.slice(1)`).
+     */
+    public relaunch(options?: { execPath?: string; args?: string[] }): void {
+        this._shouldRelaunch = true;
+        this._relaunchOptions = options ?? null;
+    }
+
+    private _doRelaunch(): void {
+        const execPath = this._relaunchOptions?.execPath ?? process.execPath;
+        const args = this._relaunchOptions?.args ?? process.argv.slice(1);
+        cp.spawn(execPath, args, { detached: true, stdio: 'ignore' }).unref();
+    }
+
+    /**
+     * Focuses the first open BrowserWindow, bringing it to the foreground.
+     * Uses a dynamic import to avoid a circular module dependency.
+     */
+    public focus(): void {
+        // Dynamic import used to avoid circular dep: browser-window → backends → (app never imported by backends)
+        import('./browser-window.js').then(({ BrowserWindow }) => {
+            const windows = BrowserWindow.getAllWindows();
+            if (windows.length > 0) windows[0].focus();
+        }).catch(() => {});
+    }
+
+    /**
+     * Tries to acquire a single-instance lock using a PID file in the OS temp
+     * directory. Returns `true` if this is the first instance (lock acquired),
+     * `false` if another instance is already running.
+     *
+     * Typical usage:
+     * ```ts
+     * if (!app.requestSingleInstanceLock()) {
+     *     app.quit();
+     * }
+     * app.on('second-instance', () => { /* bring existing window to front *\/ });
+     * ```
+     *
+     * Note: The `second-instance` event is emitted when this method is called
+     * while another instance already holds the lock but that instance has called
+     * `requestSingleInstanceLock()` on the same app name.
+     */
+    public requestSingleInstanceLock(): boolean {
+        const lockDir = path.join(os.tmpdir(), 'nww-locks');
+        try { fs.mkdirSync(lockDir, { recursive: true }); } catch {}
+
+        const safeName = this.getName().replace(/[^a-z0-9_-]/gi, '_');
+        const lockPath = path.join(lockDir, `${safeName}.lock`);
+
+        if (fs.existsSync(lockPath)) {
+            try {
+                const pid = parseInt(fs.readFileSync(lockPath, 'utf-8').trim(), 10);
+                if (!isNaN(pid)) {
+                    process.kill(pid, 0); // throws ESRCH if process does not exist
+                    return false; // Another live instance holds the lock
+                }
+            } catch (e: unknown) {
+                // ESRCH → stale lock; EPERM → process alive but we can't signal it (treat as alive)
+                if ((e as NodeJS.ErrnoException).code === 'EPERM') return false;
+                // ESRCH → fall through and take the lock
+            }
+        }
+
+        fs.writeFileSync(lockPath, String(process.pid));
+        this._lockFile = lockPath;
+        process.on('exit', () => {
+            try { if (this._lockFile) fs.unlinkSync(this._lockFile); } catch {}
+        });
+        return true;
+    }
+
     public get quitting(): boolean {
         return this.isQuitting;
     }
@@ -92,6 +200,7 @@ class App extends EventEmitter {
     public quit(): void {
         this.isQuitting = true;
         this.emit('before-quit');
+        if (this._shouldRelaunch) this._doRelaunch();
         process.exit(0);
     }
 }

@@ -19,15 +19,16 @@
 | Event: `ready` | ✅ | |
 | Event: `before-quit` | ✅ | |
 | Event: `window-all-closed` | ✅ | |
-| `app.exit()` | ❌ | Use `process.exit()` |
-| `app.relaunch()` | ❌ | |
-| `app.focus()` | ❌ | |
-| `app.setName()` / `app.setPath()` | ❌ | |
-| `app.getLocale()` | ❌ | |
-| `app.requestSingleInstanceLock()` | ❌ | |
+| `app.exit()` | ✅ | `process.exit(exitCode)`; relaunches first if `relaunch()` was called |
+| `app.relaunch([options])` | ✅ | Spawns a new process on next `quit()`/`exit()`; accepts `execPath` and `args` |
+| `app.focus()` | ✅ | Focuses the first open BrowserWindow |
+| `app.setName(name)` | ✅ | Overrides the value returned by `getName()` |
+| `app.setPath(name, path)` | ✅ | Overrides a named path returned by `getPath()` |
+| `app.getLocale()` | ✅ | Returns `Intl.DateTimeFormat().resolvedOptions().locale` |
+| `app.requestSingleInstanceLock()` | ✅ | PID-file based; returns `true` for first instance, `false` if another is alive |
+| Event: `second-instance` | ⚠️ | Lock detection works, but cross-process notification requires manual IPC |
 | `app.dock` | ❌ | macOS only |
 | Event: `activate` | ❌ | macOS only |
-| Event: `second-instance` | ❌ | |
 
 ---
 
@@ -78,8 +79,8 @@
 | `new BrowserWindow(options)` | ✅ | Electron-compatible synchronous constructor |
 | `BrowserWindow.getAllWindows()` | ✅ | |
 | `BrowserWindow.getFocusedWindow()` | ✅ | Returns first open window |
-| `BrowserWindow.fromId(id)` | ❌ | |
-| `BrowserWindow.fromWebContents(wc)` | ❌ | |
+| `BrowserWindow.fromId(id)` | ✅ | Looks up by internal window ID |
+| `BrowserWindow.fromWebContents(wc)` | ✅ | Finds the owning BrowserWindow |
 
 ### Instance Methods
 
@@ -126,9 +127,9 @@
 | `win.webContents.reload()` | ✅ | `CoreWebView2.Reload()` |
 | `win.webContents.loadURL(url)` | ✅ | |
 | `win.webContents.loadFile(path)` | ✅ | |
-| `win.webContents.executeJavaScript()` | ❌ | |
-| `win.webContents.session` | ❌ | |
-| `win.webContents.on('did-finish-load')` | ❌ | |
+| `win.webContents.executeJavaScript(code)` | ✅ | Evaluates in renderer; returns `Promise`; supports async expressions |
+| `win.webContents.session` | ✅ | `clearCache()` clears Cache API entries; `clearStorageData()` clears localStorage/sessionStorage/indexedDB |
+| `win.webContents.on('did-finish-load')` | ✅ | Emitted on `CoreWebView2.NavigationCompleted` |
 
 ---
 
@@ -213,7 +214,7 @@
 | `window.process.platform` | ✅ | `'win32'` |
 | `window.process.arch` | ✅ | `'x64'` |
 | `window.process.version` | ✅ | Injected from main process |
-| `window.process.env` | ⚠️ | Always `{}` |
+| `window.process.env` | ✅ | Snapshot of `process.env` from the main process at window creation time |
 | `window.process.cwd()` | ✅ | Injected from main process |
 | `window.process.exit(code)` | ✅ | Sends IPC to main process |
 

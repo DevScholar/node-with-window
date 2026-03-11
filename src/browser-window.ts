@@ -56,6 +56,11 @@ export class BrowserWindow extends EventEmitter {
             reload: () => { if (this.provider.reload) this.provider.reload(); },
             loadURL: (url) => this.loadURL(url),
             loadFile: (filePath) => this.loadFile(filePath),
+            executeJavaScript: (code) => {
+                if (!this.provider.executeJavaScript) return Promise.reject(new Error('executeJavaScript not supported by this backend'));
+                return this.provider.executeJavaScript(code);
+            },
+            onNavigationCompleted: (cb) => { this.provider.onNavigationCompleted?.(cb); },
         });
 
         this._createdPromise = this._init(options);
@@ -114,6 +119,18 @@ export class BrowserWindow extends EventEmitter {
 
     public static getFocusedWindow(): BrowserWindow | undefined {
         return BrowserWindow.getAllWindows()[0];
+    }
+
+    public static fromId(id: number): BrowserWindow | null {
+        return BrowserWindow._allWindows.get(id) ?? null;
+    }
+
+    /** Find the BrowserWindow that owns a given WebContents instance. */
+    public static fromWebContents(wc: WebContents): BrowserWindow | null {
+        for (const win of BrowserWindow._allWindows.values()) {
+            if (win.webContents === wc) return win;
+        }
+        return null;
     }
 
     public async loadURL(url: string): Promise<void> {

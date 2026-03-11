@@ -152,4 +152,6 @@ export interface IWindowProvider {
     setAlwaysOnTop?(flag: boolean): void;
     center?(): void;
     flashFrame?(flag: boolean): void;
+    executeJavaScript?(code: string): Promise<unknown>;
+    onNavigationCompleted?(callback: () => void): void;
 }

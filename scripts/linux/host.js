@@ -312,6 +312,13 @@ function executeCommand(cmd) {
                 if (t && gtkWindow) gtkWindow.set_title(t);
             });
 
+            // Push a navigationCompleted event when the page finishes loading
+            webView.connect('load-changed', (_wv, loadEvent) => {
+                if (loadEvent === WebKit.LoadEvent.FINISHED) {
+                    ipcQueue.push(JSON.stringify({ type: 'navigationCompleted' }));
+                }
+            });
+
             windowBox = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 0 });
             windowBox.append(webView);
             gtkWindow.set_child(windowBox);
@@ -374,6 +381,64 @@ function executeCommand(cmd) {
                 const inspector = webView.get_inspector();
                 if (inspector) inspector.show();
             }
+            return { type: 'void' };
+        }
+
+        case 'Focus': {
+            if (gtkWindow) gtkWindow.present();
+            return { type: 'void' };
+        }
+
+        case 'SetTitle': {
+            if (gtkWindow) gtkWindow.set_title(cmd.title || '');
+            return { type: 'void' };
+        }
+
+        case 'GetTitle': {
+            return { type: 'result', value: gtkWindow ? (gtkWindow.get_title() || '') : '' };
+        }
+
+        case 'Minimize': {
+            if (gtkWindow) gtkWindow.minimize();
+            return { type: 'void' };
+        }
+
+        case 'Maximize': {
+            if (gtkWindow) gtkWindow.maximize();
+            return { type: 'void' };
+        }
+
+        case 'Unmaximize': {
+            if (gtkWindow) gtkWindow.unmaximize();
+            return { type: 'void' };
+        }
+
+        case 'SetFullScreen': {
+            if (gtkWindow) {
+                if (cmd.flag) gtkWindow.fullscreen();
+                else          gtkWindow.unfullscreen();
+            }
+            return { type: 'void' };
+        }
+
+        case 'SetSize': {
+            if (gtkWindow) gtkWindow.set_default_size(cmd.width, cmd.height);
+            return { type: 'void' };
+        }
+
+        case 'GetSize': {
+            const w = gtkWindow ? gtkWindow.get_width()  : 0;
+            const h = gtkWindow ? gtkWindow.get_height() : 0;
+            return { type: 'result', value: [w, h] };
+        }
+
+        case 'SetResizable': {
+            if (gtkWindow) gtkWindow.set_resizable(cmd.flag);
+            return { type: 'void' };
+        }
+
+        case 'SetAlwaysOnTop': {
+            if (gtkWindow) gtkWindow.set_keep_above(cmd.flag);
             return { type: 'void' };
         }
 

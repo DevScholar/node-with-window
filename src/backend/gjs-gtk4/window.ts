@@ -165,10 +165,15 @@ export class LinuxWindow implements IWindowProvider {
 
     private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
     private isClosed = false;
+    private _navCompletedCallback: (() => void) | null = null;
+    private _pendingExecs = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+    private _isFullScreen = false;
+    private _isResizable = true;
 
     constructor(options?: BrowserWindowOptions) {
         this.options        = options || {};
         this.webPreferences = this.options.webPreferences || {};
+        this._isResizable   = this.options.resizable ?? true;
     }
 
     // -------------------------------------------------------------------------
@@ -369,6 +374,86 @@ export class LinuxWindow implements IWindowProvider {
         try { this._send('OpenDevTools', {}); } catch { /* ignore */ }
     }
 
+    public focus(): void {
+        try { this._send('Focus', {}); } catch { /* ignore */ }
+    }
+
+    public minimize(): void {
+        try { this._send('Minimize', {}); } catch { /* ignore */ }
+    }
+
+    public maximize(): void {
+        try { this._send('Maximize', {}); } catch { /* ignore */ }
+    }
+
+    public unmaximize(): void {
+        try { this._send('Unmaximize', {}); } catch { /* ignore */ }
+    }
+
+    public setFullScreen(flag: boolean): void {
+        this._isFullScreen = flag;
+        try { this._send('SetFullScreen', { flag }); } catch { /* ignore */ }
+    }
+
+    public isFullScreen(): boolean {
+        return this._isFullScreen;
+    }
+
+    public setTitle(title: string): void {
+        try { this._send('SetTitle', { title }); } catch { /* ignore */ }
+    }
+
+    public getTitle(): string {
+        try {
+            const res = this._send('GetTitle', {}) as { value?: string };
+            return res.value ?? '';
+        } catch {
+            return '';
+        }
+    }
+
+    public setSize(width: number, height: number): void {
+        try { this._send('SetSize', { width, height }); } catch { /* ignore */ }
+    }
+
+    public getSize(): [number, number] {
+        try {
+            const res = this._send('GetSize', {}) as { value?: [number, number] };
+            return res.value ?? [0, 0];
+        } catch {
+            return [0, 0];
+        }
+    }
+
+    public setResizable(resizable: boolean): void {
+        this._isResizable = resizable;
+        try { this._send('SetResizable', { flag: resizable }); } catch { /* ignore */ }
+    }
+
+    public isResizable(): boolean {
+        return this._isResizable;
+    }
+
+    public setAlwaysOnTop(flag: boolean): void {
+        try { this._send('SetAlwaysOnTop', { flag }); } catch { /* ignore */ }
+    }
+
+    public onNavigationCompleted(callback: () => void): void {
+        this._navCompletedCallback = callback;
+    }
+
+    public executeJavaScript(code: string): Promise<unknown> {
+        return new Promise((resolve, reject) => {
+            if (!this.ipc) { reject(new Error('GJS host not ready')); return; }
+            const id = Math.random().toString(36).substring(2, 11);
+            this._pendingExecs.set(id, { resolve, reject });
+            const payload = JSON.stringify({ type: 'exec', id, code });
+            const script = `window.__ipcDispatch(${JSON.stringify(payload)})`;
+            try { this._send('SendToRenderer', { script }); }
+            catch (e) { this._pendingExecs.delete(id); reject(e); }
+        });
+    }
+
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
@@ -417,6 +502,25 @@ export class LinuxWindow implements IWindowProvider {
         if (type === 'menuClick') {
             const handler = this.menuClickHandlers.get((data as unknown as { id: number }).id);
             if (handler) handler();
+            return;
+        }
+
+        // executeJavaScript result
+        if (type === 'execResult') {
+            const pending = this._pendingExecs.get(id!);
+            if (pending) {
+                this._pendingExecs.delete(id!);
+                if ((data as unknown as { error?: string }).error)
+                    pending.reject(new Error((data as unknown as { error: string }).error));
+                else
+                    pending.resolve((data as unknown as { result: unknown }).result);
+            }
+            return;
+        }
+
+        // did-finish-load
+        if (type === 'navigationCompleted') {
+            this._navCompletedCallback?.();
             return;
         }
 

@@ -18,6 +18,7 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
     if (nodeIntegration) {
         const injectedCwd     = JSON.stringify(process.cwd());
         const injectedVersion = JSON.stringify(process.version);
+        const injectedEnv     = JSON.stringify(process.env);
 
         nodeBridge = `
 (function() {
@@ -59,7 +60,7 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
         platform: 'linux',
         arch: 'x64',
         version: ${injectedVersion},
-        env: {},
+        env: ${injectedEnv},
         cwd: function() { return ${injectedCwd}; },
         exit: function(code) {
             window.webkit.messageHandlers.ipc.postMessage(
@@ -95,11 +96,33 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
     // Registered on() listeners keyed by channel
     window.__ipcListeners = {};
 
-    // Called by the main process (via evaluate_javascript) to deliver replies
-    // and push messages to on() listeners.
+    // Called by the main process (via evaluate_javascript) to deliver replies,
+    // push messages to on() listeners, or execute arbitrary JS (executeJavaScript).
     window.__ipcDispatch = function(json) {
         var msg;
         try { msg = JSON.parse(json); } catch(e) { return; }
+        if (msg.type === 'exec') {
+            var eid = msg.id;
+            try {
+                var r = eval(msg.code);
+                if (r && typeof r.then === 'function') {
+                    r.then(function(v) {
+                        window.webkit.messageHandlers.ipc.postMessage(
+                            JSON.stringify({type:'execResult',id:eid,result:v==null?null:v}));
+                    }).catch(function(ex) {
+                        window.webkit.messageHandlers.ipc.postMessage(
+                            JSON.stringify({type:'execResult',id:eid,error:String(ex)}));
+                    });
+                } else {
+                    window.webkit.messageHandlers.ipc.postMessage(
+                        JSON.stringify({type:'execResult',id:eid,result:r==null?null:r}));
+                }
+            } catch(ex) {
+                window.webkit.messageHandlers.ipc.postMessage(
+                    JSON.stringify({type:'execResult',id:eid,error:String(ex)}));
+            }
+            return;
+        }
         if (msg.type === 'reply') {
             var p = window.__ipcPending[msg.id];
             if (p) {

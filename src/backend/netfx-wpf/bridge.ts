@@ -60,6 +60,7 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
     if (nodeIntegration) {
         const injectedCwd     = JSON.stringify(process.cwd());
         const injectedVersion = JSON.stringify(process.version);
+        const injectedEnv     = JSON.stringify(process.env);
         const injectedPort    = syncServerPort;
         
         /**
@@ -220,7 +221,7 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
         platform: 'win32',
         arch: 'x64',
         version: ${injectedVersion},
-        env: {},
+        env: ${injectedEnv},
         cwd: function() { return ${injectedCwd}; },
         // Exit sends a message to main process rather than actually exiting
         exit: function(code) { window.chrome.webview.postMessage({ type: 'send', channel: 'process:exit', args: [code] }); }
@@ -276,6 +277,19 @@ window.__ipcDispatch=function(msg){
 
 window.chrome.webview.addEventListener('message',function(e){
   var m;try{m=JSON.parse(e.data);}catch(err){return;}
+  if(m.type==='exec'){
+    var eid=m.id;
+    try{
+      var r=eval(m.code);
+      if(r&&typeof r.then==='function'){
+        r.then(function(v){window.chrome.webview.postMessage({type:'execResult',id:eid,result:v==null?null:v});})
+         .catch(function(ex){window.chrome.webview.postMessage({type:'execResult',id:eid,error:String(ex)});});
+      }else{
+        window.chrome.webview.postMessage({type:'execResult',id:eid,result:r==null?null:r});
+      }
+    }catch(ex){window.chrome.webview.postMessage({type:'execResult',id:eid,error:String(ex)});}
+    return;
+  }
   window.__ipcDispatch(m);
 });
 
