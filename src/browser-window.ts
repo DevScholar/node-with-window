@@ -6,18 +6,24 @@ import { app } from './app.js';
 import { startSyncServer } from './node-integration.js';
 import type { Menu } from './menu.js';
 
-
 /**
  * BrowserWindow - Cross-platform window with WebView support
  *
  * - Windows (default): netfx-wpf  (WebView2 + WPF via .NET)
  * - Linux (default):   gjs-gtk4   (WebKitGTK + GTK4 via GJS)
  *
- * Use the static create() method instead of the constructor:
+ * Usage (Electron-compatible):
  *
  * ```javascript
- * const win = await BrowserWindow.create(options);
+ * const win = new BrowserWindow({ width: 800, height: 600 });
+ * win.loadFile('index.html');
+ * win.setMenu([...]);
+ * // window auto-shows on the next event-loop tick
  * ```
+ *
+ * The constructor is synchronous and returns immediately.  Backend
+ * initialization runs in the background; all method calls before it
+ * completes are queued and drained automatically.
  */
 export class BrowserWindow extends EventEmitter {
     private provider: IWindowProvider;
@@ -39,11 +45,24 @@ export class BrowserWindow extends EventEmitter {
         this._backendName = backend.name;
         this.provider = backend.createProvider(options);
 
-        this._createdPromise = this._init();
+        this._createdPromise = this._init(options);
+
+        // Auto-show on the next event-loop tick so the caller's synchronous
+        // setup code (loadFile, setMenu, ipcMain.handle, …) runs first —
+        // matching Electron's behaviour where new BrowserWindow() shows after
+        // the current synchronous block finishes.
+        if (options?.show !== false) {
+            setImmediate(() => this.show());
+        }
     }
 
-    private async _init(): Promise<void> {
+    private async _init(options?: BrowserWindowOptions): Promise<void> {
         try {
+            // Start the sync-require HTTP server before the backend so its port
+            // is available when setupIpcBridge() injects the bridge script.
+            if (options?.webPreferences?.nodeIntegration) {
+                await startSyncServer();
+            }
             await ensureBackendInitialized(this._backendName);
             await this.provider.createWindow();
             this._isCreated = true;
@@ -56,29 +75,12 @@ export class BrowserWindow extends EventEmitter {
     }
 
     /**
-     * Creates a new BrowserWindow instance asynchronously.
-     *
-     * ```javascript
-     * await app.whenReady();
-     * const win = await BrowserWindow.create({ width: 800, height: 600 });
-     * win.loadFile('index.html');
-     * win.show();
-     * ```
+     * Synchronous factory — equivalent to `new BrowserWindow(options)`.
+     * Kept for backward compatibility; `await BrowserWindow.create(opts)`
+     * continues to work because awaiting a non-Promise value returns it as-is.
      */
-    public static async create(options?: BrowserWindowOptions): Promise<BrowserWindow> {
-        if (options?.webPreferences?.nodeIntegration) {
-            await startSyncServer();
-        }
-        const win = new BrowserWindow(options);
-        await win._createdPromise;
-        if (options?.show !== false) {
-            // Defer show() to the next event-loop tick so the caller's synchronous
-            // code (loadFile, setMenu, ipcMain.handle, …) runs first — just like
-            // Electron's new BrowserWindow() which shows after construction but lets
-            // you configure the window before the message loop processes events.
-            setImmediate(() => win.show());
-        }
-        return win;
+    public static create(options?: BrowserWindowOptions): BrowserWindow {
+        return new BrowserWindow(options);
     }
 
     public whenCreated(): Promise<void> {
@@ -102,22 +104,20 @@ export class BrowserWindow extends EventEmitter {
     }
 
     public async loadURL(url: string): Promise<void> {
-        if (!this._isCreated) {
-            await this._createdPromise;
-        }
+        if (!this._isCreated) await this._createdPromise;
         return this.provider.loadURL(url);
     }
 
     public async loadFile(filePath: string): Promise<void> {
-        if (!this._isCreated) {
-            await this._createdPromise;
-        }
+        if (!this._isCreated) await this._createdPromise;
         return this.provider.loadFile(filePath);
     }
 
     public show(): void {
         if (!this._isCreated) {
-            throw new Error('Cannot show window before it is created. Call await window.whenCreated() first.');
+            // Backend not ready yet — queue show() to run once _init resolves.
+            this._createdPromise.then(() => this.provider.show()).catch(() => {});
+            return;
         }
         this.provider.show();
     }
@@ -173,18 +173,12 @@ export class BrowserWindow extends EventEmitter {
         }
     }
 
-    /**
-     * Reloads the current page in the WebView.
-     */
     public reload(): void {
         if (this.provider.reload) {
             this.provider.reload();
         }
     }
 
-    /**
-     * Opens the developer tools window.
-     */
     public openDevTools(): void {
         if (this.provider.openDevTools) {
             this.provider.openDevTools();
