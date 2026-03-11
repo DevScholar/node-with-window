@@ -3,6 +3,8 @@ import { createRequire } from 'node:module';
 import { IWindowProvider, BrowserWindowOptions, MenuItemOptions, OpenDialogOptions, SaveDialogOptions } from './interfaces';
 import { resolveBackend, ensureBackendInitialized } from './backends.js';
 import { ipcMain } from './ipc-main.js';
+import { app } from './app.js';
+import type { Menu } from './menu.js';
 
 /** Registered once per process when the first nodeIntegration window is created. */
 let _nodeIntegrationHandlerRegistered = false;
@@ -134,10 +136,20 @@ export class BrowserWindow extends EventEmitter {
         BrowserWindow._allWindows.delete(this._id);
         this.provider.close();
         this.emit('closed');
+        if (BrowserWindow._allWindows.size === 0) {
+            app.emit('window-all-closed');
+        }
     }
 
-    public setMenu(menu: MenuItemOptions[]): void {
-        this.provider.setMenu(menu);
+    public setMenu(menu: MenuItemOptions[] | Menu): void {
+        const items: MenuItemOptions[] = Array.isArray(menu)
+            ? menu
+            : (menu as Menu).items();
+        this.provider.setMenu(items);
+    }
+
+    public removeMenu(): void {
+        this.provider.setMenu([]);
     }
 
     public showOpenDialog(options: OpenDialogOptions): string[] | undefined {

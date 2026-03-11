@@ -124,7 +124,7 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
         } else if (msg.type === 'message') {
             var listeners = window.__ipcListeners[msg.channel] || [];
             for (var i = 0; i < listeners.length; i++)
-                listeners[i]({}, msg.args);
+                listeners[i].cb({}, msg.args);
         }
     };
 
@@ -148,9 +148,24 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
         on: function(channel, callback) {
             if (!window.__ipcListeners[channel])
                 window.__ipcListeners[channel] = [];
-            window.__ipcListeners[channel].push(callback);
+            window.__ipcListeners[channel].push({ cb: callback });
+        },
+
+        once: function(channel, callback) {
+            var self = window.ipcRenderer;
+            var wrapped = function(e, args) { self.off(channel, wrapped); callback(e, args); };
+            self.on(channel, wrapped);
+        },
+
+        off: function(channel, callback) {
+            var listeners = window.__ipcListeners[channel];
+            if (!listeners) return;
+            for (var i = 0; i < listeners.length; i++) {
+                if (listeners[i].cb === callback) { listeners.splice(i, 1); return; }
+            }
         }
     };
+    window.ipcRenderer.removeListener = window.ipcRenderer.off;
 })();`;
     }
 

@@ -148,15 +148,18 @@ parentPort.on('message', async (msg) => {
         this.handlers.set(channel, listener);
     }
 
-    /**
-     * Alias for handle() - registers a one-way handler.
-     * 
-     * Unlike handle(), this is for fire-and-forget messages
-     * that don't expect a response.
-     * 
-     * @param channel - The channel name to handle
-     * @param listener - The handler function
-     */
+    public handleOnce(channel: string, listener: IpcHandler): void {
+        const wrapper: IpcHandler = (event, ...args) => {
+            this.handlers.delete(channel);
+            return listener(event, ...args);
+        };
+        this.handlers.set(channel, wrapper);
+    }
+
+    public removeHandler(channel: string): void {
+        this.handlers.delete(channel);
+    }
+
     public onChannel(channel: string, listener: IpcHandler): void {
         this.handlers.set(channel, listener);
     }

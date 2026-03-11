@@ -178,58 +178,55 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
         ipcBridge = `
 (function(){
 if(window.ipcRenderer)return;
+
+window.__ipcPending={};
+window.__ipcListeners={};
+
+window.__ipcDispatch=function(msg){
+  if(msg.type==='reply'){
+    var p=window.__ipcPending[msg.id];
+    if(p){delete window.__ipcPending[msg.id];if(msg.error)p.reject(new Error(msg.error));else p.resolve(msg.result);}
+  }else if(msg.type==='message'){
+    var listeners=window.__ipcListeners[msg.channel]||[];
+    for(var i=0;i<listeners.length;i++)listeners[i].cb({},msg.args);
+  }
+};
+
+window.chrome.webview.addEventListener('message',function(e){
+  var m;try{m=JSON.parse(e.data);}catch(err){return;}
+  window.__ipcDispatch(m);
+});
+
 window.ipcRenderer={
-  /**
-   * Send a message to main process (fire-and-forget)
-   * Similar to ipcRenderer.send() in Electron
-   */
   send:function(channel){
     var args=Array.prototype.slice.call(arguments,1);
     window.chrome.webview.postMessage({type:'send',channel:channel,args:args});
   },
-  
-  /**
-   * Invoke a handler and get a Promise result
-   * Similar to ipcRenderer.invoke() in Electron
-   * 
-   * How it works:
-   * 1. Generate a random ID to track this request
-   * 2. Create a Promise with handlers for resolve/reject
-   * 3. Set up a one-time message listener to handle the reply
-   * 4. Send the message with the ID
-   * 5. When reply arrives, resolve or reject the Promise
-   */
   invoke:function(channel){
     var args=Array.prototype.slice.call(arguments,1);
     var id=Math.random().toString(36).substr(2,9);
     return new Promise(function(resolve,reject){
-      var handler=function(e){
-        var m=JSON.parse(e.data);
-        if(m.type==='reply'&&m.id===id){
-          window.chrome.webview.removeEventListener('message',handler);
-          if(m.error)reject(new Error(m.error));else resolve(m.result);
-        }
-      };
-      window.chrome.webview.addEventListener('message',handler);
+      window.__ipcPending[id]={resolve:resolve,reject:reject};
       window.chrome.webview.postMessage({type:'invoke',channel:channel,id:id,args:args});
     });
   },
-  
-  /**
-   * Listen for messages from main process
-   * Similar to ipcRenderer.on() in Electron
-   * 
-   * Main process sends messages using webView.PostWebMessageAsString()
-   * We receive them via the 'message' event and filter by channel
-   */
   on:function(channel,callback){
-    window.chrome.webview.addEventListener('message',function(e){
-      var m=JSON.parse(e.data);
-      if(m.type==='message'&&m.channel===channel)callback(e,m.args);
-    });
+    if(!window.__ipcListeners[channel])window.__ipcListeners[channel]=[];
+    window.__ipcListeners[channel].push({cb:callback});
+  },
+  once:function(channel,callback){
+    var self=window.ipcRenderer;
+    var wrapped=function(e,args){self.off(channel,wrapped);callback(e,args);};
+    self.on(channel,wrapped);
+  },
+  off:function(channel,callback){
+    var listeners=window.__ipcListeners[channel];
+    if(!listeners)return;
+    for(var i=0;i<listeners.length;i++){if(listeners[i].cb===callback){listeners.splice(i,1);return;}}
   }
-};`;
-        ipcBridge += '})();';
+};
+window.ipcRenderer.removeListener=window.ipcRenderer.off;
+})();`;
     }
 
     return nodeBridge + ipcBridge;
