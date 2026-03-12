@@ -291,6 +291,12 @@ function executeCommand(cmd) {
             const settings = webView.get_settings();
             settings.enable_developer_extras = true;
 
+            // webSecurity: false disables CORS and same-origin policy
+            if (opts.webPreferences && opts.webPreferences.webSecurity === false) {
+                settings.allow_file_access_from_file_urls = true;
+                settings.allow_universal_access_from_file_urls = true;
+            }
+
             gtkWindow = new Gtk.Window({
                 title: opts.title || 'node-with-window',
                 default_width:  opts.width  || 800,
@@ -300,6 +306,7 @@ function executeCommand(cmd) {
             if (opts.resizable === false) gtkWindow.set_resizable(false);
             if (opts.alwaysOnTop)         gtkWindow.set_keep_above(true);
             if (opts.icon)               iconPath = opts.icon;
+            if (opts.fullscreen)         gtkWindow.fullscreen();
 
             // Exit cleanly when the user closes the window
             gtkWindow.connect('close-request', () => {

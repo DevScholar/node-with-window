@@ -54,7 +54,8 @@
 | `maxWidth`, `maxHeight` | ❌ | Not forwarded to GTK |
 | `movable`, `minimizable`, `maximizable`, `closable` | ⚠️ | Accepted, not applied |
 | `transparent`, `frame`, `kiosk` | ⚠️ | Accepted, not applied |
-| `skipTaskbar`, `fullscreen` | ⚠️ | Accepted, not applied |
+| `skipTaskbar` | ⚠️ | Accepted, not applied |
+| `fullscreen` | ✅ | `Window.fullscreen()` called at creation |
 | `backgroundColor` | ❌ | |
 | `parent`, `modal` | ❌ | No child window support |
 | `titleBarStyle` | ❌ | |
@@ -68,7 +69,7 @@
 | `partition` | ⚠️ | Accepted, not applied — WebKitGTK uses a default profile |
 | `preload` | ✅ | Supported via `webPreferences.preload` |
 | `sandbox` | ⚠️ | Accepted, no effect |
-| `webSecurity` | ⚠️ | Accepted, no effect |
+| `webSecurity` | ✅ | `false` sets `allow_file_access_from_file_urls` + `allow_universal_access_from_file_urls` on `WebKit.Settings` |
 
 ### Static Methods
 
@@ -188,7 +189,7 @@
 |---|---|---|
 | `Menu.buildFromTemplate(template)` | ✅ | |
 | `new Menu()` / `menu.append()` / `menu.insert()` | ✅ | |
-| `Menu.setApplicationMenu(menu)` | ❌ | Use `win.setMenu(menu)` |
+| `Menu.setApplicationMenu(menu)` | ✅ | Sets the default menu for all windows; `null` removes the menu bar |
 | `menu.popup()` | ❌ | Context menus not implemented |
 | `label`, `type`, `click`, `submenu`, `enabled`, `visible`, `checked`, `accelerator`, `role` | ✅ | `accelerator` is displayed; keyboard shortcuts are not enforced natively |
 | `id`, `icon`, `sublabel`, `toolTip` | ❌ | |

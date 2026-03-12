@@ -56,7 +56,7 @@
 | `minimizable`, `maximizable`, `closable` | ⚠️ | Accepted, not applied |
 | `transparent`, `frame`, `kiosk` | ⚠️ | Accepted, not applied |
 | `skipTaskbar` | ⚠️ | Accepted, not applied |
-| `fullscreen` | ⚠️ | Accepted, not applied; use `win.setFullScreen(true)` after creation |
+| `fullscreen` | ✅ | Applied at window creation via `setFullScreen(true)` |
 | `backgroundColor` | ❌ | |
 | `parent`, `modal` | ❌ | No child window support |
 | `titleBarStyle` | ❌ | |
@@ -70,7 +70,7 @@
 | `partition` | ✅ | `persist:<name>` for persistent profile, `temp:` for ephemeral |
 | `preload` | ✅ | Supported via `webPreferences.preload` |
 | `sandbox` | ⚠️ | Accepted, no effect |
-| `webSecurity` | ⚠️ | Accepted, no effect |
+| `webSecurity` | ✅ | `false` passes `--disable-web-security` to WebView2 (disables CORS/same-origin) |
 
 ### Static Methods
 
@@ -190,7 +190,7 @@
 |---|---|---|
 | `Menu.buildFromTemplate(template)` | ✅ | |
 | `new Menu()` / `menu.append()` / `menu.insert()` | ✅ | |
-| `Menu.setApplicationMenu(menu)` | ❌ | Use `win.setMenu(menu)` |
+| `Menu.setApplicationMenu(menu)` | ✅ | Sets the default menu for all windows; `null` removes the menu bar |
 | `menu.popup()` | ❌ | Context menus not implemented |
 | `label`, `type`, `click`, `submenu`, `enabled`, `visible`, `checked`, `accelerator`, `role` | ✅ | `accelerator` is displayed; keyboard shortcuts are not enforced natively |
 | `id`, `icon`, `sublabel`, `toolTip` | ❌ | |
@@ -238,10 +238,10 @@ const buf = fs.readFileSync('/path/to/file');               // Buffer → Proxy 
 
 2. **`ipcMain.on()`** registers fire-and-forget listeners for `ipcRenderer.send()` and `ipcRenderer.sendSync()` calls.
 
-3. **`Menu.setApplicationMenu()` is absent.** Use `win.setMenu(menu)` on the `BrowserWindow` instance.
+3. **`win.blur()` is a no-op.** WPF has no direct API to remove focus from a window programmatically.
 
-4. **`win.blur()` is a no-op.** WPF has no direct API to remove focus from a window programmatically.
+4. **`win.flashFrame()` is a no-op.** Taskbar button flashing requires P/Invoke (`FlashWindowEx`), which is not implemented.
 
-5. **`win.flashFrame()` is a no-op.** Taskbar button flashing requires P/Invoke (`FlashWindowEx`), which is not implemented.
+5. **`setFullScreen()` does not use an exclusive fullscreen mode.** It sets `WindowStyle.None` + `WindowState.Maximized` + `Topmost = true`. The WPF window frame is hidden but the taskbar may remain visible depending on system settings.
 
-6. **`setFullScreen()` does not use an exclusive fullscreen mode.** It sets `WindowStyle.None` + `WindowState.Maximized` + `Topmost = true`. The WPF window frame is hidden but the taskbar may remain visible depending on system settings.
+6. **`webSecurity: false`** passes `--disable-web-security` to the WebView2 browser process via `CoreWebView2CreationProperties.AdditionalBrowserArguments`. Requires WebView2 SDK ≥ 1.0.1661.

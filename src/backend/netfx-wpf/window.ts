@@ -216,8 +216,14 @@ export class NetFxWpfWindow implements IWindowProvider {
     const CreationPropertiesType = (
       WebView2WpfAssembly as unknown as { GetType: (name: string) => { new (): unknown } }
     ).GetType('Microsoft.Web.WebView2.Wpf.CoreWebView2CreationProperties');
-    const props = new CreationPropertiesType() as unknown as { UserDataFolder: string };
+    const props = new CreationPropertiesType() as unknown as {
+      UserDataFolder: string;
+      AdditionalBrowserArguments: string;
+    };
     props.UserDataFolder = this.userDataPath;
+    if (this.webPreferences.webSecurity === false) {
+      props.AdditionalBrowserArguments = '--disable-web-security';
+    }
     (this.webView as unknown as { CreationProperties: unknown }).CreationProperties = props;
 
     this.browserWindow = new Windows.Window();
@@ -511,6 +517,11 @@ export class NetFxWpfWindow implements IWindowProvider {
     // StartApplication pre-sends {type:'ok'} immediately, then calls Application.Run()
     // on the .NET side — the Node.js event loop is never blocked.
     dotnetAny.startApplication(this.app, this.browserWindow);
+
+    // Apply fullscreen option after the window is shown.
+    if (this.options.fullscreen) {
+      this.setFullScreen(true);
+    }
 
     // Poll for queued .NET events (WebMessageReceived, CoreWebView2InitializationCompleted, …)
     // exactly like the Linux backend polls its GJS host.
