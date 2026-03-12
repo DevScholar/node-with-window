@@ -32,12 +32,17 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
 
     window.__nwwCallbacks = {};
 
-    var __nwwEvtSrc = new EventSource('http://127.0.0.1:${injectedPort}/__nww_events__');
-    __nwwEvtSrc.onmessage = function(e) {
-        var msg = JSON.parse(e.data);
-        var cb = window.__nwwCallbacks[msg.id];
-        if (cb) cb.apply(null, msg.args.map(__nwwWrapResult));
-    };
+    // Defer EventSource connection to avoid blocking the GDK seat
+    // initialization on first run in WebKitGTK (cold-start freeze).
+    var __nwwEvtSrc = null;
+    setTimeout(function() {
+        __nwwEvtSrc = new EventSource('http://127.0.0.1:${injectedPort}/__nww_events__');
+        __nwwEvtSrc.onmessage = function(e) {
+            var msg = JSON.parse(e.data);
+            var cb = window.__nwwCallbacks[msg.id];
+            if (cb) cb.apply(null, msg.args.map(__nwwWrapResult));
+        };
+    }, 0);
 
     function __nwwSerializeArg(a) {
         if (typeof a === 'function') {
