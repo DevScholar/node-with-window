@@ -66,7 +66,7 @@
 | `nodeIntegration` | ⚠️ | Injects stub `window.require` — calls log a warning and return `null`. Use `ipcMain`/`ipcRenderer` for all Node.js access on Linux. |
 | `contextIsolation` | ✅ | `false` (default) injects `window.ipcRenderer` |
 | `partition` | ⚠️ | Accepted, not applied — WebKitGTK uses a default profile |
-| `preload` | ❌ | No preload script support |
+| `preload` | ✅ | Supported via `webPreferences.preload` |
 | `sandbox` | ⚠️ | Accepted, no effect |
 | `webSecurity` | ⚠️ | Accepted, no effect |
 
@@ -230,7 +230,7 @@ const content = await ipcRenderer.invoke('read-file', '/path/to/file');
 
 2. **`x`, `y`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` constructor options are ignored.** GTK window placement is managed by the window manager; GTK4 removed `window.move()`.
 
-3. **No preload scripts.** The IPC bridge is injected by prepending a `<script>` tag to the HTML source. There is no `webPreferences.preload` path.
+3. **Preload scripts** are supported. Set `webPreferences.preload` to an absolute or relative path. The script is registered via `WebKit.UserContentManager.add_script()` so it fires on every page navigation before the page's own scripts.
 
 4. **`ipcMain.on()` is absent.** Use `ipcMain.handle()` for all renderer→main communication.
 

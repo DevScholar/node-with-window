@@ -55,6 +55,8 @@ let isClosed    = false;
 // Queue of JSON strings posted by the HTML renderer (webkit.messageHandlers.ipc)
 const ipcQueue  = [];
 
+let cm = null;  // WebKit.UserContentManager (set during CreateWindow)
+
 // Gio.SimpleActionGroup for menu item actions
 const menuActions     = new Gio.SimpleActionGroup();
 let   menuActionIndex = 0;
@@ -272,7 +274,7 @@ function executeCommand(cmd) {
             Gtk.init();
 
             // WebKit UserContentManager — receives messages from ipcRenderer.send/invoke
-            const cm = new WebKit.UserContentManager();
+            cm = new WebKit.UserContentManager();
             cm.register_script_message_handler('ipc', null);
             cm.connect('script-message-received', (_mgr, value) => {
                 const msg = value.to_string();
@@ -352,6 +354,20 @@ function executeCommand(cmd) {
 
         case 'LoadHTML': {
             if (webView) webView.load_html(cmd.html, cmd.baseUri || null);
+            return { type: 'void' };
+        }
+
+        case 'SetUserScript': {
+            if (cm && cmd.code) {
+                const script = new WebKit.UserScript(
+                    cmd.code,
+                    WebKit.UserContentInjectedFrames.ALL_FRAMES,
+                    WebKit.UserScriptInjectionTime.START,
+                    null,
+                    null
+                );
+                cm.add_script(script);
+            }
             return { type: 'void' };
         }
 

@@ -68,7 +68,7 @@
 | `nodeIntegration` | ✅ | Enables `window.require` (sync XHR) and `window.process` |
 | `contextIsolation` | ✅ | `false` (default) injects `window.ipcRenderer` |
 | `partition` | ✅ | `persist:<name>` for persistent profile, `temp:` for ephemeral |
-| `preload` | ❌ | No preload script support; use IPC instead |
+| `preload` | ✅ | Supported via `webPreferences.preload` |
 | `sandbox` | ⚠️ | Accepted, no effect |
 | `webSecurity` | ⚠️ | Accepted, no effect |
 
@@ -234,7 +234,7 @@ const buf = fs.readFileSync('/path/to/file');               // Buffer → Proxy 
 
 ## Key Differences from Electron
 
-1. **No preload scripts.** The IPC bridge is injected via `CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync`. There is no `webPreferences.preload` path.
+1. **Preload scripts** are supported. Set `webPreferences.preload` to an absolute or relative path. The script is appended to the bridge code registered with `CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync`, so it runs on every navigation before the page's own scripts.
 
 2. **`ipcMain.on()` is absent.** Use `ipcMain.handle()` for all renderer→main communication. For fire-and-forget, return `undefined`.
 

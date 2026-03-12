@@ -12,7 +12,7 @@ import {
   MenuItemOptions,
 } from '../../interfaces';
 import { ipcMain } from '../../ipc-main';
-import { injectBridgeScript } from './bridge.js';
+import { injectBridgeScript, generateBridgeScript } from './bridge.js';
 import { getSyncServerPort } from '../../node-integration.js';
 
 /**
@@ -270,6 +270,24 @@ export class GjsGtk4Window implements IWindowProvider {
 
     // Tell GJS to create the window (but not show it yet)
     this._send('CreateWindow', { options });
+
+    // Register the bridge (and optional preload) as a UserContentManager script so
+    // that it fires on every page navigation, including loadURL().
+    // For loadFile() the bridge is also injected into the HTML directly; the
+    // window.__nodeBridge / window.ipcRenderer guards prevent double-execution.
+    let userScript = generateBridgeScript(this.webPreferences, getSyncServerPort());
+    const preloadPath = this.webPreferences.preload;
+    if (preloadPath) {
+      const absPreload = path.isAbsolute(preloadPath)
+        ? preloadPath
+        : path.resolve(process.cwd(), preloadPath);
+      try {
+        userScript += '\n' + fs.readFileSync(absPreload, 'utf-8');
+      } catch (e) {
+        console.error('[node-with-window] Failed to load preload script:', e);
+      }
+    }
+    this._send('SetUserScript', { code: userScript });
   }
 
   public show(): void {

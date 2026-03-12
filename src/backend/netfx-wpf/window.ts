@@ -11,7 +11,7 @@ import {
   MenuItemOptions,
 } from '../../interfaces';
 import { ipcMain } from '../../ipc-main';
-import { injectBridgeScript, generateBridgeScript } from './bridge.js';
+import { generateBridgeScript } from './bridge.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 import { buildWpfMenu } from './menu.js';
 import { getSyncServerPort } from '../../node-integration.js';
@@ -310,7 +310,18 @@ export class NetFxWpfWindow implements IWindowProvider {
     // In polling mode we cannot Task.Wait() on the UI thread (deadlock), so the
     // dedicated AddScriptAndNavigate action uses Task.ContinueWith to call Navigate()
     // only after the ack arrives — guaranteeing the script runs on the first document.
-    const bridgeScript = generateBridgeScript(this.webPreferences, getSyncServerPort());
+    let bridgeScript = generateBridgeScript(this.webPreferences, getSyncServerPort());
+    const preloadPath = this.webPreferences.preload;
+    if (preloadPath) {
+      const absPreload = path.isAbsolute(preloadPath)
+        ? preloadPath
+        : path.resolve(process.cwd(), preloadPath);
+      try {
+        bridgeScript += '\n' + fs.readFileSync(absPreload, 'utf-8');
+      } catch (e) {
+        console.error('[node-with-window] Failed to load preload script:', e);
+      }
+    }
     // _pendingFileUri is set when loadFile() was called before show().
     // pendingFilePath is set when loadFile() was called after show() but before
     // CoreWebView2 was ready (e.g. async user code between create() and loadFile()).
