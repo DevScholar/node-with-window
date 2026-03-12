@@ -185,6 +185,47 @@ describe('/__nww_ipc_sync__ — ipcRenderer.sendSync()', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
+// /__nww_module_keys__ — ESM nodeImport support
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('/__nww_module_keys__ — module key listing', () => {
+  it('returns keys for the os module', async () => {
+    const res = await fetch(`${base()}/__nww_module_keys__?m=os`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { keys: string[] };
+    expect(Array.isArray(body.keys)).toBe(true);
+    expect(body.keys).toContain('platform');
+    expect(body.keys).toContain('arch');
+    expect(body.keys).toContain('homedir');
+  });
+
+  it('returns keys for the path module', async () => {
+    const res = await fetch(`${base()}/__nww_module_keys__?m=path`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { keys: string[] };
+    expect(body.keys).toContain('join');
+    expect(body.keys).toContain('resolve');
+    expect(body.keys).toContain('dirname');
+  });
+
+  it('returns only valid identifier keys (no __esModule, no default)', async () => {
+    const res = await fetch(`${base()}/__nww_module_keys__?m=os`);
+    const body = await res.json() as { keys: string[] };
+    expect(body.keys).not.toContain('__esModule');
+    expect(body.keys).not.toContain('default');
+    // All keys must be valid JS identifiers
+    for (const k of body.keys) {
+      expect(k).toMatch(/^[a-zA-Z_$][a-zA-Z0-9_$]*$/);
+    }
+  });
+
+  it('returns 500 for an unknown module', async () => {
+    const res = await fetch(`${base()}/__nww_module_keys__?m=__nonexistent__`);
+    expect(res.status).toBe(500);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
 // /__nww_release__ — ref cleanup
 // ──────────────────────────────────────────────────────────────────────────────
 

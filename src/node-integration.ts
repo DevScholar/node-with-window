@@ -158,6 +158,25 @@ export function startSyncServer(): Promise<number> {
         return;
       }
 
+      // ── Module keys endpoint (nodeImport ESM support) ─────────────────
+      // Returns the own enumerable property names of a module so the renderer
+      // can generate a blob URL with named ES exports.
+      if (req.method === 'GET' && req.url?.startsWith('/__nww_module_keys__?')) {
+        try {
+          const moduleName = new URL('http://x' + req.url).searchParams.get('m') ?? '';
+          const mod = _require(moduleName) as Record<string, unknown>;
+          const keys = Object.getOwnPropertyNames(mod).filter(
+            k => k !== '__esModule' && k !== 'default' && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(k)
+          );
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ keys }));
+        } catch (e: unknown) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: (e as Error).message ?? String(e) }));
+        }
+        return;
+      }
+
       // ── Ref release endpoint ──────────────────────────────────────────
       // The renderer calls this to free server-side ref objects when their
       // Proxy wrappers are GC'd (FinalizationRegistry) or on page unload.

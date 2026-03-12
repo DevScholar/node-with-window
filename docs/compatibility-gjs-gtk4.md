@@ -222,6 +222,7 @@ const content = await ipcRenderer.invoke('read-file', '/path/to/file');
 | `window.process.env` | ✅ | Snapshot of `process.env` from the main process at window creation time |
 | `window.process.cwd()` | ✅ | Injected from main process |
 | `window.process.exit(code)` | ✅ | Sends IPC to main process |
+| `window.nodeImport(name)` | ⚠️ | ESM-compatible wrapper — same underlying stub; `const { x } = await nodeImport('fs')` returns `null` methods |
 
 ---
 

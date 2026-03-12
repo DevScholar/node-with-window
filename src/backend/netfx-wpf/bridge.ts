@@ -267,6 +267,47 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
         // Exit sends a message to main process rather than actually exiting
         exit: function(code) { window.chrome.webview.postMessage({ type: 'send', channel: 'process:exit', args: [code] }); }
     };
+
+    // ESM-compatible async import for Node.js modules.
+    // Wraps window.require() into a genuine ES module so renderer code can use:
+    //   const { readFileSync } = await nodeImport('fs');
+    //   const path = await nodeImport('path');
+    // Works inside <script type="module"> and supports top-level await.
+    //
+    // How it works:
+    //   1. Fetch the module's export key list from /__nww_module_keys__
+    //   2. Generate a tiny ES module source that re-exports each key from window.require()
+    //   3. Turn it into a blob URL and import() it — the browser does the rest
+    //   4. Cache the resulting module by name so repeated calls are free
+    var __nwwImportCache = Object.create(null);
+    window.nodeImport = function(moduleName) {
+        if (__nwwImportCache[moduleName]) return __nwwImportCache[moduleName];
+        var p = (function(name) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', 'http://127.0.0.1:${injectedPort}/__nww_module_keys__?m=' + encodeURIComponent(name), false);
+            xhr.send(null);
+            var keys = [];
+            if (xhr.status === 200) {
+                try { keys = JSON.parse(xhr.responseText).keys || []; } catch (_e) {}
+            }
+            var namedExports = keys.map(function(k) {
+                return 'export var ' + k + ' = _m[' + JSON.stringify(k) + '];';
+            }).join('\n');
+            var src = '/* nodeImport(' + JSON.stringify(name) + ') */\n' +
+                      'var _m = window.require(' + JSON.stringify(name) + ');\n' +
+                      namedExports + '\n' +
+                      'export default _m;\n';
+            var blob = new Blob([src], { type: 'text/javascript' });
+            var url = URL.createObjectURL(blob);
+            return import(url).then(function(mod) {
+                URL.revokeObjectURL(url);
+                __nwwImportCache[name] = Promise.resolve(mod);
+                return mod;
+            });
+        })(moduleName);
+        __nwwImportCache[moduleName] = p;
+        return p;
+    };
 })();`;
   }
 

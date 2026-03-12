@@ -217,6 +217,7 @@
 | `window.process.env` | ✅ | Snapshot of `process.env` from the main process at window creation time |
 | `window.process.cwd()` | ✅ | Injected from main process |
 | `window.process.exit(code)` | ✅ | Sends IPC to main process |
+| `window.nodeImport(name)` | ✅ | ESM-compatible: `const { readFileSync } = await nodeImport('fs')` |
 
 ### How `window.require` works
 
@@ -229,6 +230,25 @@ const buf = fs.readFileSync('/path/to/file');               // Buffer → Proxy 
 ```
 
 `window.require(module).method(...args)` issues a synchronous `XMLHttpRequest` to a loopback HTTP server started in the main process. Chromium's network stack runs on a background thread, so the renderer JS thread can block without deadlocking Node.js. Callbacks are delivered via a persistent `EventSource` (`/__nww_events__`); Chromium queues SSE events while XHR is in flight and dispatches them once the JS thread unblocks.
+
+### How `window.nodeImport` works (ESM style)
+
+```js
+// In <script type="module"> or any async context:
+const { readFileSync, existsSync } = await nodeImport('fs');
+const path = await nodeImport('path');
+
+const data = readFileSync('/path/to/file', 'utf-8');
+```
+
+`nodeImport(name)` is a thin async wrapper over `window.require`:
+
+1. Fetches the module's export key list from `/__nww_module_keys__` (one sync XHR)
+2. Generates an ES module source with named `export var` statements pointing back to `window.require(name)`
+3. Creates a `Blob` URL and `import()`s it — Chromium handles the rest
+4. Caches the resulting module; subsequent calls for the same name resolve immediately
+
+The underlying data still flows through the same sync-XHR mechanism. `nodeImport` is purely a **syntax bridge** that lets you write idiomatic ESM destructuring while keeping the synchronous semantics under the hood.
 
 ---
 
