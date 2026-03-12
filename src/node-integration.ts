@@ -198,7 +198,11 @@ export function startSyncServer(): Promise<number> {
             };
             ipcMain.emit(channel, event, ...(args as unknown[]).map(resolveArg));
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ result: serializeValue(event.returnValue) }));
+            // Explicitly map undefined → null so the JSON key is always present.
+            const returnVal = event.returnValue !== undefined
+              ? serializeValue(event.returnValue)
+              : null;
+            res.end(JSON.stringify({ result: returnVal }));
           } catch (e: unknown) {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: (e as Error).message ?? String(e) }));

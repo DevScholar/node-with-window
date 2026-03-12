@@ -395,8 +395,8 @@ window.ipcRenderer.removeListener=window.ipcRenderer.off;
  * @param webPreferences - Configuration for what to inject
  * @returns Modified HTML with bridge script inserted
  */
-export function injectBridgeScript(html: string, webPreferences: WebPreferences): string {
-  const script = `<script>${generateBridgeScript(webPreferences)}</script>`;
+export function injectBridgeScript(html: string, webPreferences: WebPreferences, syncServerPort = 0): string {
+  const script = `<script>${generateBridgeScript(webPreferences, syncServerPort)}</script>`;
 
   // Try to insert after <head> tag
   if (/<head[^>]*>/i.test(html)) {

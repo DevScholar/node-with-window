@@ -14,7 +14,9 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "lint": "eslint src --ext .ts",
-    "format": "prettier --write src"
+    "format": "prettier --write src",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [],
   "author": "",
@@ -28,7 +30,8 @@
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.4.0",
     "prettier": "^3.8.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
   },
   "dependencies": {
     "@devscholar/node-ps1-dotnet": "file:../node-ps1-dotnet"
