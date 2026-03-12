@@ -5,6 +5,7 @@
 A cross-platform windowing library for Node.js/Deno/Bun with an Electron-compatible API. Uses [node-ps1-dotnet](../node-ps1-dotnet) (WPF + WebView2) on Windows and [node-with-gjs](../node-with-gjs) (GTK + WebKitGTK) on Linux.
 
 ![WPF Notepad Screenshot](./screenshots/wpf-notepad.png)
+
 ![GTK Notepad Screenshot](./screenshots/gtk-notepad.png)
 
 
