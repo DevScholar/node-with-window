@@ -1,6 +1,6 @@
 {
   "name": "@devscholar/node-with-window",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Cross-platform window library with WebView support",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -31,7 +31,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@devscholar/node-ps1-dotnet": "file:../node-ps1-dotnet"
+    "@devscholar/node-ps1-dotnet": "latest"
   },
   "optionalDependencies": {
     "@devscholar/node-with-gjs": "latest"
