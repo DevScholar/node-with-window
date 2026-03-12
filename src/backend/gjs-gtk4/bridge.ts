@@ -263,6 +263,16 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
             });
         },
 
+        sendSync: function(channel) {
+            var args = Array.prototype.slice.call(arguments, 1);
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', 'http://127.0.0.1:${syncServerPort}/__nww_ipc_sync__', false);
+            xhr.setRequestHeader('Content-Type', 'application/json');
+            xhr.send(JSON.stringify({ channel: channel, args: args }));
+            if (xhr.status !== 200) return undefined;
+            try { return JSON.parse(xhr.responseText).result; } catch(e) { return undefined; }
+        },
+
         on: function(channel, callback) {
             if (!window.__ipcListeners[channel])
                 window.__ipcListeners[channel] = [];

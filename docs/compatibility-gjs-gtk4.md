@@ -138,9 +138,9 @@
 | `ipcMain.handle(channel, listener)` | ✅ | Sync and async handlers both supported |
 | `ipcMain.handleOnce(channel, listener)` | ✅ | |
 | `ipcMain.removeHandler(channel)` | ✅ | |
-| `ipcMain.on(channel, listener)` | ❌ | Use `handle()` and return `undefined` for fire-and-forget |
-| `ipcMain.once(channel, listener)` | ❌ | Use `handleOnce()` |
-| `event.returnValue` (sync IPC) | ❌ | |
+| `ipcMain.on(channel, listener)` | ✅ | |
+| `ipcMain.once(channel, listener)` | ✅ | |
+| `event.returnValue` (sync IPC) | ✅ | Set in `ipcMain.on()` handler; returned to `sendSync()` caller |
 | `event.reply(channel, ...args)` | ✅ | |
 
 ---
@@ -155,7 +155,7 @@
 | `ipcRenderer.once(channel, listener)` | ✅ | |
 | `ipcRenderer.off(channel, listener)` | ✅ | |
 | `ipcRenderer.removeListener(channel, listener)` | ✅ | Alias for `off()` |
-| `ipcRenderer.sendSync()` | ❌ | |
+| `ipcRenderer.sendSync()` | ✅ | Sync XHR to loopback; handler must be synchronous |
 
 ---
 

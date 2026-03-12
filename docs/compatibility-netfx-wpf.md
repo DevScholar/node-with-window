@@ -140,9 +140,9 @@
 | `ipcMain.handle(channel, listener)` | ✅ | Sync and async handlers both supported |
 | `ipcMain.handleOnce(channel, listener)` | ✅ | |
 | `ipcMain.removeHandler(channel)` | ✅ | |
-| `ipcMain.on(channel, listener)` | ❌ | Use `handle()` and return `undefined` for fire-and-forget |
-| `ipcMain.once(channel, listener)` | ❌ | Use `handleOnce()` |
-| `event.returnValue` (sync IPC) | ❌ | |
+| `ipcMain.on(channel, listener)` | ✅ | |
+| `ipcMain.once(channel, listener)` | ✅ | |
+| `event.returnValue` (sync IPC) | ✅ | Set in `ipcMain.on()` handler; returned to `sendSync()` caller |
 | `event.reply(channel, ...args)` | ✅ | |
 
 ---
@@ -157,7 +157,7 @@
 | `ipcRenderer.once(channel, listener)` | ✅ | |
 | `ipcRenderer.off(channel, listener)` | ✅ | |
 | `ipcRenderer.removeListener(channel, listener)` | ✅ | Alias for `off()` |
-| `ipcRenderer.sendSync()` | ❌ | |
+| `ipcRenderer.sendSync()` | ✅ | Sync XHR to loopback; handler must be synchronous |
 
 ---
 
@@ -236,7 +236,7 @@ const buf = fs.readFileSync('/path/to/file');               // Buffer → Proxy 
 
 1. **Preload scripts** are supported. Set `webPreferences.preload` to an absolute or relative path. The script is appended to the bridge code registered with `CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync`, so it runs on every navigation before the page's own scripts.
 
-2. **`ipcMain.on()` is absent.** Use `ipcMain.handle()` for all renderer→main communication. For fire-and-forget, return `undefined`.
+2. **`ipcMain.on()`** registers fire-and-forget listeners for `ipcRenderer.send()` and `ipcRenderer.sendSync()` calls.
 
 3. **`Menu.setApplicationMenu()` is absent.** Use `win.setMenu(menu)` on the `BrowserWindow` instance.
 

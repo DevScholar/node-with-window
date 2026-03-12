@@ -91,11 +91,10 @@ export class BrowserWindow extends EventEmitter {
 
   private async _init(options?: BrowserWindowOptions): Promise<void> {
     try {
-      // Start the sync-require HTTP server before the backend so its port
-      // is available when setupIpcBridge() injects the bridge script.
-      if (options?.webPreferences?.nodeIntegration) {
-        await startSyncServer();
-      }
+      // Start the sync HTTP server before the backend so its port is available
+      // when setupIpcBridge() injects the bridge script.  The server is needed
+      // for both window.require (nodeIntegration) and ipcRenderer.sendSync().
+      await startSyncServer();
       await ensureBackendInitialized(this._backendName);
       await this.provider.createWindow();
       this._isCreated = true;

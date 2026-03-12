@@ -10,11 +10,14 @@ type IpcHandler = (event: IpcMainEvent, ...args: unknown[]) => unknown;
  * - sender: Reference to the window that sent the message
  * - frameId: The frame ID that sent the message
  * - reply: Function to send a response back to the renderer
+ * - returnValue: Set this in an ipcMain.on() handler to return a value
+ *   from ipcRenderer.sendSync()
  */
 interface IpcMainEvent {
   sender: unknown;
   frameId: number;
   reply: (channel: string, ...args: unknown[]) => void;
+  returnValue?: unknown;
 }
 
 /**
@@ -160,8 +163,19 @@ parentPort.on('message', async (msg) => {
     this.handlers.delete(channel);
   }
 
-  public onChannel(channel: string, listener: IpcHandler): void {
-    this.handlers.set(channel, listener);
+  /** Register a fire-and-forget listener (for ipcRenderer.send / sendSync). */
+  public on(channel: string, listener: IpcHandler): this {
+    return super.on(channel, listener);
+  }
+
+  /** Register a one-time fire-and-forget listener. */
+  public once(channel: string, listener: IpcHandler): this {
+    return super.once(channel, listener);
+  }
+
+  /** Remove a fire-and-forget listener registered with on(). */
+  public off(channel: string, listener: IpcHandler): this {
+    return super.off(channel, listener);
   }
 
   /**

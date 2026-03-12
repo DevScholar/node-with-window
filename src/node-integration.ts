@@ -1,5 +1,6 @@
 import * as http from 'node:http';
 import { createRequire } from 'node:module';
+import { ipcMain } from './ipc-main.js';
 
 /**
  * Synchronous require server for nodeIntegration windows.
@@ -182,10 +183,32 @@ export function startSyncServer(): Promise<number> {
         return;
       }
 
+      // ── Sync IPC endpoint (ipcRenderer.sendSync) ─────────────────────
+      if (req.url === '/__nww_ipc_sync__') {
+        let body = '';
+        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        req.on('end', () => {
+          try {
+            const { channel, args = [] } = JSON.parse(body) as { channel: string; args: unknown[] };
+            const event = {
+              returnValue: undefined as unknown,
+              sender: null,
+              frameId: 0,
+              reply: () => {},
+            };
+            ipcMain.emit(channel, event, ...(args as unknown[]).map(resolveArg));
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ result: serializeValue(event.returnValue) }));
+          } catch (e: unknown) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: (e as Error).message ?? String(e) }));
+          }
+        });
+        return;
+      }
+
       let body = '';
-      req.on('data', (chunk: Buffer) => {
-        body += chunk.toString();
-      });
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
       req.on('end', () => {
         const respond = (result: unknown) => {
           res.writeHead(200, { 'Content-Type': 'application/json' });
