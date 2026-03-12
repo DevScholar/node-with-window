@@ -9,7 +9,7 @@ import {
 import { resolveBackend, ensureBackendInitialized } from './backends.js';
 import { app } from './app.js';
 import { startSyncServer } from './node-integration.js';
-import type { Menu } from './menu.js';
+import { Menu, MENU_REMOVED } from './menu.js';
 import { WebContents } from './web-contents.js';
 
 /**
@@ -38,6 +38,8 @@ export class BrowserWindow extends EventEmitter {
   private static _allWindows: Map<number, BrowserWindow> = new Map();
   private static _lastId = 0;
   private _isCreated = false;
+  /** True once setMenu() has been called explicitly on this window. */
+  private _menuSet = false;
   private _createdPromise: Promise<void>;
 
   /** Electron-compatible webContents object. */
@@ -159,8 +161,21 @@ export class BrowserWindow extends EventEmitter {
   public show(): void {
     if (!this._isCreated) {
       // Backend not ready yet — queue show() to run once _init resolves.
-      this._createdPromise.then(() => this.provider.show()).catch(() => {});
+      this._createdPromise.then(() => this._showNow()).catch(() => {});
       return;
+    }
+    this._showNow();
+  }
+
+  private _showNow(): void {
+    // Apply the application menu when the caller never called setMenu().
+    if (!this._menuSet) {
+      const resolved = Menu._resolveDefaultItems();
+      if (resolved === MENU_REMOVED) {
+        this.provider.setMenu([]);
+      } else {
+        this.provider.setMenu(resolved);
+      }
     }
     this.provider.show();
   }
@@ -175,11 +190,13 @@ export class BrowserWindow extends EventEmitter {
   }
 
   public setMenu(menu: MenuItemOptions[] | Menu): void {
+    this._menuSet = true;
     const items: MenuItemOptions[] = Array.isArray(menu) ? menu : (menu as Menu).items();
     this.provider.setMenu(items);
   }
 
   public removeMenu(): void {
+    this._menuSet = true;
     this.provider.setMenu([]);
   }
 
