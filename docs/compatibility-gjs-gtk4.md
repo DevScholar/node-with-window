@@ -238,4 +238,4 @@ const content = await ipcRenderer.invoke('read-file', '/path/to/file');
 
 6. **`webPreferences.partition` is ignored.** WebKitGTK uses a single default profile; per-window session isolation is not supported.
 
-7. **WebKit sandbox must be disabled.** The GJS host sets `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` at spawn time. This is a known limitation of embedding WebKitGTK outside its default sandbox environment.
+7. **WebKit sandbox is only disabled inside VMware.** The library reads `/sys/class/dmi/id/sys_vendor` at startup; if it contains `"vmware"`, `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` is set for the GJS child process. On bare-metal and other hypervisors the sandbox runs normally.

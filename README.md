@@ -46,9 +46,12 @@ bwrap: setting up uid map: Permission denied
 Failed to fully launch dbus-proxy
 ```
 
-`node-with-window` automatically sets `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1`
-when spawning the GJS host, so this error is suppressed by default. On production
-systems that support user namespaces, you can instead enable the sandbox properly:
+`node-with-window` detects VMware at startup by reading `/sys/class/dmi/id/sys_vendor`.
+When running inside VMware, `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` is set
+automatically when spawning the GJS host, suppressing this error.
+On bare-metal or other hypervisors the WebKit sandbox runs normally.
+If you hit this error in another environment (e.g. a container or a different VM),
+enable user namespaces instead:
 
 ```bash
 sudo sysctl -w kernel.unprivileged_userns_clone=1

@@ -171,6 +171,16 @@ function findHostScript(): string {
   );
 }
 
+/** Returns true when running inside a VMware virtual machine. */
+function isVMware(): boolean {
+  try {
+    const vendor = fs.readFileSync('/sys/class/dmi/id/sys_vendor', 'utf-8').trim();
+    return vendor.toLowerCase().includes('vmware');
+  } catch {
+    return false;
+  }
+}
+
 export class LinuxWindow implements IWindowProvider {
   public options: BrowserWindowOptions;
   public webPreferences: WebPreferences;
@@ -226,7 +236,10 @@ export class LinuxWindow implements IWindowProvider {
     // Open the FIFOs BEFORE spawning GJS so that the open() calls don't block forever.
     // We open the write end first (Node→GJS) and then the read end (GJS→Node).
     // GJS opens them in the opposite order on its side, so both sides unblock together.
-    const spawnEnv = { ...process.env, WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1' };
+    const spawnEnv: NodeJS.ProcessEnv = { ...process.env };
+    if (isVMware()) {
+      spawnEnv.WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS = '1';
+    }
     this.proc = cp.spawn(
       'bash',
       ['-c', `exec "${gjsPath}" -m "${hostScript}" 3<"${this.reqPath}" 4>"${this.resPath}"`],
