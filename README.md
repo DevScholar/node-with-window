@@ -178,9 +178,9 @@ node /path/to/node-with-window/start.js main.ts
 
 ## Developing
 
-This library depends on [node-ps1-dotnet](../node-ps1-dotnet) (Windows) and
-[node-with-gjs](../node-with-gjs) (Linux), both installed as `file:` symlinks in
-`node_modules`. After changing either dependency, rebuild in order:
+This library depends on [node-ps1-dotnet](https://github.com/DevScholar/node-ps1-dotnet) (Windows) and
+[node-with-gjs](https://github.com/DevScholar/node-with-gjs) (Linux), both installed as `file:` symlinks in
+`node_modules` (non-NPM versions of Node with Window only). After changing either dependency, rebuild in order:
 
 ```bash
 # From the repo root (c:/amateur-programming or ~/amateur-programming):
