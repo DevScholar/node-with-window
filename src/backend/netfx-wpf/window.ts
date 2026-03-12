@@ -119,7 +119,7 @@ function findWebView2Runtime(): string {
 const POLL_INTERVAL_MS = 16;
 
 /**
- * WindowsWindow implements the IWindowProvider interface for Windows using WPF + WebView2.
+ * NetFxWpfWindow implements the IWindowProvider interface for Windows using WPF + WebView2.
  *
  * Key architectural points:
  *
@@ -137,7 +137,7 @@ const POLL_INTERVAL_MS = 16;
  *    Node.js polls for queued events every POLL_INTERVAL_MS, exactly like the
  *    Linux backend. This means async ipcMain.handle() callbacks work on Windows.
  */
-export class WindowsWindow implements IWindowProvider {
+export class NetFxWpfWindow implements IWindowProvider {
   public options: BrowserWindowOptions;
   public webPreferences: WebPreferences;
   public browserWindow: unknown;

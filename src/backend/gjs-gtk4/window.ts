@@ -16,7 +16,7 @@ import { injectBridgeScript } from './bridge.js';
 import { getSyncServerPort } from '../../node-integration.js';
 
 /**
- * LinuxWindow — IWindowProvider implementation for Linux using GTK4 + WebKitGTK.
+ * GjsGtk4Window — IWindowProvider implementation for Linux using GTK4 + WebKitGTK.
  *
  * Architecture overview
  * ─────────────────────
@@ -111,7 +111,7 @@ class LinuxIpc {
 }
 
 // ---------------------------------------------------------------------------
-// LinuxWindow
+// GjsGtk4Window
 // ---------------------------------------------------------------------------
 
 /** How often (ms) Node.js polls the GJS host for queued WebKit IPC messages. */
@@ -182,7 +182,7 @@ function isVMware(): boolean {
   }
 }
 
-export class LinuxWindow implements IWindowProvider {
+export class GjsGtk4Window implements IWindowProvider {
   public options: BrowserWindowOptions;
   public webPreferences: WebPreferences;
 
@@ -617,7 +617,7 @@ export class LinuxWindow implements IWindowProvider {
     };
 
     if (resp.type === 'error') {
-      console.error(`[LinuxWindow] GJS error for "${action}":`, resp.message);
+      console.error(`[GjsGtk4Window] GJS error for "${action}":`, resp.message);
     }
     return resp;
   }
@@ -650,7 +650,7 @@ export class LinuxWindow implements IWindowProvider {
     try {
       data = JSON.parse(rawJson);
     } catch {
-      console.error('[LinuxWindow] Invalid IPC JSON:', rawJson);
+      console.error('[GjsGtk4Window] Invalid IPC JSON:', rawJson);
       return;
     }
 

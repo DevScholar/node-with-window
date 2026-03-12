@@ -211,7 +211,7 @@ cd node-with-window && npm run build
 
 ### Linux (GJS + GTK 4 + WebKitGTK)
 
-- `LinuxWindow` spawns a dedicated GJS script (`scripts/linux/host.js`) as a child process.
+- `GjsGtk4Window` spawns a dedicated GJS script (`scripts/linux/host.js`) as a child process.
   The host script runs the GTK 4 main loop (`GLib.MainLoop`) and owns the `Gtk.Window` + `WebKit.WebView`.
 - Node.js and the GJS host communicate over two Unix FIFOs (passed as fd 3 and fd 4) using
   a synchronous newline-delimited JSON request/response protocol — the same as the Windows pipe bridge.

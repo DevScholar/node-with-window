@@ -1,4 +1,4 @@
-import { WindowsWindow, setDotNetInstance as setWindowDotNetInstance } from './window.js';
+import { NetFxWpfWindow, setDotNetInstance as setWindowDotNetInstance } from './window.js';
 import { generateBridgeScript, injectBridgeScript } from './bridge.js';
 import {
   showOpenDialog,
@@ -13,7 +13,7 @@ import type { BrowserWindowOptions } from '../../interfaces.js';
 let dotnetInstance: unknown = null;
 
 export {
-  WindowsWindow,
+  NetFxWpfWindow,
   generateBridgeScript,
   injectBridgeScript,
   showOpenDialog,
@@ -45,6 +45,6 @@ registerBackend({
     setDotNetInstance(dotnet);
   },
   createProvider(options?: BrowserWindowOptions) {
-    return new WindowsWindow(options);
+    return new NetFxWpfWindow(options);
   },
 });
