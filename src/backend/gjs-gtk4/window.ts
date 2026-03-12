@@ -13,6 +13,7 @@ import {
 } from '../../interfaces';
 import { ipcMain } from '../../ipc-main';
 import { injectBridgeScript } from './bridge.js';
+import { getSyncServerPort } from '../../node-integration.js';
 
 /**
  * LinuxWindow — IWindowProvider implementation for Linux using GTK4 + WebKitGTK.
@@ -326,7 +327,7 @@ export class LinuxWindow implements IWindowProvider {
   public async loadFile(filePath: string): Promise<void> {
     const absPath = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
     const rawHtml = fs.readFileSync(absPath, 'utf-8');
-    const html = injectBridgeScript(rawHtml, this.webPreferences);
+    const html = injectBridgeScript(rawHtml, this.webPreferences, getSyncServerPort());
     const baseUri = `file://${absPath}`;
 
     if (!this.ipc) {

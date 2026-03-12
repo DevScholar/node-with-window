@@ -11,50 +11,125 @@ import { WebPreferences } from '../../interfaces';
  * Windows version so that application code is fully cross-platform.
  */
 
-export function generateBridgeScript(webPreferences: WebPreferences): string {
+export function generateBridgeScript(webPreferences: WebPreferences, syncServerPort = 0): string {
   const nodeIntegration = webPreferences.nodeIntegration;
 
   let nodeBridge = '';
   if (nodeIntegration) {
-    const injectedCwd = JSON.stringify(process.cwd());
+    const injectedCwd     = JSON.stringify(process.cwd());
     const injectedVersion = JSON.stringify(process.version);
-    const injectedEnv = JSON.stringify(process.env);
+    const injectedEnv     = JSON.stringify(process.env);
+    const injectedPort    = syncServerPort;
 
-    nodeBridge = `
+    if (injectedPort > 0) {
+      // Full implementation: synchronous XHR to the local require server.
+      // SSE connection delivers callbacks (fs.watch, EventEmitter.on, etc.).
+      // FinalizationRegistry + unload handler keep server-side ref memory tidy.
+      nodeBridge = `
 (function() {
     if (window.__nodeBridge) return;
     window.__nodeBridge = true;
 
-    const nodeRequire = function(module) {
-        const stub = function(name) {
-            return function() {
-                console.warn('[node-with-window] ' + module + '.' + name + '() is not available in renderer. Use ipcRenderer.invoke() instead.');
-                return null;
-            };
-        };
-        if (module === 'fs') {
-            return { readFileSync: stub('readFileSync'), writeFileSync: stub('writeFileSync'),
-                existsSync: stub('existsSync'), readdirSync: stub('readdirSync'),
-                mkdirSync: stub('mkdirSync'), statSync: stub('statSync'),
-                unlinkSync: stub('unlinkSync'), rmdirSync: stub('rmdirSync') };
-        }
-        if (module === 'path') {
-            return { join: stub('join'), resolve: stub('resolve'), dirname: stub('dirname'),
-                basename: stub('basename'), extname: stub('extname'),
-                isAbsolute: stub('isAbsolute'), normalize: stub('normalize') };
-        }
-        if (module === 'os') {
-            return { homedir: stub('homedir'), tmpdir: stub('tmpdir'),
-                platform: function() { return 'linux'; },
-                arch: function() { return 'x64'; },
-                cpus: stub('cpus'), totalmem: stub('totalmem'),
-                freemem: stub('freemem'), uptime: stub('uptime') };
-        }
-        return null;
+    window.__nwwCallbacks = {};
+
+    var __nwwEvtSrc = new EventSource('http://127.0.0.1:${injectedPort}/__nww_events__');
+    __nwwEvtSrc.onmessage = function(e) {
+        var msg = JSON.parse(e.data);
+        var cb = window.__nwwCallbacks[msg.id];
+        if (cb) cb.apply(null, msg.args.map(__nwwWrapResult));
     };
 
-    window.require = function(module) { return nodeRequire(module); };
+    function __nwwSerializeArg(a) {
+        if (typeof a === 'function') {
+            var id = Math.random().toString(36).substring(2, 11);
+            window.__nwwCallbacks[id] = a;
+            return { __nww_cb: id };
+        }
+        if (a !== null && typeof a === 'object' && typeof a.__nww_ref === 'string') {
+            return { __nww_ref: a.__nww_ref };
+        }
+        return a;
+    }
 
+    function __nwwWrapResult(result) {
+        if (result !== null && typeof result === 'object' && typeof result.__nww_ref === 'string') {
+            return __nwwMakeRef(result.__nww_ref);
+        }
+        return result;
+    }
+
+    window.__nwwLiveRefs = new Set();
+    var __nwwPendingRelease = [];
+    var __nwwReleaseTimer = null;
+
+    var __nwwRefFinalizer = new FinalizationRegistry(function(id) {
+        window.__nwwLiveRefs.delete(id);
+        __nwwPendingRelease.push(id);
+        if (!__nwwReleaseTimer) {
+            __nwwReleaseTimer = setTimeout(function() {
+                __nwwReleaseTimer = null;
+                var batch = __nwwPendingRelease.splice(0);
+                if (batch.length === 0) return;
+                fetch('http://127.0.0.1:${injectedPort}/__nww_release__', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ refs: batch })
+                }).catch(function() {});
+            }, 0);
+        }
+    });
+
+    function __nwwMakeRef(refId) {
+        var proxy = new Proxy({ __nww_ref: refId }, {
+            get: function(target, prop) {
+                if (prop === '__nww_ref') return refId;
+                if (typeof prop !== 'string') return undefined;
+                if (prop === 'then') return undefined;
+                return function() {
+                    var args = Array.prototype.slice.call(arguments);
+                    var xhr = new XMLHttpRequest();
+                    xhr.open('POST', 'http://127.0.0.1:${injectedPort}/__nww_sync__', false);
+                    xhr.setRequestHeader('Content-Type', 'application/json');
+                    xhr.send(JSON.stringify({ ref: refId, methodName: prop, args: args.map(__nwwSerializeArg) }));
+                    var resp = JSON.parse(xhr.responseText);
+                    if (xhr.status !== 200) throw new Error(resp.error || 'ref call failed');
+                    return __nwwWrapResult(resp.result);
+                };
+            }
+        });
+        window.__nwwLiveRefs.add(refId);
+        __nwwRefFinalizer.register(proxy, refId);
+        return proxy;
+    }
+
+    window.require = function(moduleName) {
+        return new Proxy({}, {
+            get: function(target, methodName) {
+                if (typeof methodName !== 'string') return undefined;
+                if (methodName === 'then') return undefined;
+                return function() {
+                    var args = Array.prototype.slice.call(arguments);
+                    var xhr = new XMLHttpRequest();
+                    xhr.open('POST', 'http://127.0.0.1:${injectedPort}/__nww_sync__', false);
+                    xhr.setRequestHeader('Content-Type', 'application/json');
+                    xhr.send(JSON.stringify({ moduleName: moduleName, methodName: methodName, args: args.map(__nwwSerializeArg) }));
+                    var resp = JSON.parse(xhr.responseText);
+                    if (xhr.status !== 200) throw new Error(resp.error || 'require failed');
+                    return __nwwWrapResult(resp.result);
+                };
+            }
+        });
+    };
+
+    window.addEventListener('unload', function() {
+        if (window.__nwwLiveRefs.size === 0) return;
+        var ids = Array.from(window.__nwwLiveRefs);
+        window.__nwwLiveRefs.clear();
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', 'http://127.0.0.1:${injectedPort}/__nww_release__', false);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        try { xhr.send(JSON.stringify({ refs: ids })); } catch (_e) {}
+    });
 
     window.process = {
         platform: 'linux',
@@ -68,6 +143,35 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
         }
     };
 })();`;
+    } else {
+      // Fallback stubs when no sync server is running (nodeIntegration without
+      // a running server should not happen in normal use, but degrade gracefully).
+      nodeBridge = `
+(function() {
+    if (window.__nodeBridge) return;
+    window.__nodeBridge = true;
+    var stub = function(m, n) {
+        return function() {
+            console.warn('[node-with-window] ' + m + '.' + n + '() is not available. Use ipcRenderer.invoke() instead.');
+            return null;
+        };
+    };
+    window.require = function(m) {
+        console.warn('[node-with-window] window.require() stub: sync server not available.');
+        return null;
+    };
+    window.process = {
+        platform: 'linux', arch: 'x64',
+        version: ${injectedVersion},
+        env: ${injectedEnv},
+        cwd: function() { return ${injectedCwd}; },
+        exit: function(code) {
+            window.webkit.messageHandlers.ipc.postMessage(
+                JSON.stringify({ type: 'send', channel: 'process:exit', args: [code] }));
+        }
+    };
+})();`;
+    }
   }
 
   let ipcBridge = '';
@@ -184,8 +288,8 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
 /**
  * Injects the bridge script into HTML, mirroring the Windows implementation.
  */
-export function injectBridgeScript(html: string, webPreferences: WebPreferences): string {
-  const script = `<script>${generateBridgeScript(webPreferences)}</script>`;
+export function injectBridgeScript(html: string, webPreferences: WebPreferences, syncServerPort = 0): string {
+  const script = `<script>${generateBridgeScript(webPreferences, syncServerPort)}</script>`;
 
   if (/<head[^>]*>/i.test(html)) return html.replace(/(<head[^>]*>)/i, `$1${script}`);
 

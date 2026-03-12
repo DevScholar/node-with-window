@@ -212,9 +212,9 @@ const content = await ipcRenderer.invoke('read-file', '/path/to/file');
 
 | Feature | Status | Notes |
 |---|---|---|
-| `window.require('fs')` | ⚠️ | Stub — logs warning, returns `null` |
-| `window.require('path')` | ⚠️ | Stub — logs warning, returns `null` |
-| `window.require('os')` | ⚠️ | Partial — `platform()` and `arch()` work; all other methods are stubs |
+| `window.require('fs')` | ✅ | Full sync-XHR bridge; all Node.js builtins accessible |
+| `window.require('path')` | ✅ | Full sync-XHR bridge |
+| `window.require('os')` | ✅ | Full sync-XHR bridge |
 | `window.process.platform` | ✅ | `'linux'` |
 | `window.process.arch` | ✅ | `'x64'` |
 | `window.process.version` | ✅ | Injected from main process |
@@ -226,7 +226,7 @@ const content = await ipcRenderer.invoke('read-file', '/path/to/file');
 
 ## Key Differences from Electron
 
-1. **`window.require` is not functional.** Only stubs are injected. All Node.js access from the renderer must go through `ipcMain.handle` + `ipcRenderer.invoke`.
+1. **`window.require` uses synchronous XHR** to a loopback HTTP server (same mechanism as the `netfx-wpf` backend). All Node.js builtins work. SSE delivers callbacks, so `fs.watch`, `EventEmitter.on`, etc. fire correctly. npm packages in the user's project are not accessible (only Node.js builtins via `node:` scheme).
 
 2. **`x`, `y`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` constructor options are ignored.** GTK window placement is managed by the window manager; GTK4 removed `window.move()`.
 
