@@ -157,6 +157,25 @@ export function startSyncServer(): Promise<number> {
         return;
       }
 
+      // ── Ref release endpoint ──────────────────────────────────────────
+      // The renderer calls this to free server-side ref objects when their
+      // Proxy wrappers are GC'd (FinalizationRegistry) or on page unload.
+      if (req.method === 'POST' && req.url === '/__nww_release__') {
+        let body = '';
+        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        req.on('end', () => {
+          try {
+            const { refs } = JSON.parse(body) as { refs: string[] };
+            if (Array.isArray(refs)) {
+              for (const id of refs) refRegistry.delete(id);
+            }
+          } catch { /* ignore malformed body */ }
+          res.writeHead(204);
+          res.end();
+        });
+        return;
+      }
+
       if (req.method !== 'POST') {
         res.writeHead(405);
         res.end();

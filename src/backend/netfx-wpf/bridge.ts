@@ -158,11 +158,36 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
         return result;
     }
 
+    // Track all ref IDs currently alive in the renderer.
+    // The unload handler uses this to bulk-release everything that GC didn't catch.
+    window.__nwwLiveRefs = new Set();
+
+    // Batch pending GC-triggered releases and flush them in one async fetch.
+    var __nwwPendingRelease = [];
+    var __nwwReleaseTimer = null;
+
+    var __nwwRefFinalizer = new FinalizationRegistry(function(id) {
+        window.__nwwLiveRefs.delete(id);
+        __nwwPendingRelease.push(id);
+        if (!__nwwReleaseTimer) {
+            __nwwReleaseTimer = setTimeout(function() {
+                __nwwReleaseTimer = null;
+                var batch = __nwwPendingRelease.splice(0);
+                if (batch.length === 0) return;
+                fetch('http://127.0.0.1:${injectedPort}/__nww_release__', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ refs: batch })
+                }).catch(function() {});
+            }, 0);
+        }
+    });
+
     // Build a Proxy for a server-side ref object.
     // Any method call on the proxy is dispatched to { ref, methodName, args }
     // on the server, which retrieves the real object from refRegistry.
     function __nwwMakeRef(refId) {
-        return new Proxy({ __nww_ref: refId }, {
+        var proxy = new Proxy({ __nww_ref: refId }, {
             get: function(target, prop) {
                 if (prop === '__nww_ref') return refId;
                 if (typeof prop !== 'string') return undefined;
@@ -179,6 +204,9 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
                 };
             }
         });
+        window.__nwwLiveRefs.add(refId);
+        __nwwRefFinalizer.register(proxy, refId);
+        return proxy;
     }
 
     // Synchronous require via local HTTP server.
@@ -214,6 +242,19 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
             }
         });
     };
+
+    // Release all remaining server-side refs when the page unloads.
+    // This is the safety net for objects that were never GC'd during page lifetime
+    // (e.g. refs held in closures or module-level variables).
+    window.addEventListener('unload', function() {
+        if (window.__nwwLiveRefs.size === 0) return;
+        var ids = Array.from(window.__nwwLiveRefs);
+        window.__nwwLiveRefs.clear();
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', 'http://127.0.0.1:${injectedPort}/__nww_release__', false);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        try { xhr.send(JSON.stringify({ refs: ids })); } catch (_e) {}
+    });
 
 
     // Expose process object with some working properties
