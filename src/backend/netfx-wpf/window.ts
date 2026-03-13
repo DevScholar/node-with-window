@@ -11,7 +11,7 @@ import {
   MenuItemOptions,
 } from '../../interfaces';
 import { ipcMain } from '../../ipc-main';
-import { generateBridgeScript } from './bridge.js';
+import { generateBridgeScript, injectImportMap } from './bridge.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 import { buildWpfMenu } from './menu.js';
 import { getSyncServerPort } from '../../node-integration.js';
@@ -147,7 +147,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   public isWebViewReady = false;
   public navigationQueue: Array<() => void> = [];
   public pendingFilePath: string | null = null;
-  private _pendingFileUri: string | null = null;
+  private _pendingAbsFilePath: string | null = null;
   public userDataPath: string;
   public pendingMenu: MenuItemOptions[] | null = null;
   private isClosed = false;
@@ -328,16 +328,20 @@ export class NetFxWpfWindow implements IWindowProvider {
         console.error('[node-with-window] Failed to load preload script:', e);
       }
     }
-    // _pendingFileUri is set when loadFile() was called before show().
+    // _pendingAbsFilePath is set when loadFile() was called before show().
     // pendingFilePath is set when loadFile() was called after show() but before
     // CoreWebView2 was ready (e.g. async user code between create() and loadFile()).
-    if (!this._pendingFileUri && this.pendingFilePath) {
-      this._pendingFileUri = 'file:///' + this.pendingFilePath.replace(/\\/g, '/');
+    if (!this._pendingAbsFilePath && this.pendingFilePath) {
+      this._pendingAbsFilePath = this.pendingFilePath;
       this.pendingFilePath = null;
     }
-    if (this._pendingFileUri) {
-      (dotnet as any).addScriptAndNavigate(this.coreWebView2, bridgeScript, this._pendingFileUri);
-      this._pendingFileUri = null;
+    if (this._pendingAbsFilePath) {
+      const rawHtml = fs.readFileSync(this._pendingAbsFilePath, 'utf-8');
+      const dir = path.dirname(this._pendingAbsFilePath);
+      const baseHref = 'file:///' + dir.replace(/\\/g, '/') + '/';
+      const html = injectImportMap(rawHtml, this.webPreferences, getSyncServerPort(), baseHref);
+      (dotnet as any).addScriptAndNavigateToString(this.coreWebView2, bridgeScript, html);
+      this._pendingAbsFilePath = null;
     } else {
       (
         this.coreWebView2 as unknown as {
@@ -477,8 +481,11 @@ export class NetFxWpfWindow implements IWindowProvider {
       this.pendingFilePath = absolutePath;
       return;
     }
-    const fileUri = 'file:///' + absolutePath.replace(/\\/g, '/');
-    (this.coreWebView2 as unknown as { Navigate: (url: string) => void }).Navigate(fileUri);
+    const rawHtml = fs.readFileSync(absolutePath, 'utf-8');
+    const dir = path.dirname(absolutePath);
+    const baseHref = 'file:///' + dir.replace(/\\/g, '/') + '/';
+    const html = injectImportMap(rawHtml, this.webPreferences, getSyncServerPort(), baseHref);
+    (this.coreWebView2 as unknown as { NavigateToString: (html: string) => void }).NavigateToString(html);
   }
 
   public show(): void {
@@ -500,8 +507,8 @@ export class NetFxWpfWindow implements IWindowProvider {
     }
 
     if (this.pendingFilePath) {
-      // Store for setupIpcBridge to navigate AFTER script registration
-      this._pendingFileUri = 'file:///' + this.pendingFilePath.replace(/\\/g, '/');
+      // Store absolute path; setupIpcBridge reads the HTML and navigates via NavigateToString
+      this._pendingAbsFilePath = this.pendingFilePath;
       this.pendingFilePath = null;
     }
 

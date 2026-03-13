@@ -217,7 +217,7 @@
 | `window.process.env` | ✅ | Snapshot of `process.env` from the main process at window creation time |
 | `window.process.cwd()` | ✅ | Injected from main process |
 | `window.process.exit(code)` | ✅ | Sends IPC to main process |
-| `window.nodeImport(name)` | ✅ | ESM-compatible: `const { readFileSync } = await nodeImport('fs')` |
+| `import { x } from 'fs'` | ✅ | Standard static ESM import; works with both `loadFile()` and `loadURL()` |
 
 ### How `window.require` works
 
@@ -231,24 +231,30 @@ const buf = fs.readFileSync('/path/to/file');               // Buffer → Proxy 
 
 `window.require(module).method(...args)` issues a synchronous `XMLHttpRequest` to a loopback HTTP server started in the main process. Chromium's network stack runs on a background thread, so the renderer JS thread can block without deadlocking Node.js. Callbacks are delivered via a persistent `EventSource` (`/__nww_events__`); Chromium queues SSE events while XHR is in flight and dispatches them once the JS thread unblocks.
 
-### How `window.nodeImport` works (ESM style)
+### Static `import` support (ESM)
+
+With `nodeIntegration: true`, standard static ES module import syntax works for all Node.js built-in modules:
 
 ```js
-// In <script type="module"> or any async context:
-const { readFileSync, existsSync } = await nodeImport('fs');
-const path = await nodeImport('path');
+// <script type="module"> — no special API, fully standard syntax
+import { readFileSync, existsSync } from 'fs';
+import path from 'path';
+import { platform } from 'node:os';     // node: prefix also works
+import { readFile } from 'fs/promises'; // sub-path variants too
 
 const data = readFileSync('/path/to/file', 'utf-8');
 ```
 
-`nodeImport(name)` is a thin async wrapper over `window.require`:
+**How it works:**
 
-1. Fetches the module's export key list from `/__nww_module_keys__` (one sync XHR)
-2. Generates an ES module source with named `export var` statements pointing back to `window.require(name)`
-3. Creates a `Blob` URL and `import()`s it — Chromium handles the rest
-4. Caches the resulting module; subsequent calls for the same name resolve immediately
+The bridge registers two complementary mechanisms so imports work regardless of how the page is loaded:
 
-The underlying data still flows through the same sync-XHR mechanism. `nodeImport` is purely a **syntax bridge** that lets you write idiomatic ESM destructuring while keeping the synchronous semantics under the hood.
+| Loaded via | Mechanism |
+|---|---|
+| `loadFile()` | `<script type="importmap">` injected into the HTML source before WebView2 receives it |
+| `loadURL()` | `MutationObserver` in the bridge script detects when `<head>` is created and injects the importmap before any module script is parsed |
+
+Both mechanisms map every Node.js built-in name (and its `node:` alias) to `http://127.0.0.1:<port>/__nww_esm__/<module>`. That endpoint returns an ES module whose named exports delegate to `window.require()`. The underlying sync-XHR mechanism is unchanged — `import` is purely a syntax layer on top.
 
 ---
 

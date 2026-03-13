@@ -177,6 +177,48 @@ export function startSyncServer(): Promise<number> {
         return;
       }
 
+      // ── ESM shim endpoint (static import support via importmap) ──────────
+      // Returns a JavaScript ES module that re-exports a Node.js built-in
+      // through window.require(), enabling:
+      //   import { readFileSync } from 'fs';
+      //   import path from 'path';
+      //
+      // URL pattern: GET /__nww_esm__/<moduleName>
+      //
+      // The generated module source uses window.require() so all method calls
+      // still go through the existing sync-XHR mechanism. The key list is
+      // resolved server-side so the export names are accurate.
+      if (req.method === 'GET' && req.url?.startsWith('/__nww_esm__/')) {
+        const moduleName = req.url.slice('/__nww_esm__/'.length);
+        if (!moduleName) {
+          res.writeHead(400); res.end(); return;
+        }
+        try {
+          const mod = _require(moduleName) as Record<string, unknown>;
+          const keys = Object.getOwnPropertyNames(mod).filter(
+            k => k !== '__esModule' && k !== 'default' && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(k)
+          );
+          const namedExports = keys
+            .map(k => `export var ${k} = _m[${JSON.stringify(k)}];`)
+            .join('\n');
+          const src = [
+            `/* node-with-window ESM shim: ${moduleName} */`,
+            `var _m = window.require(${JSON.stringify(moduleName)});`,
+            namedExports,
+            `export default _m;`,
+          ].join('\n');
+          res.writeHead(200, {
+            'Content-Type': 'text/javascript',
+            'Cache-Control': 'no-store',
+          });
+          res.end(src);
+        } catch (e: unknown) {
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end(String((e as Error).message ?? e));
+        }
+        return;
+      }
+
       // ── Ref release endpoint ──────────────────────────────────────────
       // The renderer calls this to free server-side ref objects when their
       // Proxy wrappers are GC'd (FinalizationRegistry) or on page unload.

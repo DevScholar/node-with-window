@@ -1,4 +1,5 @@
 import { WebPreferences } from '../../interfaces';
+import { generateImportMapTag, NODE_BUILTINS } from '../../esm-importmap.js';
 
 /**
  * Linux Bridge — WebKit JavaScript Injection
@@ -20,6 +21,17 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
     const injectedVersion = JSON.stringify(process.version);
     const injectedEnv     = JSON.stringify(process.env);
     const injectedPort    = syncServerPort;
+
+    let injectedImportMapJson = 'null';
+    if (injectedPort > 0) {
+      const base = `http://127.0.0.1:${injectedPort}/__nww_esm__/`;
+      const imports: Record<string, string> = {};
+      for (const name of NODE_BUILTINS) {
+        imports[name] = base + name;
+        imports[`node:${name}`] = base + name;
+      }
+      injectedImportMapJson = JSON.stringify(JSON.stringify({ imports }));
+    }
 
     if (injectedPort > 0) {
       // Full implementation: synchronous XHR to the local require server.
@@ -148,35 +160,24 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
         }
     };
 
-    var __nwwImportCache = Object.create(null);
-    window.nodeImport = function(moduleName) {
-        if (__nwwImportCache[moduleName]) return __nwwImportCache[moduleName];
-        var p = (function(name) {
-            var xhr = new XMLHttpRequest();
-            xhr.open('GET', 'http://127.0.0.1:${injectedPort}/__nww_module_keys__?m=' + encodeURIComponent(name), false);
-            xhr.send(null);
-            var keys = [];
-            if (xhr.status === 200) {
-                try { keys = JSON.parse(xhr.responseText).keys || []; } catch (_e) {}
-            }
-            var namedExports = keys.map(function(k) {
-                return 'export var ' + k + ' = _m[' + JSON.stringify(k) + '];';
-            }).join('\n');
-            var src = '/* nodeImport(' + JSON.stringify(name) + ') */\n' +
-                      'var _m = window.require(' + JSON.stringify(name) + ');\n' +
-                      namedExports + '\n' +
-                      'export default _m;\n';
-            var blob = new Blob([src], { type: 'text/javascript' });
-            var url = URL.createObjectURL(blob);
-            return import(url).then(function(mod) {
-                URL.revokeObjectURL(url);
-                __nwwImportCache[name] = Promise.resolve(mod);
-                return mod;
+    if (${injectedImportMapJson} !== null) {
+        var __nwwImportMapJson = ${injectedImportMapJson};
+        function __nwwDoInjectImportMap() {
+            if (!document.head) return false;
+            if (document.querySelector('script[type="importmap"]')) return true;
+            var s = document.createElement('script');
+            s.type = 'importmap';
+            s.textContent = __nwwImportMapJson;
+            document.head.insertBefore(s, document.head.firstChild);
+            return true;
+        }
+        if (!__nwwDoInjectImportMap()) {
+            var __nwwImportMapObs = new MutationObserver(function(m, o) {
+                if (__nwwDoInjectImportMap()) o.disconnect();
             });
-        })(moduleName);
-        __nwwImportCache[moduleName] = p;
-        return p;
-    };
+            __nwwImportMapObs.observe(document, { childList: true, subtree: true });
+        }
+    }
 })();`;
     } else {
       // Fallback stubs when no sync server is running (nodeIntegration without
@@ -331,14 +332,24 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
 }
 
 /**
- * Injects the bridge script into HTML, mirroring the Windows implementation.
+ * Injects the bridge script (and importmap when nodeIntegration is active)
+ * into HTML, mirroring the Windows implementation.
+ *
+ * The importmap must precede the bridge script so that `import 'fs'` in any
+ * subsequent `<script type="module">` resolves via the shim server.
  */
 export function injectBridgeScript(html: string, webPreferences: WebPreferences, syncServerPort = 0): string {
-  const script = `<script>${generateBridgeScript(webPreferences, syncServerPort)}</script>`;
+  const bridgeTag = `<script>${generateBridgeScript(webPreferences, syncServerPort)}</script>`;
+  const importMapTag = (webPreferences.nodeIntegration && syncServerPort > 0)
+    ? generateImportMapTag(syncServerPort)
+    : '';
+  // importmap must come BEFORE the bridge script so it is registered before
+  // any module scripts the bridge might trigger.
+  const injection = importMapTag + bridgeTag;
 
-  if (/<head[^>]*>/i.test(html)) return html.replace(/(<head[^>]*>)/i, `$1${script}`);
+  if (/<head[^>]*>/i.test(html)) return html.replace(/(<head[^>]*>)/i, `$1${injection}`);
 
-  if (/<body[^>]*>/i.test(html)) return html.replace(/(<body[^>]*>)/i, `$1${script}`);
+  if (/<body[^>]*>/i.test(html)) return html.replace(/(<body[^>]*>)/i, `$1${injection}`);
 
-  return script + html;
+  return injection + html;
 }

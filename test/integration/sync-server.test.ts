@@ -226,6 +226,61 @@ describe('/__nww_module_keys__ — module key listing', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
+// /__nww_esm__ — ES module shim for static import support
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('/__nww_esm__ — ES module shims', () => {
+  it('returns JavaScript source for the os module', async () => {
+    const res = await fetch(`${base()}/__nww_esm__/os`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/javascript');
+    const src = await res.text();
+    expect(src).toContain('window.require("os")');
+    expect(src).toContain('export default');
+    expect(src).toContain('export var platform');
+    expect(src).toContain('export var arch');
+  });
+
+  it('returns JavaScript source for the path module', async () => {
+    const res = await fetch(`${base()}/__nww_esm__/path`);
+    expect(res.status).toBe(200);
+    const src = await res.text();
+    expect(src).toContain('window.require("path")');
+    expect(src).toContain('export var join');
+    expect(src).toContain('export var resolve');
+    expect(src).toContain('export var dirname');
+  });
+
+  it('handles sub-path modules like fs/promises', async () => {
+    const res = await fetch(`${base()}/__nww_esm__/fs/promises`);
+    expect(res.status).toBe(200);
+    const src = await res.text();
+    expect(src).toContain('window.require("fs/promises")');
+    expect(src).toContain('export default');
+  });
+
+  it('returns valid ES module syntax (no syntax errors)', async () => {
+    const res = await fetch(`${base()}/__nww_esm__/os`);
+    const src = await res.text();
+    // All exports must use valid identifier names
+    const exportLines = src.split('\n').filter(l => l.startsWith('export var '));
+    for (const line of exportLines) {
+      expect(line).toMatch(/^export var [a-zA-Z_$][a-zA-Z0-9_$]* = /);
+    }
+  });
+
+  it('returns 500 for an unknown module', async () => {
+    const res = await fetch(`${base()}/__nww_esm__/__nonexistent__`);
+    expect(res.status).toBe(500);
+  });
+
+  it('sets Cache-Control: no-store', async () => {
+    const res = await fetch(`${base()}/__nww_esm__/os`);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
 // /__nww_release__ — ref cleanup
 // ──────────────────────────────────────────────────────────────────────────────
 
