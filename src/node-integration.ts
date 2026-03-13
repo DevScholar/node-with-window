@@ -300,12 +300,10 @@ export function startSyncServer(): Promise<number> {
             if (target === undefined) throw new Error(`Unknown ref: ${parsed.ref}`);
             methodName = parsed.methodName as string;
             rawArgs = (parsed.args as unknown[]) ?? [];
-            console.log(`[require] <ref>.${methodName}()`);
           } else {
             const moduleName = parsed.moduleName as string;
             methodName = parsed.methodName as string;
             rawArgs = (parsed.args as unknown[]) ?? [];
-            console.log(`[require] ${moduleName}.${methodName}()`);
             target = _require(moduleName);
           }
 
@@ -353,7 +351,6 @@ export function startSyncServer(): Promise<number> {
     // Port 0 → OS picks a free port automatically.
     server.listen(0, '127.0.0.1', () => {
       _port = (server.address() as { port: number }).port;
-      console.log(`[node-integration] sync require server on 127.0.0.1:${_port}`);
       resolve(_port);
     });
   });
