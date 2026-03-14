@@ -354,6 +354,11 @@ export class NetFxWpfWindow implements IWindowProvider {
         this.coreWebView2 = (this.webView as unknown as { CoreWebView2: unknown }).CoreWebView2;
         this.setupIpcBridge();
         this.isWebViewReady = true;
+        // After CoreWebView2 initialises, WebView2 creates additional host-side HWNDs.
+        // Re-run the first-level child fix to ensure those HWNDs are also patched.
+        if (this.options.transparent) {
+          (dotnet as any).fixTransparentInputChildren(this.browserWindow);
+        }
 
         while (this.navigationQueue.length > 0) {
           const action = this.navigationQueue.shift();
@@ -566,11 +571,7 @@ export class NetFxWpfWindow implements IWindowProvider {
     const Windows = System.Windows;
 
     if (this.pendingMenu) {
-      buildWpfMenu({
-        browserWindow: this.browserWindow,
-        webView: this.webView,
-        pendingMenu: this.pendingMenu,
-      });
+      buildWpfMenu(Object.assign(this, { pendingMenu: this.pendingMenu }));
     }
 
     if (this.pendingFilePath) {
@@ -716,7 +717,7 @@ export class NetFxWpfWindow implements IWindowProvider {
 
   public setMenu(menu: MenuItemOptions[]): void {
     if (this.app && this.browserWindow) {
-      buildWpfMenu({ browserWindow: this.browserWindow, webView: this.webView, pendingMenu: menu });
+      buildWpfMenu(Object.assign(this, { pendingMenu: menu }));
     } else {
       this.pendingMenu = menu;
     }
@@ -756,9 +757,7 @@ export class NetFxWpfWindow implements IWindowProvider {
 
   public minimize(): void {
     if (!this.browserWindow) return;
-    (this.browserWindow as unknown as { WindowState: unknown }).WindowState = (
-      dotnet as any
-    ).System.Windows.WindowState.Minimized;
+    (dotnet as any).minimize(this.browserWindow);
   }
 
   public maximize(): void {
@@ -778,21 +777,10 @@ export class NetFxWpfWindow implements IWindowProvider {
   public setFullScreen(flag: boolean): void {
     if (!this.browserWindow) return;
     this._isFullScreen = flag;
-    const Windows = (dotnet as any).System.Windows;
-    const win = this.browserWindow as unknown as {
-      WindowStyle: unknown;
-      WindowState: unknown;
-      Topmost: boolean;
-    };
-    if (flag) {
-      win.WindowStyle = Windows.WindowStyle.None;
-      win.WindowState = Windows.WindowState.Maximized;
-      win.Topmost = true;
-    } else {
-      win.WindowStyle = Windows.WindowStyle.SingleBorderWindow;
-      win.WindowState = Windows.WindowState.Normal;
-      win.Topmost = false;
-    }
+    const needFrameless = this.options.frame === false || this.options.transparent === true;
+    (dotnet as any).setFullScreen(
+      this.browserWindow, flag, needFrameless, this.options.alwaysOnTop ?? false
+    );
   }
 
   public isFullScreen(): boolean {
@@ -940,6 +928,14 @@ export class NetFxWpfWindow implements IWindowProvider {
     if (!this._isClosable)   (dotnet as any).winHelper(this.browserWindow, 'SetClosable',    false);
     if (!this._isMovable)    (dotnet as any).winHelper(this.browserWindow, 'SetMovable',     false);
     if (this._skipTaskbar)   (dotnet as any).winHelper(this.browserWindow, 'SetSkipTaskbar', true);
+    // When AllowsTransparency=true, WPF returns HTTRANSPARENT for all WM_NCHITTEST
+    // messages because its rendered bitmap is fully transparent (WebView2 is a child
+    // HWND, not a WPF element, so it is invisible to WPF's hit-tester).
+    // Override WM_NCHITTEST to return HTCLIENT so the WebView2 child HWND receives
+    // mouse events normally.
+    if (this.options.transparent) {
+      (dotnet as any).fixTransparentInput(this.browserWindow);
+    }
   }
 
   public showOpenDialog(options: OpenDialogOptions): string[] | undefined {

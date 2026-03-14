@@ -13,11 +13,20 @@ export function setMenu(
   (window as any).pendingMenu = menu;
 }
 
-export function buildWpfMenu(window: {
+interface WindowRef {
   browserWindow: unknown;
   webView: unknown;
   pendingMenu?: unknown[] | null;
-}): void {
+  close(): void;
+  minimize(): void;
+  reload(): void;
+  openDevTools(): void;
+  executeJavaScript?(code: string): Promise<unknown>;
+  isFullScreen(): boolean;
+  setFullScreen(flag: boolean): void;
+}
+
+export function buildWpfMenu(window: WindowRef): void {
   const dotnetAny = dotnet as any;
   const DockPanelType = dotnetAny['System.Windows.Controls.DockPanel'];
   const MenuType = dotnetAny['System.Windows.Controls.Menu'];
@@ -28,6 +37,33 @@ export function buildWpfMenu(window: {
 
   const menuBar = new MenuType();
 
+  const roleClick = (role: string): (() => void) | undefined => {
+    switch (role) {
+      case 'close':         return () => window.close();
+      case 'minimize':      return () => window.minimize();
+      case 'reload':        return () => window.reload();
+      case 'forceReload':   return () => window.reload();
+      case 'toggleDevTools':return () => window.openDevTools();
+      case 'togglefullscreen': return () => window.setFullScreen(!window.isFullScreen());
+      case 'resetZoom':     return () => { (window.webView as any).ZoomFactor = 1.0; };
+      case 'zoomIn':        return () => {
+        const z = (window.webView as any).ZoomFactor as number;
+        (window.webView as any).ZoomFactor = Math.min(z + 0.1, 5.0);
+      };
+      case 'zoomOut':       return () => {
+        const z = (window.webView as any).ZoomFactor as number;
+        (window.webView as any).ZoomFactor = Math.max(z - 0.1, 0.25);
+      };
+      case 'undo':          return () => window.executeJavaScript?.("document.execCommand('undo')");
+      case 'redo':          return () => window.executeJavaScript?.("document.execCommand('redo')");
+      case 'cut':           return () => window.executeJavaScript?.("document.execCommand('cut')");
+      case 'copy':          return () => window.executeJavaScript?.("document.execCommand('copy')");
+      case 'paste':         return () => window.executeJavaScript?.("document.execCommand('paste')");
+      case 'selectAll':     return () => window.executeJavaScript?.("document.execCommand('selectAll')");
+      default:              return undefined;
+    }
+  };
+
   const buildItems = (parent: unknown, items: MenuItemOptions[]) => {
     for (const item of items) {
       if (item.type === 'separator') {
@@ -36,11 +72,9 @@ export function buildWpfMenu(window: {
         const mi = new MenuItemType();
         (mi as any).Header = item.label || '';
         if (item.enabled === false) (mi as any).IsEnabled = false;
-        if (item.click) {
-          const clickFn = item.click;
-          (mi as any).add_Click(() => {
-            clickFn();
-          });
+        const clickFn = item.click ?? (item.role ? roleClick(item.role) : undefined);
+        if (clickFn) {
+          (mi as any).add_Click(() => { clickFn(); });
         }
         if (item.submenu) buildItems(mi, item.submenu);
         (parent as any).Items.Add(mi);

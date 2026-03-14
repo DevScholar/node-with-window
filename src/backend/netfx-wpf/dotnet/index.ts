@@ -234,11 +234,30 @@ const dotnetProxy = new Proxy(function() {} as any, {
 
         // Sends a window-management P/Invoke command to the WPF backend.
         // windowId: the __ref of the WPF Window object.
-        // op: one of FlashWindow | SetMinimizable | SetMaximizable | SetClosable | SetMovable | SetSkipTaskbar
+        // op: one of FlashWindow | SetMinimizable | SetMaximizable | SetClosable |
+        //          SetMovable | SetSkipTaskbar | Minimize | SetFullScreen
         if (prop === 'winHelper') {
             return (window: any, op: string, flag: boolean) => {
                 doInitialize();
                 getIpc()!.send({ action: 'WinHelper', windowId: window.__ref, op, flag });
+            };
+        }
+
+        // Minimizes the WPF window via a single atomic C# call.
+        if (prop === 'minimize') {
+            return (window: any): void => {
+                doInitialize();
+                getIpc()!.send({ action: 'WinHelper', windowId: window.__ref, op: 'Minimize' });
+            };
+        }
+
+        // Enters or exits full-screen mode via a single atomic C# call.
+        // needFrameless: true when the window was created with frame:false or transparent:true.
+        // alwaysOnTop:   true when the window was created with alwaysOnTop:true.
+        if (prop === 'setFullScreen') {
+            return (window: any, flag: boolean, needFrameless: boolean, alwaysOnTop: boolean): void => {
+                doInitialize();
+                getIpc()!.send({ action: 'WinHelper', windowId: window.__ref, op: 'SetFullScreen', flag, needFrameless, alwaysOnTop });
             };
         }
 
@@ -260,6 +279,27 @@ const dotnetProxy = new Proxy(function() {} as any, {
             return (webView: any, a: number, r: number, g: number, b: number): void => {
                 doInitialize();
                 getIpc()!.send({ action: 'SetWebViewBackground', webViewId: webView.__ref, a, r, g, b });
+            };
+        }
+
+        // Installs a WM_NCHITTEST hook on the WPF window that forces HTCLIENT for all
+        // hits. Required when transparent:true is used: WPF's layered-window renderer
+        // returns HTTRANSPARENT (clicks pass through) because the WPF bitmap is fully
+        // transparent — WebView2 is a child HWND not visible to WPF's hit-tester.
+        if (prop === 'fixTransparentInput') {
+            return (window: any): void => {
+                doInitialize();
+                getIpc()!.send({ action: 'FixTransparentInput', windowId: window.__ref });
+            };
+        }
+
+        // Re-runs the child-HWND WS_EX_TRANSPARENT cleanup after CoreWebView2 initialises.
+        // WebView2 creates additional host-side HWNDs asynchronously; calling this in
+        // CoreWebView2InitializationCompleted ensures those HWNDs are fixed too.
+        if (prop === 'fixTransparentInputChildren') {
+            return (window: any): void => {
+                doInitialize();
+                getIpc()!.send({ action: 'FixTransparentInputChildren', windowId: window.__ref });
             };
         }
 
