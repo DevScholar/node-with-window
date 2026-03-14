@@ -38,11 +38,8 @@ registerBackend({
   name: 'netfx-wpf',
   defaultPlatforms: ['win32'],
   async initialize() {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore — no type declarations for this package
-    const nodePs1Dotnet = await import('@devscholar/node-ps1-dotnet');
-    const dotnet = nodePs1Dotnet.default || nodePs1Dotnet;
-    setDotNetInstance(dotnet);
+    const winBridge = await import('./dotnet/index.js');
+    setDotNetInstance(winBridge.default);
   },
   createProvider(options?: BrowserWindowOptions) {
     return new NetFxWpfWindow(options);

@@ -15,22 +15,23 @@ import { generateBridgeScript, injectImportMap } from './bridge.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 import { buildWpfMenu } from './menu.js';
 import { getSyncServerPort } from '../../node-integration.js';
+import { callbackRegistry, createProxy, createProxyWithInlineProps } from './dotnet/proxy.js';
 
 /**
  * This library bridges Node.js with platform-specific GUI frameworks.
  *
  * On Windows, we use WebView2 (Microsoft's Chromium-based webview) combined with
- * WPF (Windows Presentation Foundation) for the window frame. The actual .NET
- * interop is handled by the separate 'node-ps1-dotnet' package.
+ * WPF (Windows Presentation Foundation) for the window frame. The .NET interop is
+ * handled by a self-contained PowerShell/C# bridge in scripts/windows/.
  *
  * Why this architecture?
  * - Node.js runs in a single-threaded event loop
  * - .NET/WPF also runs on its own thread and message loop
  * - We need to communicate between these two runtimes in a way that doesn't block either
  *
- * The node-ps1-dotnet package spawns a hidden PowerShell process that hosts .NET.
- * Communication happens through stdin/stdout JSON messages - this is why we can't use
- * async handlers in IPC (they would block the single-threaded bridge process).
+ * The Windows backend spawns a hidden PowerShell process (scripts/windows/WinHost.ps1)
+ * that compiles and hosts the C# bridge. Communication happens through a named pipe
+ * using synchronous JSON-line messages.
  */
 
 let dotnet: unknown;
@@ -369,7 +370,10 @@ export class NetFxWpfWindow implements IWindowProvider {
     ).add_WebMessageReceived((_sender, e) => {
       try {
         const evt = e as unknown as { WebMessageAsJson: string };
-        const message = JSON.parse(evt.WebMessageAsJson);
+        // WebMessageAsJson double-encodes string messages: JSON.parse once gives the inner
+        // JSON string, JSON.parse again gives the actual message object.
+        const outer = JSON.parse(evt.WebMessageAsJson);
+        const message = typeof outer === 'string' ? JSON.parse(outer) : outer;
         const { channel, type, id, args = [] } = message;
 
         const event = {
@@ -582,16 +586,56 @@ export class NetFxWpfWindow implements IWindowProvider {
     }
     if (resp.type === 'ipc' && resp.message) {
       try {
-        const result = (dotnet as any).dispatchEvent(resp.message);
-        // If the callback is async, silently swallow the promise (errors logged inside)
-        if (result && typeof (result as Promise<unknown>).then === 'function') {
-          (result as Promise<unknown>).catch((e: unknown) =>
-            console.error('[node-with-window] async event handler error:', e)
-          );
-        }
+        this._dispatchRendererMessage(resp.message);
       } catch (e) {
         console.error('[node-with-window] event dispatch error:', e);
       }
+    }
+  }
+
+  /**
+   * Dispatches a JSON message from the WebView2 renderer to the appropriate handler.
+   *
+   * Message shapes (from preload-script.ts):
+   *   { type: 'ipc-invoke', channel, requestId, args }  — ipcMain.handle()
+   *   { type: 'ipc-send',   channel, args }             — ipcMain.on()
+   *   { type: 'event',      callbackId, args }          — .NET event callbacks (menu, WebView2 events, etc.)
+   */
+  private _dispatchRendererMessage(raw: string): void {
+    let msg: any;
+    try { msg = JSON.parse(raw); } catch { return; }
+
+    if (msg.type === 'event') {
+      // .NET event callback (e.g. menu item click, WebView2 CoreWebView2InitializationCompleted)
+      const cb = callbackRegistry.get(msg.callbackId);
+      if (cb) {
+        const wrappedArgs = (msg.args ?? []).map((arg: any) => {
+          if (arg && arg.type === 'ref' && arg.props) return createProxyWithInlineProps(arg);
+          return createProxy(arg);
+        });
+        try { cb(...wrappedArgs); } catch (e) { console.error('[node-with-window] .NET event callback error:', e); }
+      }
+    } else if (msg.type === 'ipc-invoke') {
+      const handler = ipcMain.handlers.get(msg.channel);
+      const event = { sender: this, frameId: 0, reply: () => {} };
+      const resultOrPromise = handler ? handler(event, ...(msg.args ?? [])) : undefined;
+      const requestId = msg.requestId;
+
+      const sendReply = (result: unknown) => {
+        if (!this.coreWebView2) return;
+        (this.coreWebView2 as unknown as { PostWebMessageAsString: (s: string) => void })
+          .PostWebMessageAsString(JSON.stringify({ type: 'ipc-reply', requestId, result }));
+      };
+
+      if (resultOrPromise && typeof (resultOrPromise as Promise<unknown>).then === 'function') {
+        (resultOrPromise as Promise<unknown>)
+          .then(sendReply)
+          .catch((e: unknown) => console.error('[node-with-window] async ipc handler error:', e));
+      } else {
+        sendReply(resultOrPromise);
+      }
+    } else if (msg.type === 'ipc-send') {
+      ipcMain.emit(msg.channel, { sender: this }, ...(msg.args ?? []));
     }
   }
 
