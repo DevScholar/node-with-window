@@ -47,6 +47,9 @@ export const NODE_BUILTINS: readonly string[] = [
 export function generateImportMapTag(syncServerPort: number): string {
   const base = `http://127.0.0.1:${syncServerPort}/__nww_esm__/`;
   const imports: Record<string, string> = {};
+  // @devscholar/node-with-window → renderer-side shim (ipcRenderer, etc.)
+  // Note: 'electron' is intentionally not aliased; use @devscholar/node-with-window directly.
+  imports['@devscholar/node-with-window'] = base + '@devscholar/node-with-window';
   for (const name of NODE_BUILTINS) {
     imports[name] = base + name;
     imports[`node:${name}`] = base + name;

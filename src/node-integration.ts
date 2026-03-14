@@ -193,6 +193,21 @@ export function startSyncServer(): Promise<number> {
         if (!moduleName) {
           res.writeHead(400); res.end(); return;
         }
+
+        // @devscholar/node-with-window exposes renderer-side APIs (ipcRenderer, etc.)
+        // that live on window.* in the renderer — no _require() call needed.
+        // Note: 'electron' is intentionally not aliased to this module.
+        if (moduleName === '@devscholar/node-with-window') {
+          const src = [
+            '/* node-with-window ESM shim: @devscholar/node-with-window */',
+            'export var ipcRenderer = window.ipcRenderer;',
+            'export default { ipcRenderer: window.ipcRenderer };',
+          ].join('\n');
+          res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cache-Control': 'no-store' });
+          res.end(src);
+          return;
+        }
+
         try {
           const mod = _require(moduleName) as Record<string, unknown>;
           const keys = Object.getOwnPropertyNames(mod).filter(

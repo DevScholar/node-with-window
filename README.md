@@ -37,7 +37,7 @@ A cross-platform windowing library for Node.js/Deno/Bun with an Electron-compati
 These are typically pre-installed on Ubuntu 24.04 LTS / GNOME desktops. If missing:
 
 ```bash
-sudo apt install gjs gir1.2-gtk-4.0 gir1.2-webkit2-6.0
+sudo apt install gjs gir1.2-gtk-4.0 gir1.2-webkit-6.0
 ```
 
 #### WebKit sandbox in virtual machines
@@ -200,3 +200,34 @@ Because `node-with-window-examples` resolves the library via a `file:` symlink i
 - File/message dialogs are implemented natively with `Gtk.FileChooserDialog` /
   `Gtk.MessageDialog` using a nested `GLib.MainContext.iteration()` loop for synchronous
   behaviour without blocking IPC.
+
+## Known Limitations
+
+### Windows — transparent window mouse click-through
+
+When `transparent: true` is used with WPF + WebView2, clicks on the WebView2 area
+pass through to windows beneath instead of reaching the web content. This is a
+fundamental limitation of the Windows layered-window model:
+
+- `AllowsTransparency=true` forces WPF into software-renderer mode
+  (`WS_EX_LAYERED` + `UpdateLayeredWindow`). In this mode Windows performs
+  OS-level per-pixel alpha hit-testing before dispatching `WM_NCHITTEST`.
+- WebView2 renders via DirectComposition into its own child HWND, so the WPF
+  bitmap has alpha=0 everywhere the WebView2 sits. Those pixels are filtered by
+  the OS before any hook can intercept them.
+- The `WM_NCHITTEST` hook approach cannot fix this because it never fires for
+  alpha=0 pixels.
+
+**No upstream fix is available.** The WebView2 team's recommended solution is
+`CoreWebView2CompositionController`, which renders into a visual instead of a
+child HWND, giving the host application full control over hit-testing. This is
+not yet implemented in node-with-window.
+
+### Linux — transparent window background
+
+On Linux, `transparent: true` removes the window chrome and sets the WebKit
+background to transparent, but the GTK window background may still appear opaque
+(white) depending on the compositor and GTK theme. On Wayland desktops with a
+compositing window manager (e.g. GNOME Shell, KDE Plasma) true transparency
+works correctly. WSL2's WSLg compositor has limited support and may show an
+opaque background.

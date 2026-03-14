@@ -34,6 +34,7 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
     if (injectedPort > 0) {
       const base = `http://127.0.0.1:${injectedPort}/__nww_esm__/`;
       const imports: Record<string, string> = {};
+      imports['@devscholar/node-with-window'] = base + '@devscholar/node-with-window';
       for (const name of NODE_BUILTINS) {
         imports[name] = base + name;
         imports[`node:${name}`] = base + name;
@@ -141,6 +142,9 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
     }
 
     window.require = function(moduleName) {
+        if (moduleName === '@devscholar/node-with-window') {
+            return { ipcRenderer: window.ipcRenderer };
+        }
         return new Proxy({}, {
             get: function(target, methodName) {
                 if (typeof methodName !== 'string') return undefined;
@@ -189,6 +193,9 @@ ${importMapBlock}
     if (window.__nodeBridge) return;
     window.__nodeBridge = true;
     window.require = function(m) {
+        if (m === '@devscholar/node-with-window') {
+            return { ipcRenderer: window.ipcRenderer };
+        }
         console.warn('[node-with-window] window.require() stub: sync server not available.');
         return null;
     };

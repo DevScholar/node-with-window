@@ -103,8 +103,17 @@ export function handleWindowCommand(cmd, state) {
                 state.gtkWindow.set_decorated(false);
             }
 
-            // transparent: true — transparent WebView background (compositor-dependent).
+            // transparent: true — transparent window + WebView background.
+            // GTK4 removes gtk_widget_set_app_paintable; use CSS instead.
             if (opts.transparent === true) {
+                const cssProvider = new Gtk.CssProvider();
+                cssProvider.load_from_string('.nww-transparent { background-color: transparent; box-shadow: none; }');
+                Gtk.StyleContext.add_provider_for_display(
+                    Gdk.Display.get_default(),
+                    cssProvider,
+                    Gtk.STYLE_PROVIDER_PRIORITY_USER
+                );
+                state.gtkWindow.add_css_class('nww-transparent');
                 try {
                     const c = new Gdk.RGBA();
                     c.red = c.green = c.blue = c.alpha = 0;
@@ -141,6 +150,7 @@ export function handleWindowCommand(cmd, state) {
             });
 
             state.windowBoxRef.value = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 0 });
+            if (opts.transparent) state.windowBoxRef.value.add_css_class('nww-transparent');
             state.windowBoxRef.value.append(state.webView);
             state.gtkWindow.set_child(state.windowBoxRef.value);
 

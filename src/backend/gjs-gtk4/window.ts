@@ -338,6 +338,7 @@ export class GjsGtk4Window implements IWindowProvider {
       /* pipe may already be closed */
     }
     this._cleanup();
+    process.exit(0);
   }
 
   // -------------------------------------------------------------------------
