@@ -9,7 +9,8 @@ public static class WinChromeActions
     public static bool Handles(string action)
     {
         return action == "WinHelper" || action == "TrashItem"
-            || action == "FixTransparentInput" || action == "FixTransparentInputChildren";
+            || action == "FixTransparentInput" || action == "FixTransparentInputChildren"
+            || action == "DwmTransparent";
     }
 
     public static Dictionary<string, object> Execute(Dictionary<string, object> cmd)
@@ -95,7 +96,15 @@ public static class WinChromeActions
             return new Dictionary<string, object> { { "type", "void" } };
         }
 
-        if (action == "TrashItem")        {
+        if (action == "DwmTransparent")
+        {
+            var wpfWindow = BridgeState.ObjectStore[cmd["windowId"].ToString()];
+            WindowHelper.DwmTransparent(wpfWindow);
+            return new Dictionary<string, object> { { "type", "void" } };
+        }
+
+        if (action == "TrashItem")
+        {
             var filePath = cmd["filePath"].ToString();
             try
             {

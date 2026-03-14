@@ -103,6 +103,20 @@ internal static class WindowNativeMethods
 
     [DllImport("user32.dll")]
     internal static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+
+    // DWM glass transparency — makes the window's client area show the DWM compositor
+    // layer (desktop/blur) through areas where the WPF render surface is transparent.
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MARGINS
+    {
+        public int cxLeftWidth;
+        public int cxRightWidth;
+        public int cyTopHeight;
+        public int cyBottomHeight;
+    }
+
+    [DllImport("dwmapi.dll")]
+    internal static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS pMarInset);
 }
 
 // ---------------------------------------------------------------------------
@@ -553,5 +567,42 @@ public static class WindowHelper
         int result = WindowNativeMethods.SHFileOperation(ref op);
         if (result != 0)
             throw new Exception(string.Format("SHFileOperation failed with error code 0x{0:X}", result));
+    }
+
+    // ---------------------------------------------------------------------------
+    // DWM transparency
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Enables DWM glass transparency for the entire client area.
+    ///
+    /// Use this instead of AllowsTransparency=true when the window hosts WebView2.
+    /// AllowsTransparency=true uses WS_EX_LAYERED + UpdateLayeredWindow (SWRT mode),
+    /// which causes per-pixel alpha hit-testing at the OS level: clicks on alpha=0
+    /// pixels are routed to the window behind BEFORE WM_NCHITTEST is sent, so no
+    /// WM_NCHITTEST hook can intercept them.  WebView2's rendering area is alpha=0
+    /// in the WPF bitmap (WPF cannot render into child HWNDs), so the entire
+    /// WebView2 area passes through clicks.
+    ///
+    /// With AllowsTransparency=false (hardware/DX renderer) + DwmExtendFrameIntoClientArea:
+    /// - The window is NOT WS_EX_LAYERED — no per-pixel alpha hit-testing.
+    /// - All clicks within the window bounds are routed normally to the window and
+    ///   its child HWNDs (including WebView2).
+    /// - Visual transparency is provided by DWM composition (desktop/blur behind
+    ///   the window wherever the WPF render surface has alpha=0).
+    /// </summary>
+    public static void DwmTransparent(object wpfWindow)
+    {
+        IntPtr hwnd = GetHwnd(wpfWindow);
+        if (hwnd == IntPtr.Zero) return;
+
+        var margins = new WindowNativeMethods.MARGINS
+        {
+            cxLeftWidth    = -1,
+            cxRightWidth   = -1,
+            cyTopHeight    = -1,
+            cyBottomHeight = -1
+        };
+        WindowNativeMethods.DwmExtendFrameIntoClientArea(hwnd, ref margins);
     }
 }

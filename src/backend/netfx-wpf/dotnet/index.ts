@@ -303,6 +303,20 @@ const dotnetProxy = new Proxy(function() {} as any, {
             };
         }
 
+        // Enables DWM glass transparency for the entire client area.
+        // Use this instead of AllowsTransparency=true when hosting WebView2.
+        // AllowsTransparency=true (WS_EX_LAYERED + UpdateLayeredWindow) filters
+        // clicks by per-pixel alpha at the OS level before WM_NCHITTEST is sent,
+        // so the WebView2 area (alpha=0 in the WPF bitmap) always passes through.
+        // With AllowsTransparency=false + DwmExtendFrameIntoClientArea, the window
+        // is not layered — all clicks route normally to the window and child HWNDs.
+        if (prop === 'fixDwmTransparent') {
+            return (window: any): void => {
+                doInitialize();
+                getIpc()!.send({ action: 'DwmTransparent', windowId: window.__ref });
+            };
+        }
+
         // Fall through: resolve as a .NET type name.
         return winBridge._load(prop);
     },

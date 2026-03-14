@@ -327,8 +327,6 @@ export class NetFxWpfWindow implements IWindowProvider {
         Windows.WindowStyle.None;
     }
 
-    // transparent: true — enable per-pixel alpha on the WPF window and
-    // set WebView2 background to fully transparent so web content shows through.
     if (this.options.transparent) {
       (this.browserWindow as unknown as { AllowsTransparency: boolean }).AllowsTransparency = true;
       (this.browserWindow as unknown as { Background: unknown }).Background =
@@ -354,11 +352,6 @@ export class NetFxWpfWindow implements IWindowProvider {
         this.coreWebView2 = (this.webView as unknown as { CoreWebView2: unknown }).CoreWebView2;
         this.setupIpcBridge();
         this.isWebViewReady = true;
-        // After CoreWebView2 initialises, WebView2 creates additional host-side HWNDs.
-        // Re-run the first-level child fix to ensure those HWNDs are also patched.
-        if (this.options.transparent) {
-          (dotnet as any).fixTransparentInputChildren(this.browserWindow);
-        }
 
         while (this.navigationQueue.length > 0) {
           const action = this.navigationQueue.shift();
@@ -928,14 +921,6 @@ export class NetFxWpfWindow implements IWindowProvider {
     if (!this._isClosable)   (dotnet as any).winHelper(this.browserWindow, 'SetClosable',    false);
     if (!this._isMovable)    (dotnet as any).winHelper(this.browserWindow, 'SetMovable',     false);
     if (this._skipTaskbar)   (dotnet as any).winHelper(this.browserWindow, 'SetSkipTaskbar', true);
-    // When AllowsTransparency=true, WPF returns HTTRANSPARENT for all WM_NCHITTEST
-    // messages because its rendered bitmap is fully transparent (WebView2 is a child
-    // HWND, not a WPF element, so it is invisible to WPF's hit-tester).
-    // Override WM_NCHITTEST to return HTCLIENT so the WebView2 child HWND receives
-    // mouse events normally.
-    if (this.options.transparent) {
-      (dotnet as any).fixTransparentInput(this.browserWindow);
-    }
   }
 
   public showOpenDialog(options: OpenDialogOptions): string[] | undefined {
