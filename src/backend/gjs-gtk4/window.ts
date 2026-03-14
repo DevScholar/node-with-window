@@ -377,6 +377,28 @@ export class GjsGtk4Window implements IWindowProvider {
     this._applyMenu(menu);
   }
 
+  /** Translate a menu item role to a click handler. Mirrors netfx-wpf/menu.ts. */
+  private _roleClick(role: string): (() => void) | undefined {
+    switch (role) {
+      case 'close':            return () => this.close();
+      case 'minimize':         return () => this.minimize();
+      case 'reload':
+      case 'forceReload':      return () => this.reload();
+      case 'toggleDevTools':   return () => this.openDevTools();
+      case 'togglefullscreen': return () => this.setFullScreen(!this.isFullScreen());
+      case 'resetZoom':        return () => this.executeJavaScript('document.body.style.zoom="100%"');
+      case 'zoomIn':           return () => this.executeJavaScript('document.body.style.zoom=(parseFloat(document.body.style.zoom||1)+0.1)+"" ');
+      case 'zoomOut':          return () => this.executeJavaScript('document.body.style.zoom=Math.max(parseFloat(document.body.style.zoom||1)-0.1,0.25)+""');
+      case 'undo':             return () => this.executeJavaScript("document.execCommand('undo')");
+      case 'redo':             return () => this.executeJavaScript("document.execCommand('redo')");
+      case 'cut':              return () => this.executeJavaScript("document.execCommand('cut')");
+      case 'copy':             return () => this.executeJavaScript("document.execCommand('copy')");
+      case 'paste':            return () => this.executeJavaScript("document.execCommand('paste')");
+      case 'selectAll':        return () => this.executeJavaScript("document.execCommand('selectAll')");
+      default:                 return undefined;
+    }
+  }
+
   /** Flatten the menu tree, assign numeric IDs to clickable items, store handlers. */
   private _applyMenu(menu: MenuItemOptions[]): void {
     this.menuClickHandlers.clear();
@@ -393,7 +415,8 @@ export class GjsGtk4Window implements IWindowProvider {
           };
         }
         const id = idx++;
-        if (item.click) this.menuClickHandlers.set(id, item.click);
+        const clickFn = item.click ?? (item.role ? this._roleClick(item.role) : undefined);
+        if (clickFn) this.menuClickHandlers.set(id, clickFn);
         return { label: item.label, enabled: item.enabled, id };
       });
     };
