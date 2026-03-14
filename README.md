@@ -2,7 +2,7 @@
 
 ⚠️ This project is still in pre-alpha stage, expect breaking changes.
 
-A cross-platform windowing library for Node.js/Deno/Bun with an Electron-compatible API. Uses [node-ps1-dotnet](https://github.com/DevScholar/node-ps1-dotnet) (WPF + WebView2) on Windows and [node-with-gjs](https://github.com/DevScholar/node-with-gjs) (GTK + WebKitGTK) on Linux.
+A cross-platform windowing library for Node.js/Deno/Bun with an Electron-compatible API. Uses WPF + WebView2 on Windows and GJS + GTK 4 + WebKitGTK on Linux. Both backends are fully self-contained — no external runtime packages are required.
 
 ![WPF Notepad Screenshot](./screenshots/wpf-notepad.png)
 
@@ -22,11 +22,10 @@ A cross-platform windowing library for Node.js/Deno/Bun with an Electron-compati
   - `Microsoft.Web.WebView2.Core.dll`
   - `Microsoft.Web.WebView2.Wpf.dll`
 
-  Install via the parent project's install script:
+  Install via the bundled install script:
   ```
-  node ../node-ps1-dotnet/scripts/webview2-install.js install
+  node scripts/webview2-install.js install
   ```
-  Then copy or symlink the resulting DLLs into `runtimes/webview2/`.
 
 ### Linux
 
@@ -80,7 +79,7 @@ See [node-with-window-examples](https://github.com/devscholar/node-with-window-e
 ```bash
 cd ../node-with-window-examples
 npm install
-npm run notepad
+node start.js src/notepad/notepad.ts
 ```
 
 ### Linux
@@ -92,20 +91,8 @@ do a clean install to avoid stale platform-specific binaries:
 cd ../node-with-window-examples
 rm -rf dist node_modules
 npm install
+node start.js src/notepad/notepad.ts
 ```
-
-`npm install` triggers a `postinstall` script that compiles
-`@devscholar/node-with-gjs` (used internally) from its TypeScript source using
-the bundled esbuild.
-
-Then run:
-
-```bash
-npm run notepad
-```
-
-The WebKit sandbox is disabled automatically by the library (see
-[WebKit sandbox in virtual machines](#webkit-sandbox-in-virtual-machines)).
 
 ## API
 
@@ -126,7 +113,7 @@ npm install /path/to/node-with-window
 2. Create `main.ts`:
 
 ```typescript
-import { app, BrowserWindow, ipcMain } from 'node-with-window';
+import { app, BrowserWindow, ipcMain } from '@devscholar/node-with-window';
 import * as path from 'node:path';
 import * as url from 'node:url';
 
@@ -135,9 +122,9 @@ const __dirname = url.fileURLToPath(new URL('.', import.meta.url));
 app.whenReady().then(() => {
     ipcMain.handle('greet', (event, name: string) => `Hello, ${name}!`);
 
-    const win = new BrowserWindow({ 
-        title: 'My App', 
-        width: 600, 
+    const win = new BrowserWindow({
+        title: 'My App',
+        width: 600,
         height: 400,
         webPreferences: {
             nodeIntegration: true
@@ -156,60 +143,53 @@ app.whenReady().then(() => {
 <body>
     <div id="output">Loading...</div>
     <script>
-        // Use Node.js APIs directly when nodeIntegration is enabled
-        const fs = require('fs');
-        const path = require('path');
-        
         window.ipcRenderer.invoke('greet', 'world').then(msg => {
             document.getElementById('output').textContent = msg;
         });
-        
-        console.log('Current directory:', process.cwd());
     </script>
 </body>
 </html>
 ```
 
-4. Run using the start.js helper:
+4. Build and run:
 
 ```bash
-node /path/to/node-with-window/start.js main.ts
+# Using the start.js helper from node-with-window-examples:
+node /path/to/node-with-window-examples/start.js main.ts
+
+# Or build manually with esbuild and run:
+npx esbuild main.ts --bundle --platform=node --format=esm --outfile=dist/main.js
+node dist/main.js
 ```
 
 ## Developing
 
-This library depends on [node-ps1-dotnet](https://github.com/DevScholar/node-ps1-dotnet) (Windows) and
-[node-with-gjs](https://github.com/DevScholar/node-with-gjs) (Linux), both installed as `file:` symlinks in
-`node_modules` (non-NPM versions of Node with Window only). After changing either dependency, rebuild in order.
-```
-
-The script builds `node-ps1-dotnet` then `node-with-window`. Because
-`node-with-window-examples` resolves both via `file:` symlinks, no copy step
-is needed — the rebuilt `dist/` is picked up immediately.
-
-If you only changed `node-with-window` itself:
+After making changes to `node-with-window` itself, rebuild:
 
 ```bash
 cd node-with-window && npm run build
 ```
 
+Because `node-with-window-examples` resolves the library via a `file:` symlink in
+`node_modules`, the rebuilt `dist/` is picked up immediately — no copy step needed.
+
 ## How it works
 
 ### Windows (WPF + WebView2)
 
-- The main process communicates with a PowerShell-hosted .NET runtime over a Windows Named Pipe via the [node-ps1-dotnet](../node-ps1-dotnet) bridge
-- `show()` sends a `StartApplication` command to the .NET host, which immediately acknowledges and then calls `Application.Run(window)` — blocking the .NET thread in the WPF message loop without blocking the Node.js event loop
-- Node.js polls for events every 16 ms with a `Poll` command that drains a thread-safe queue. WPF event handlers (like `WebMessageReceived`) enqueue their payload instead of blocking on synchronous IPC, so `async ipcMain.handle()` callbacks work normally
-- When `loadFile` is called before `show()`, the HTML is read, the `ipcRenderer` bridge is injected into `<head>`, and the modified HTML is written to a temp file. `webView.Source` is set to this temp file URL before `Application.Run()` — identical to the one-navigation pattern in the reference [`webview2-browser.ts`](../node-ps1-dotnet-examples/src/wpf/webview2-browser/webview2-browser.ts) example
-- The `WebMessageReceived` handler enqueues the raw JSON payload. The next `Poll` delivers it to Node.js, which dispatches it to the registered `ipcMain` handler and sends the reply via `PostWebMessageAsString`
-- Node integration uses `NODE_WITH_WINDOW:` prefixed messages via `chrome.webview.postMessage()` to provide access to Node.js APIs in the renderer
+- `node-with-window` spawns `scripts/windows/WinHost.ps1` as a child process. The script compiles the WPF/WebView2 C# bridge (`scripts/windows/*.cs`) at startup via PowerShell's `Add-Type` and communicates over a Windows Named Pipe using a synchronous JSON request/response protocol.
+- `show()` sends a `StartApplication` command to the .NET host, which immediately acknowledges and then calls `Application.Run(window)` — blocking the .NET thread in the WPF message loop without blocking the Node.js event loop.
+- Node.js polls for events every 16 ms with a `Poll` command that drains a thread-safe queue. WPF event handlers (like `WebMessageReceived`) enqueue their payload instead of blocking on synchronous IPC, so `async ipcMain.handle()` callbacks work normally.
+- When `loadFile` is called, the HTML is read, the `ipcRenderer` bridge is injected into `<head>`, and the modified HTML is sent to the WPF host before `Application.Run()`.
+- The `WebMessageReceived` handler enqueues the raw JSON payload. The next `Poll` delivers it to Node.js, which dispatches it to the registered `ipcMain` handler and sends the reply via `PostWebMessageAsString`.
+- Node integration uses a loopback HTTP server started in the main process; the renderer calls `window.require(module)` via synchronous XHR. Callbacks are delivered via a persistent `EventSource`.
 
 ### Linux (GJS + GTK 4 + WebKitGTK)
 
-- `GjsGtk4Window` spawns a dedicated GJS script (`scripts/linux/host.js`) as a child process.
+- `GjsGtk4Window` spawns `scripts/linux/host.js` as a child process via GJS.
   The host script runs the GTK 4 main loop (`GLib.MainLoop`) and owns the `Gtk.Window` + `WebKit.WebView`.
 - Node.js and the GJS host communicate over two Unix FIFOs (passed as fd 3 and fd 4) using
-  a synchronous newline-delimited JSON request/response protocol — the same as the Windows pipe bridge.
+  a synchronous newline-delimited JSON request/response protocol.
 - **WebKit → Node.js IPC:** the HTML renderer posts messages via
   `window.webkit.messageHandlers.ipc.postMessage(json)`. The GJS host queues them.
   Node.js drains the queue every 16 ms with a `Poll` command.
