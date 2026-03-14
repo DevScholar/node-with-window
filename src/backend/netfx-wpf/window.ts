@@ -120,6 +120,37 @@ function findWebView2Runtime(): string {
 const POLL_INTERVAL_MS = 16;
 
 /**
+ * Parses a CSS hex color string into ARGB components (each 0–255).
+ * Accepts: #RGB, #RRGGBB, #AARRGGBB (Electron uses AA-prefixed alpha).
+ * Returns null if the string is not a recognised hex color.
+ */
+function parseBackgroundColor(color: string): { a: number; r: number; g: number; b: number } | null {
+  const hex3 = color.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i);
+  if (hex3) return {
+    a: 255,
+    r: parseInt(hex3[1] + hex3[1], 16),
+    g: parseInt(hex3[2] + hex3[2], 16),
+    b: parseInt(hex3[3] + hex3[3], 16),
+  };
+  const hex6 = color.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (hex6) return {
+    a: 255,
+    r: parseInt(hex6[1], 16),
+    g: parseInt(hex6[2], 16),
+    b: parseInt(hex6[3], 16),
+  };
+  // #AARRGGBB — Electron convention for transparent background colors
+  const hex8 = color.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (hex8) return {
+    a: parseInt(hex8[1], 16),
+    r: parseInt(hex8[2], 16),
+    g: parseInt(hex8[3], 16),
+    b: parseInt(hex8[4], 16),
+  };
+  return null;
+}
+
+/**
  * NetFxWpfWindow implements the IWindowProvider interface for Windows using WPF + WebView2.
  *
  * Key architectural points:
@@ -286,6 +317,28 @@ export class NetFxWpfWindow implements IWindowProvider {
         Windows.WindowStartupLocation.Manual;
       (this.browserWindow as unknown as { Left: number }).Left = this.options.x;
       (this.browserWindow as unknown as { Top: number }).Top = this.options.y;
+    }
+
+    // frame: false — remove title bar and window border.
+    // AllowsTransparency requires WindowStyle.None, so transparent also implies frameless.
+    const needFrameless = this.options.frame === false || this.options.transparent === true;
+    if (needFrameless) {
+      (this.browserWindow as unknown as { WindowStyle: unknown }).WindowStyle =
+        Windows.WindowStyle.None;
+    }
+
+    // transparent: true — enable per-pixel alpha on the WPF window and
+    // set WebView2 background to fully transparent so web content shows through.
+    if (this.options.transparent) {
+      (this.browserWindow as unknown as { AllowsTransparency: boolean }).AllowsTransparency = true;
+      (this.browserWindow as unknown as { Background: unknown }).Background =
+        Windows.Media.Brushes.Transparent;
+      (dotnet as any).setWebViewBackground(this.webView, 0, 0, 0, 0);
+    } else if (this.options.backgroundColor) {
+      const parsed = parseBackgroundColor(this.options.backgroundColor);
+      if (parsed) {
+        (dotnet as any).setWebViewBackground(this.webView, parsed.a, parsed.r, parsed.g, parsed.b);
+      }
     }
 
     (

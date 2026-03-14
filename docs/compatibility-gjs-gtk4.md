@@ -56,7 +56,10 @@
 | `minimizable` | ⚠️ | Logged as warning; GTK4 provides no compositor-independent API to hide the minimize button |
 | `maximizable` | ✅ | `Window.set_resizable()` controls whether the window can be maximized |
 | `closable` | ✅ | `Window.set_deletable(false)` hides the close button |
-| `transparent`, `frame`, `kiosk` | ⚠️ | Accepted, not applied |
+| `transparent` | ✅ | `set_decorated(false)` + `WebKit.WebView.set_background_color(alpha=0)` — compositor-dependent |
+| `frame` | ✅ | `Window.set_decorated(false)` — removes title bar and border |
+| `backgroundColor` | ✅ | `WebKit.WebView.set_background_color(Gdk.RGBA)`; accepts `#RGB`, `#RRGGBB`, `#AARRGGBB` |
+| `kiosk` | ⚠️ | Accepted, not applied |
 | `skipTaskbar` | ⚠️ | Logged as warning; GTK4 removed `set_skip_taskbar_hint()`, most compositors ignore workarounds |
 | `fullscreen` | ✅ | `Window.fullscreen()` called at creation |
 | `backgroundColor` | ❌ | |
@@ -122,6 +125,7 @@
 | `win.setAlwaysOnTop(flag)` | ✅ | `Window.set_keep_above()` |
 | `win.center()` | ⚠️ | No-op + console warning; GTK4 removed `gtk_window_set_position()` |
 | `win.flashFrame(flag)` | ⚠️ | Best-effort via `Gdk.Surface.set_urgency_hint()`; compositor support varies |
+| `win.setBackgroundColor(color)` | ✅ | `WebKit.WebView.set_background_color(Gdk.RGBA)`; same format as `backgroundColor` constructor option |
 | `win.setMenu(menu)` | ✅ | GTK4 `PopoverMenuBar`; menu items flattened and mapped to `Gio.SimpleAction` |
 | `win.removeMenu()` | ✅ | Calls `setMenu([])` |
 | `win.showOpenDialog(options)` | ✅ | `Gtk.FileChooserDialog`; synchronous via nested GLib main loop |

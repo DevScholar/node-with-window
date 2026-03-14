@@ -43,6 +43,8 @@ export interface BrowserWindowOptions {
   show?: boolean;
   frame?: boolean;
   transparent?: boolean;
+  /** CSS hex color for the window/webview background (#RGB, #RRGGBB, or #AARRGGBB). */
+  backgroundColor?: string;
   fullscreen?: boolean;
   alwaysOnTop?: boolean;
   skipTaskbar?: boolean;

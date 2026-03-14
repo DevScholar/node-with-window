@@ -674,6 +674,22 @@ export class GjsGtk4Window implements IWindowProvider {
     }
   }
 
+  public setFrame(flag: boolean): void {
+    try {
+      this._send('SetFrame', { flag });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  public setBackgroundColor(color: string): void {
+    try {
+      this._send('SetBackgroundColor', { color });
+    } catch {
+      /* ignore */
+    }
+  }
+
   public onNavigationCompleted(callback: () => void): void {
     this._navCompletedCallback = callback;
   }

@@ -55,7 +55,10 @@
 | `movable` | ✅ | `HwndSource` `WM_NCHITTEST` hook blocks title-bar drag when `false` |
 | `minimizable`, `maximizable` | ✅ | `GetWindowLong`/`SetWindowLong` WS_MINIMIZEBOX / WS_MAXIMIZEBOX |
 | `closable` | ✅ | `EnableMenuItem` on the system menu's `SC_CLOSE` item |
-| `transparent`, `frame`, `kiosk` | ⚠️ | Accepted, not applied |
+| `transparent` | ✅ | `WindowStyle.None` + `AllowsTransparency = true` + `Background = Transparent`; WebView2 `DefaultBackgroundColor = Color.Transparent` |
+| `frame` | ✅ | `WindowStyle.None` — removes title bar and border |
+| `backgroundColor` | ✅ | WebView2 `DefaultBackgroundColor` via `System.Drawing.Color.FromArgb`; accepts `#RGB`, `#RRGGBB`, `#AARRGGBB` |
+| `kiosk` | ⚠️ | Accepted, not applied |
 | `skipTaskbar` | ✅ | `SetWindowLong` WS_EX_TOOLWINDOW / WS_EX_APPWINDOW on extended style |
 | `fullscreen` | ✅ | Applied at window creation via `setFullScreen(true)` |
 | `backgroundColor` | ❌ | |
@@ -121,6 +124,7 @@
 | `win.setAlwaysOnTop(flag)` | ✅ | `Window.Topmost` |
 | `win.center()` | ✅ | Computes from `SystemParameters.PrimaryScreenWidth/Height` |
 | `win.flashFrame(flag)` | ✅ | `FlashWindowEx` (user32) — flashes taskbar button until window is focused |
+| `win.setBackgroundColor(color)` | ✅ | WebView2 `DefaultBackgroundColor`; same format as `backgroundColor` constructor option |
 | `win.setMenu(menu)` | ✅ | Accepts `Menu` instance or `MenuItemOptions[]` |
 | `win.removeMenu()` | ✅ | Clears the menu bar |
 | `win.showOpenDialog(options)` | ✅ | Synchronous; returns `string[] \| undefined` |
@@ -281,3 +285,5 @@ Both mechanisms map every Node.js built-in name (and its `node:` alias) to `http
 5. **`setFullScreen()` does not use an exclusive fullscreen mode.** It sets `WindowStyle.None` + `WindowState.Maximized` + `Topmost = true`. The WPF window frame is hidden but the taskbar may remain visible depending on system settings.
 
 6. **`webSecurity: false`** passes `--disable-web-security` to the WebView2 browser process via `CoreWebView2CreationProperties.AdditionalBrowserArguments`. Requires WebView2 SDK ≥ 1.0.1661.
+
+7. **`transparent: true` requires no host-page CSS.** The WPF window uses `AllowsTransparency = true` with a transparent `Background`, and WebView2's `DefaultBackgroundColor` is set to `Color.Transparent`. Regions of the page with a transparent CSS background will show the desktop behind the window. `frame: false` is implied (WPF requires `WindowStyle.None` before enabling transparency).

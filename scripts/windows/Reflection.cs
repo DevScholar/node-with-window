@@ -1067,6 +1067,28 @@ public static class Reflection
             }
         }
 
+        // Sets the WebView2 DefaultBackgroundColor property, which controls the background
+        // shown behind web content (including fully transparent regions).
+        // WPF WebView2 stores the value and applies it once the CoreWebView2Controller is ready,
+        // so this can be called any time between webview creation and show().
+        if (action == "SetWebViewBackground")
+        {
+            var webViewId = cmd["webViewId"].ToString();
+            var a = Convert.ToInt32(cmd["a"]);
+            var r = Convert.ToInt32(cmd["r"]);
+            var g = Convert.ToInt32(cmd["g"]);
+            var b = Convert.ToInt32(cmd["b"]);
+
+            var webViewObj = BridgeState.ObjectStore[webViewId];
+            var bgProp = webViewObj.GetType().GetProperty("DefaultBackgroundColor");
+            if (bgProp != null)
+            {
+                var color = System.Drawing.Color.FromArgb(a, r, g, b);
+                bgProp.SetValue(webViewObj, color, null);
+            }
+            return new Dictionary<string, object> { { "type", "void" } };
+        }
+
         return new Dictionary<string, object> { { "type", "void" } };
     }
     

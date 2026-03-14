@@ -254,6 +254,15 @@ const dotnetProxy = new Proxy(function() {} as any, {
             };
         }
 
+        // Sets WebView2 DefaultBackgroundColor. a/r/g/b are 0-255 integers.
+        // Call this right after creating the WebView2 object, before show().
+        if (prop === 'setWebViewBackground') {
+            return (webView: any, a: number, r: number, g: number, b: number): void => {
+                doInitialize();
+                getIpc()!.send({ action: 'SetWebViewBackground', webViewId: webView.__ref, a, r, g, b });
+            };
+        }
+
         // Fall through: resolve as a .NET type name.
         return winBridge._load(prop);
     },

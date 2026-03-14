@@ -74,6 +74,40 @@ function writeLine(obj) {
 }
 
 // ---------------------------------------------------------------------------
+// Color parser — accepts #RGB, #RRGGBB, #AARRGGBB (Electron convention)
+// ---------------------------------------------------------------------------
+
+function parseHexColor(str) {
+    if (!str || str[0] !== '#') return null;
+    const s = str.slice(1);
+    if (s.length === 3) {
+        return {
+            a: 255,
+            r: parseInt(s[0] + s[0], 16),
+            g: parseInt(s[1] + s[1], 16),
+            b: parseInt(s[2] + s[2], 16),
+        };
+    }
+    if (s.length === 6) {
+        return {
+            a: 255,
+            r: parseInt(s.slice(0, 2), 16),
+            g: parseInt(s.slice(2, 4), 16),
+            b: parseInt(s.slice(4, 6), 16),
+        };
+    }
+    if (s.length === 8) {
+        return {
+            a: parseInt(s.slice(0, 2), 16),
+            r: parseInt(s.slice(2, 4), 16),
+            g: parseInt(s.slice(4, 6), 16),
+            b: parseInt(s.slice(6, 8), 16),
+        };
+    }
+    return null;
+}
+
+// ---------------------------------------------------------------------------
 // Menu builder
 // ---------------------------------------------------------------------------
 
@@ -308,6 +342,38 @@ function executeCommand(cmd) {
             if (opts.icon)               iconPath = opts.icon;
             if (opts.fullscreen)         gtkWindow.fullscreen();
 
+            // frame: false — remove window chrome (title bar + border).
+            // transparent also implies frameless (compositor requires undecorated window).
+            if (opts.frame === false || opts.transparent === true) {
+                gtkWindow.set_decorated(false);
+            }
+
+            // transparent: true — transparent WebView background (compositor-dependent).
+            if (opts.transparent === true) {
+                try {
+                    const transparentColor = new Gdk.RGBA();
+                    transparentColor.red   = 0;
+                    transparentColor.green = 0;
+                    transparentColor.blue  = 0;
+                    transparentColor.alpha = 0;
+                    webView.set_background_color(transparentColor);
+                } catch (_e) {
+                    // Not all WebKitGTK versions support set_background_color; ignore.
+                }
+            } else if (opts.backgroundColor) {
+                const parsed = parseHexColor(opts.backgroundColor);
+                if (parsed) {
+                    try {
+                        const c = new Gdk.RGBA();
+                        c.red   = parsed.r / 255;
+                        c.green = parsed.g / 255;
+                        c.blue  = parsed.b / 255;
+                        c.alpha = parsed.a / 255;
+                        webView.set_background_color(c);
+                    } catch (_e) { /* ignore */ }
+                }
+            }
+
             // Exit cleanly when the user closes the window
             gtkWindow.connect('close-request', () => {
                 isClosed = true;
@@ -524,6 +590,45 @@ function executeCommand(cmd) {
             isClosed = true;
             if (gtkWindow) gtkWindow.close();
             if (mainLoop)  mainLoop.quit();
+            return { type: 'void' };
+        }
+
+        case 'SetFrame': {
+            // Remove (false) or restore (true) window decorations (title bar + border).
+            if (gtkWindow) gtkWindow.set_decorated(cmd.flag);
+            return { type: 'void' };
+        }
+
+        case 'SetTransparent': {
+            // Make the WebKit content background transparent (compositor-dependent).
+            if (webView) {
+                try {
+                    const c = new Gdk.RGBA();
+                    c.red   = 0;
+                    c.green = 0;
+                    c.blue  = 0;
+                    c.alpha = cmd.flag ? 0 : 1;
+                    webView.set_background_color(c);
+                } catch (_e) { /* ignore */ }
+            }
+            if (gtkWindow && cmd.flag) gtkWindow.set_decorated(false);
+            return { type: 'void' };
+        }
+
+        case 'SetBackgroundColor': {
+            if (webView && cmd.color) {
+                const parsed = parseHexColor(cmd.color);
+                if (parsed) {
+                    try {
+                        const c = new Gdk.RGBA();
+                        c.red   = parsed.r / 255;
+                        c.green = parsed.g / 255;
+                        c.blue  = parsed.b / 255;
+                        c.alpha = parsed.a / 255;
+                        webView.set_background_color(c);
+                    } catch (_e) { /* ignore */ }
+                }
+            }
             return { type: 'void' };
         }
 

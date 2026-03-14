@@ -2,8 +2,8 @@
 
 ⚠️ This project is still in pre-alpha stage, expect breaking changes.
 
-A cross-platform windowing library for Node.js/Deno/Bun with an Electron-compatible API. Uses WPF + WebView2 on Windows and GJS + GTK 4 + WebKitGTK on Linux. Both backends are fully self-contained — no external runtime packages are required.
-
+A cross-platform windowing library for Node.js/Deno/Bun with an Electron-compatible API.
+ 
 ![WPF Notepad Screenshot](./screenshots/wpf-notepad.png)
 
 ![GTK Notepad Screenshot](./screenshots/gtk-notepad.png)
