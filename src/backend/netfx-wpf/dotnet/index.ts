@@ -303,6 +303,18 @@ const dotnetProxy = new Proxy(function() {} as any, {
             };
         }
 
+        // Applies WPF WindowChrome with GlassFrameThickness=-1 for transparent windows.
+        // This is the recommended approach over raw DwmExtendFrameIntoClientArea:
+        // WPF manages the DWM lifecycle, so the hardware DX render target composites
+        // correctly with the DWM glass and the window does not appear black.
+        // Call from createWindow() (before show()) — no HWND required.
+        if (prop === 'applyWindowChrome') {
+            return (window: any): void => {
+                doInitialize();
+                getIpc()!.send({ action: 'ApplyWindowChrome', windowId: window.__ref });
+            };
+        }
+
         // Enables DWM glass transparency for the entire client area.
         // Use this instead of AllowsTransparency=true when hosting WebView2.
         // AllowsTransparency=true (WS_EX_LAYERED + UpdateLayeredWindow) filters

@@ -570,7 +570,62 @@ public static class WindowHelper
     }
 
     // ---------------------------------------------------------------------------
-    // DWM transparency
+    // WindowChrome transparency (recommended approach for WebView2)
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Applies WPF WindowChrome with GlassFrameThickness=-1 to extend the DWM
+    /// compositor glass over the entire client area.
+    ///
+    /// This is the correct approach for transparent windows hosting WebView2:
+    ///   AllowsTransparency=false  →  hardware DX renderer, no WS_EX_LAYERED
+    ///   WindowChrome(-1,-1,-1,-1) →  WPF manages DWM lifecycle; transparent WPF
+    ///                                 areas show desktop behind via DWM composition
+    ///
+    /// Unlike the raw DwmExtendFrameIntoClientArea P/Invoke approach, using WPF's
+    /// WindowChrome class integrates with WPF's rendering pipeline so the window
+    /// does not appear black in hardware rendering mode.
+    ///
+    /// Must be called while on the WPF UI thread (any time after the Window object
+    /// is created, including before Show()).
+    /// </summary>
+    public static void ApplyWindowChrome(object wpfWindow)
+    {
+        Type windowChromeType = null;
+        Type thicknessType = null;
+        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            if (windowChromeType == null)
+                windowChromeType = asm.GetType("System.Windows.Shell.WindowChrome");
+            if (thicknessType == null)
+                thicknessType = asm.GetType("System.Windows.Thickness");
+            if (windowChromeType != null && thicknessType != null) break;
+        }
+        if (windowChromeType == null || thicknessType == null) return;
+
+        object chrome = Activator.CreateInstance(windowChromeType);
+
+        // Thickness(-1,-1,-1,-1) extends the DWM glass frame over the entire client area.
+        object negThickness  = Activator.CreateInstance(thicknessType, new object[] { -1.0, -1.0, -1.0, -1.0 });
+        object zeroThickness = Activator.CreateInstance(thicknessType, new object[] {  0.0,  0.0,  0.0,  0.0 });
+
+        PropertyInfo glassProp   = windowChromeType.GetProperty("GlassFrameThickness");
+        PropertyInfo resizeProp  = windowChromeType.GetProperty("ResizeBorderThickness");
+        PropertyInfo captionProp = windowChromeType.GetProperty("CaptionHeight");
+        PropertyInfo aeroProp    = windowChromeType.GetProperty("UseAeroCaptionButtons");
+
+        if (glassProp   != null) glassProp.SetValue(chrome, negThickness, null);
+        if (resizeProp  != null) resizeProp.SetValue(chrome, zeroThickness, null);
+        if (captionProp != null) captionProp.SetValue(chrome, 0.0, null);
+        if (aeroProp    != null) aeroProp.SetValue(chrome, false, null);
+
+        MethodInfo setMethod = windowChromeType.GetMethod(
+            "SetWindowChrome", BindingFlags.Public | BindingFlags.Static);
+        if (setMethod != null) setMethod.Invoke(null, new object[] { wpfWindow, chrome });
+    }
+
+    // ---------------------------------------------------------------------------
+    // DWM transparency (raw P/Invoke — kept for reference, use ApplyWindowChrome instead)
     // ---------------------------------------------------------------------------
 
     /// <summary>

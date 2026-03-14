@@ -10,7 +10,7 @@ public static class WinChromeActions
     {
         return action == "WinHelper" || action == "TrashItem"
             || action == "FixTransparentInput" || action == "FixTransparentInputChildren"
-            || action == "DwmTransparent";
+            || action == "DwmTransparent" || action == "ApplyWindowChrome";
     }
 
     public static Dictionary<string, object> Execute(Dictionary<string, object> cmd)
@@ -93,6 +93,13 @@ public static class WinChromeActions
             var wpfWindow = BridgeState.ObjectStore[cmd["windowId"].ToString()];
             var hwnd = WindowHelper.GetHwnd(wpfWindow);
             if (hwnd != System.IntPtr.Zero) WindowHelper.FixChildHwnds(hwnd);
+            return new Dictionary<string, object> { { "type", "void" } };
+        }
+
+        if (action == "ApplyWindowChrome")
+        {
+            var wpfWindow = BridgeState.ObjectStore[cmd["windowId"].ToString()];
+            WindowHelper.ApplyWindowChrome(wpfWindow);
             return new Dictionary<string, object> { { "type", "void" } };
         }
 

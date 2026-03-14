@@ -320,7 +320,7 @@ export class NetFxWpfWindow implements IWindowProvider {
     }
 
     // frame: false — remove title bar and window border.
-    // AllowsTransparency requires WindowStyle.None, so transparent also implies frameless.
+    // transparent also implies frameless (WindowChrome requires WindowStyle.None).
     const needFrameless = this.options.frame === false || this.options.transparent === true;
     if (needFrameless) {
       (this.browserWindow as unknown as { WindowStyle: unknown }).WindowStyle =
@@ -328,9 +328,21 @@ export class NetFxWpfWindow implements IWindowProvider {
     }
 
     if (this.options.transparent) {
-      (this.browserWindow as unknown as { AllowsTransparency: boolean }).AllowsTransparency = true;
+      // WindowChrome approach (article: wpf-transparent-window-without-allows-transparency):
+      //   - AllowsTransparency=false  → hardware DX renderer, no WS_EX_LAYERED, no OS-level
+      //                                  per-pixel alpha hit-testing → WebView2 receives clicks
+      //   - ResizeMode=NoResize       → required by WPF for correct glass-frame compositing
+      //   - Background=Transparent    → WPF DX surface cleared to alpha=0 so DWM glass shows through
+      //   - WindowChrome(-1,-1,-1,-1) → WPF manages DWM glass over entire client area
+      //
+      // WindowChrome is a WPF dependency property — no HWND needed, safe to call
+      // before show(). Applying it here (before Application.Run/Show) means the window
+      // is already transparent when it first becomes visible, eliminating the black flash.
+      (this.browserWindow as unknown as { ResizeMode: unknown }).ResizeMode =
+        Windows.ResizeMode.NoResize;
       (this.browserWindow as unknown as { Background: unknown }).Background =
         Windows.Media.Brushes.Transparent;
+      (dotnet as any).applyWindowChrome(this.browserWindow);
       (dotnet as any).setWebViewBackground(this.webView, 0, 0, 0, 0);
     } else if (this.options.backgroundColor) {
       const parsed = parseBackgroundColor(this.options.backgroundColor);
