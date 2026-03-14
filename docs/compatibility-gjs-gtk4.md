@@ -62,7 +62,6 @@
 | `kiosk` | ⚠️ | Accepted, not applied |
 | `skipTaskbar` | ⚠️ | Logged as warning; GTK4 removed `set_skip_taskbar_hint()`, most compositors ignore workarounds |
 | `fullscreen` | ✅ | `Window.fullscreen()` called at creation |
-| `backgroundColor` | ❌ | |
 | `parent`, `modal` | ❌ | No child window support |
 | `titleBarStyle` | ❌ | |
 
