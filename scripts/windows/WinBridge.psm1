@@ -7,6 +7,8 @@ $csFiles = @(
     "$scriptDir\BridgeState.cs",
     "$scriptDir\Protocol.cs",
     "$scriptDir\WindowHelper.cs",
+    "$scriptDir\WinChromeActions.cs",
+    "$scriptDir\WebView2Actions.cs",
     "$scriptDir\Reflection.cs",
     "$scriptDir\PsHost.cs",
     "$scriptDir\PsHostEntry.cs"
