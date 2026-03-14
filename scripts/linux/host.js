@@ -57,6 +57,7 @@ const state = {
     windowBoxRef:     { value: null },
     iconPathRef:      { value: null },
     isClosedRef:      { value: false },
+    alwaysOnTopPending: false,  // set_keep_above failed in CreateWindow; retry after Show
     ipcQueue,
     menuActions:      null,  // initialised after Gtk.init() in CreateWindow
     menuActionIndexRef: { value: 0 },

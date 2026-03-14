@@ -93,9 +93,13 @@ export function handleWindowCommand(cmd, state) {
             });
 
             if (opts.resizable === false) state.gtkWindow.set_resizable(false);
-            if (opts.alwaysOnTop)         state.gtkWindow.set_keep_above(true);
-            if (opts.icon)               state.iconPathRef.value = opts.icon;
-            if (opts.fullscreen)         state.gtkWindow.fullscreen();
+            // set_keep_above was removed in GTK4; try it and fall back silently.
+            if (opts.alwaysOnTop) {
+                try { state.gtkWindow.set_keep_above(true); }
+                catch (_e) { state.alwaysOnTopPending = true; }
+            }
+            if (opts.icon)    state.iconPathRef.value = opts.icon;
+            if (opts.fullscreen) state.gtkWindow.fullscreen();
 
             // frame: false — remove window chrome (title bar + border).
             // transparent also implies frameless (compositor requires undecorated window).
@@ -159,6 +163,15 @@ export function handleWindowCommand(cmd, state) {
 
         case 'Show': {
             if (state.gtkWindow) state.gtkWindow.present();
+            // GTK4 fallback for alwaysOnTop: try GdkToplevel after the surface exists.
+            if (state.alwaysOnTopPending) {
+                try {
+                    const surface = state.gtkWindow.get_surface();
+                    if (surface && typeof surface.set_keep_above === 'function')
+                        surface.set_keep_above(true);
+                } catch (_e) { /* compositor may not support keep-above */ }
+                state.alwaysOnTopPending = false;
+            }
             if (state.iconPathRef.value) {
                 try {
                     const texture = Gdk.Texture.new_from_filename(state.iconPathRef.value);
