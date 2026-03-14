@@ -232,12 +232,25 @@ const dotnetProxy = new Proxy(function() {} as any, {
             };
         }
 
-        // Sends a window-management command (flash, minimize/maximize/closable/movable).
+        // Sends a window-management P/Invoke command to the WPF backend.
         // windowId: the __ref of the WPF Window object.
+        // op: one of FlashWindow | SetMinimizable | SetMaximizable | SetClosable | SetMovable | SetSkipTaskbar
         if (prop === 'winHelper') {
-            return (window: any, cmd: string, flag: boolean) => {
+            return (window: any, op: string, flag: boolean) => {
                 doInitialize();
-                getIpc()!.send({ action: 'WinHelper', windowId: window.__ref, cmd, flag });
+                getIpc()!.send({ action: 'WinHelper', windowId: window.__ref, op, flag });
+            };
+        }
+
+        // Sends a file or directory to the Recycle Bin via SHFileOperation.
+        // Returns a promise-like: callers should await or catch on the TypeScript side.
+        if (prop === 'trashItem') {
+            return (filePath: string): void => {
+                doInitialize();
+                const res = getIpc()!.send({ action: 'TrashItem', filePath }) as any;
+                if (res && res.type === 'error') {
+                    throw new Error(res.message || 'TrashItem failed');
+                }
             };
         }
 

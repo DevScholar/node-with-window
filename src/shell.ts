@@ -40,39 +40,34 @@ export const shell = {
   /**
    * Moves a file or directory to the system trash (Recycle Bin on Windows).
    * Returns a Promise that rejects if the path does not exist or the operation fails.
+   *
+   * Windows: uses SHFileOperation via the self-contained C# bridge (no PowerShell spawn).
+   * Linux:   delegates to `gio trash`.
+   * macOS:   delegates to AppleScript / Finder.
    */
   trashItem(filePath: string): Promise<void> {
     return new Promise((resolve, reject) => {
       if (process.platform === 'win32') {
-        // Determine if path is a file or directory to call the correct VB method.
-        let isDir = false;
+        // Validate path exists before sending to C# layer.
         try {
-          isDir = statSync(filePath).isDirectory();
-        } catch (e) {
+          statSync(filePath);
+        } catch {
           reject(new Error(`shell.trashItem: path not found: ${filePath}`));
           return;
         }
 
-        const escapedPath = filePath.replace(/'/g, "''");
-        const method = isDir
-          ? `[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory('${escapedPath}', 'OnlyErrorDialogs', 'SendToRecycleBin')`
-          : `[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('${escapedPath}', 'OnlyErrorDialogs', 'SendToRecycleBin')`;
-
-        const ps = spawn(
-          'powershell.exe',
-          ['-NoProfile', '-NonInteractive', '-Command',
-           `Add-Type -AssemblyName Microsoft.VisualBasic; ${method}`],
-          { stdio: ['ignore', 'ignore', 'pipe'] }
-        );
-        let stderr = '';
-        ps.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
-        ps.on('close', (code: number) => {
-          if (code === 0) resolve();
-          else reject(new Error(`shell.trashItem failed (exit ${code}): ${stderr.trim()}`));
-        });
+        // Use the already-running WPF bridge process (SHFileOperation P/Invoke).
+        // Dynamic import avoids pulling in the .NET bridge on non-Windows platforms.
+        import('./backend/netfx-wpf/dotnet/index.js').then(mod => {
+          try {
+            (mod.default as any).trashItem(filePath);
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        }).catch(reject);
       } else {
-        // Linux / macOS: use gio trash (available on GNOME-based systems) or
-        // fall back to the macOS `trash` CLI if present.
+        // Linux / macOS: use gio trash or AppleScript.
         const [cmd, args] =
           process.platform === 'darwin'
             ? ['osascript', ['-e', `tell application "Finder" to delete POSIX file "${filePath}"`]]

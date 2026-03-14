@@ -155,6 +155,11 @@ export class NetFxWpfWindow implements IWindowProvider {
   private _pollTimer: ReturnType<typeof setInterval> | null = null;
   private _isFullScreen = false;
   private _isResizable = true;
+  private _isMinimizable = true;
+  private _isMaximizable = true;
+  private _isClosable = true;
+  private _isMovable = true;
+  private _skipTaskbar = false;
   private _navCompletedCallback: (() => void) | null = null;
   private _pendingExecs = new Map<
     string,
@@ -164,7 +169,12 @@ export class NetFxWpfWindow implements IWindowProvider {
   constructor(options?: BrowserWindowOptions) {
     this.options = options || {};
     this.webPreferences = this.options.webPreferences || {};
-    this._isResizable = this.options.resizable ?? true;
+    this._isResizable   = this.options.resizable    ?? true;
+    this._isMinimizable = this.options.minimizable  ?? true;
+    this._isMaximizable = this.options.maximizable  ?? true;
+    this._isClosable    = this.options.closable     ?? true;
+    this._isMovable     = this.options.movable      ?? true;
+    this._skipTaskbar   = this.options.skipTaskbar  ?? false;
 
     const partition = this.webPreferences.partition;
 
@@ -534,6 +544,10 @@ export class NetFxWpfWindow implements IWindowProvider {
       this.setFullScreen(true);
     }
 
+    // Apply P/Invoke chrome options. HWND is valid once Application.Run() has been
+    // called and the window handle has been created (synchronous after startApplication).
+    this._applyWindowChrome();
+
     // Poll for queued .NET events (WebMessageReceived, CoreWebView2InitializationCompleted, …)
     // exactly like the Linux backend polls its GJS host.
     this._pollTimer = setInterval(() => this._poll(), POLL_INTERVAL_MS);
@@ -810,9 +824,69 @@ export class NetFxWpfWindow implements IWindowProvider {
     win.Top = (sp.PrimaryScreenHeight - win.Height) / 2;
   }
 
-  /** Flash the taskbar button to attract user attention (no-op — requires P/Invoke). */
-  public flashFrame(_flag: boolean): void {
-    /* P/Invoke not implemented */
+  /** Flash (or stop flashing) the taskbar button to attract user attention. */
+  public flashFrame(flag: boolean): void {
+    if (!this.browserWindow) return;
+    (dotnet as any).winHelper(this.browserWindow, 'FlashWindow', flag);
+  }
+
+  public setMinimizable(flag: boolean): void {
+    this._isMinimizable = flag;
+    if (!this.browserWindow) return;
+    (dotnet as any).winHelper(this.browserWindow, 'SetMinimizable', flag);
+  }
+
+  public isMinimizable(): boolean {
+    return this._isMinimizable;
+  }
+
+  public setMaximizable(flag: boolean): void {
+    this._isMaximizable = flag;
+    if (!this.browserWindow) return;
+    (dotnet as any).winHelper(this.browserWindow, 'SetMaximizable', flag);
+  }
+
+  public isMaximizable(): boolean {
+    return this._isMaximizable;
+  }
+
+  public setClosable(flag: boolean): void {
+    this._isClosable = flag;
+    if (!this.browserWindow) return;
+    (dotnet as any).winHelper(this.browserWindow, 'SetClosable', flag);
+  }
+
+  public isClosable(): boolean {
+    return this._isClosable;
+  }
+
+  public setMovable(flag: boolean): void {
+    this._isMovable = flag;
+    if (!this.browserWindow) return;
+    (dotnet as any).winHelper(this.browserWindow, 'SetMovable', flag);
+  }
+
+  public isMovable(): boolean {
+    return this._isMovable;
+  }
+
+  public setSkipTaskbar(flag: boolean): void {
+    this._skipTaskbar = flag;
+    if (!this.browserWindow) return;
+    (dotnet as any).winHelper(this.browserWindow, 'SetSkipTaskbar', flag);
+  }
+
+  /**
+   * Applies P/Invoke window chrome options that require an HWND.
+   * Called once from show() after Application.Run() has been called.
+   */
+  private _applyWindowChrome(): void {
+    if (!this.browserWindow) return;
+    if (!this._isMinimizable) (dotnet as any).winHelper(this.browserWindow, 'SetMinimizable', false);
+    if (!this._isMaximizable) (dotnet as any).winHelper(this.browserWindow, 'SetMaximizable', false);
+    if (!this._isClosable)   (dotnet as any).winHelper(this.browserWindow, 'SetClosable',    false);
+    if (!this._isMovable)    (dotnet as any).winHelper(this.browserWindow, 'SetMovable',     false);
+    if (this._skipTaskbar)   (dotnet as any).winHelper(this.browserWindow, 'SetSkipTaskbar', true);
   }
 
   public showOpenDialog(options: OpenDialogOptions): string[] | undefined {

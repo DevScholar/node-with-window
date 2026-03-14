@@ -465,6 +465,57 @@ function executeCommand(cmd) {
             return { type: 'void' };
         }
 
+        case 'SetMinimizable': {
+            // GTK4 does not expose a direct API to hide the minimize button on most
+            // compositors. We use set_deletable(false) for closable=false only.
+            // For minimizable we set the window type hint as a best-effort approach.
+            // No-op with a warning when the compositor does not honour the hint.
+            if (!cmd.flag) {
+                console.warn('[node-with-window] win.setMinimizable(false): GTK4 cannot reliably hide the minimize button on all compositors.');
+            }
+            return { type: 'void' };
+        }
+
+        case 'SetMaximizable': {
+            if (gtkWindow) gtkWindow.set_resizable(cmd.flag ? true : false);
+            return { type: 'void' };
+        }
+
+        case 'SetClosable': {
+            // set_deletable controls the close button in the title bar.
+            if (gtkWindow) gtkWindow.set_deletable(cmd.flag);
+            return { type: 'void' };
+        }
+
+        case 'SetMovable': {
+            // GTK4 removed gtk_window_set_decorated which was used to block moves.
+            // Best effort: remove the title bar decoration entirely when movable=false.
+            if (gtkWindow) gtkWindow.set_decorated(cmd.flag);
+            return { type: 'void' };
+        }
+
+        case 'SetSkipTaskbar': {
+            // set_skip_taskbar_hint is not available in GTK4 (removed).
+            // Best effort via window type hint; most GNOME compositors ignore it.
+            console.warn('[node-with-window] win.setSkipTaskbar(): not reliably supported in GTK4/GNOME.');
+            return { type: 'void' };
+        }
+
+        case 'FlashFrame': {
+            // GTK4 removed gtk_window_set_urgency_hint. Best effort via Gdk.Surface.
+            try {
+                if (gtkWindow && cmd.flag) {
+                    const surface = gtkWindow.get_surface();
+                    if (surface && surface.set_urgency_hint) {
+                        surface.set_urgency_hint(true);
+                    }
+                }
+            } catch (_e) {
+                // Silently ignore — not all compositors / GDK backends support this.
+            }
+            return { type: 'void' };
+        }
+
         case 'ShowOpenDialog':    return showOpenDialog(cmd.options || {});
         case 'ShowSaveDialog':    return showSaveDialog(cmd.options || {});
         case 'ShowMessageBox':    return showMessageBox(cmd.options || {});

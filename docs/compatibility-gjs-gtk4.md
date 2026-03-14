@@ -52,9 +52,12 @@
 | `x`, `y` | ❌ | Not forwarded to GTK; placement is WM-controlled |
 | `minWidth`, `minHeight` | ❌ | Not forwarded to GTK |
 | `maxWidth`, `maxHeight` | ❌ | Not forwarded to GTK |
-| `movable`, `minimizable`, `maximizable`, `closable` | ⚠️ | Accepted, not applied |
+| `movable` | ✅ | `Window.set_decorated(false)` when `false` — removes title bar so window cannot be dragged |
+| `minimizable` | ⚠️ | Logged as warning; GTK4 provides no compositor-independent API to hide the minimize button |
+| `maximizable` | ✅ | `Window.set_resizable()` controls whether the window can be maximized |
+| `closable` | ✅ | `Window.set_deletable(false)` hides the close button |
 | `transparent`, `frame`, `kiosk` | ⚠️ | Accepted, not applied |
-| `skipTaskbar` | ⚠️ | Accepted, not applied |
+| `skipTaskbar` | ⚠️ | Logged as warning; GTK4 removed `set_skip_taskbar_hint()`, most compositors ignore workarounds |
 | `fullscreen` | ✅ | `Window.fullscreen()` called at creation |
 | `backgroundColor` | ❌ | |
 | `parent`, `modal` | ❌ | No child window support |
@@ -107,9 +110,18 @@
 | `win.getOpacity()` | ⚠️ | Returns `1.0` + console warning |
 | `win.setResizable(flag)` | ✅ | `Window.set_resizable()`; works at runtime |
 | `win.isResizable()` | ✅ | Tracks local state (constructor default + `setResizable()` calls) |
+| `win.setMinimizable(flag)` | ⚠️ | Logs warning; no reliable GTK4 API to hide minimize button |
+| `win.isMinimizable()` | ✅ | Tracked in JS |
+| `win.setMaximizable(flag)` | ✅ | `Window.set_resizable()` |
+| `win.isMaximizable()` | ✅ | Tracked in JS |
+| `win.setClosable(flag)` | ✅ | `Window.set_deletable()` |
+| `win.isClosable()` | ✅ | Tracked in JS |
+| `win.setMovable(flag)` | ✅ | `Window.set_decorated(false)` removes title bar, preventing drag |
+| `win.isMovable()` | ✅ | Tracked in JS |
+| `win.setSkipTaskbar(flag)` | ⚠️ | Logs warning; GTK4 removed urgency/taskbar hint APIs |
 | `win.setAlwaysOnTop(flag)` | ✅ | `Window.set_keep_above()` |
 | `win.center()` | ⚠️ | No-op + console warning; GTK4 removed `gtk_window_set_position()` |
-| `win.flashFrame(flag)` | ⚠️ | No-op + console warning |
+| `win.flashFrame(flag)` | ⚠️ | Best-effort via `Gdk.Surface.set_urgency_hint()`; compositor support varies |
 | `win.setMenu(menu)` | ✅ | GTK4 `PopoverMenuBar`; menu items flattened and mapped to `Gio.SimpleAction` |
 | `win.removeMenu()` | ✅ | Calls `setMenu([])` |
 | `win.showOpenDialog(options)` | ✅ | `Gtk.FileChooserDialog`; synchronous via nested GLib main loop |
@@ -179,7 +191,7 @@
 | `shell.openPath(filePath)` | ✅ | |
 | `shell.showItemInFolder(filePath)` | ✅ | |
 | `shell.beep()` | ✅ | Writes `\x07` to stdout |
-| `shell.trashItem()` | ❌ | |
+| `shell.trashItem(path)` | ✅ | Delegates to `gio trash` |
 
 ---
 

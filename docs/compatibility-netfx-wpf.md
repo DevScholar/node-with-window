@@ -52,10 +52,11 @@
 | `x`, `y` | ✅ | Sets `WindowStartupLocation.Manual` + `Left`/`Top` |
 | `alwaysOnTop` | ✅ | WPF `Topmost` |
 | `webPreferences` | ✅ | See WebPreferences section |
-| `movable` | ⚠️ | Accepted, not applied |
-| `minimizable`, `maximizable`, `closable` | ⚠️ | Accepted, not applied |
+| `movable` | ✅ | `HwndSource` `WM_NCHITTEST` hook blocks title-bar drag when `false` |
+| `minimizable`, `maximizable` | ✅ | `GetWindowLong`/`SetWindowLong` WS_MINIMIZEBOX / WS_MAXIMIZEBOX |
+| `closable` | ✅ | `EnableMenuItem` on the system menu's `SC_CLOSE` item |
 | `transparent`, `frame`, `kiosk` | ⚠️ | Accepted, not applied |
-| `skipTaskbar` | ⚠️ | Accepted, not applied |
+| `skipTaskbar` | ✅ | `SetWindowLong` WS_EX_TOOLWINDOW / WS_EX_APPWINDOW on extended style |
 | `fullscreen` | ✅ | Applied at window creation via `setFullScreen(true)` |
 | `backgroundColor` | ❌ | |
 | `parent`, `modal` | ❌ | No child window support |
@@ -108,9 +109,18 @@
 | `win.getOpacity()` | ✅ | Reads `Window.Opacity` |
 | `win.setResizable(flag)` | ✅ | `ResizeMode.CanResize` / `NoResize` |
 | `win.isResizable()` | ✅ | Tracked in JS (`_isResizable` flag) |
+| `win.setMinimizable(flag)` | ✅ | `SetWindowLong` WS_MINIMIZEBOX |
+| `win.isMinimizable()` | ✅ | Tracked in JS |
+| `win.setMaximizable(flag)` | ✅ | `SetWindowLong` WS_MAXIMIZEBOX |
+| `win.isMaximizable()` | ✅ | Tracked in JS |
+| `win.setClosable(flag)` | ✅ | `EnableMenuItem` SC_CLOSE on system menu |
+| `win.isClosable()` | ✅ | Tracked in JS |
+| `win.setMovable(flag)` | ✅ | `HwndSource` hook intercepts `WM_SYSCOMMAND SC_MOVE` |
+| `win.isMovable()` | ✅ | Tracked in JS |
+| `win.setSkipTaskbar(flag)` | ✅ | `SetWindowLong` WS_EX_TOOLWINDOW / WS_EX_APPWINDOW |
 | `win.setAlwaysOnTop(flag)` | ✅ | `Window.Topmost` |
 | `win.center()` | ✅ | Computes from `SystemParameters.PrimaryScreenWidth/Height` |
-| `win.flashFrame(flag)` | ✅ | No-op — requires P/Invoke (not implemented) |
+| `win.flashFrame(flag)` | ✅ | `FlashWindowEx` (user32) — flashes taskbar button until window is focused |
 | `win.setMenu(menu)` | ✅ | Accepts `Menu` instance or `MenuItemOptions[]` |
 | `win.removeMenu()` | ✅ | Clears the menu bar |
 | `win.showOpenDialog(options)` | ✅ | Synchronous; returns `string[] \| undefined` |
@@ -180,7 +190,7 @@
 | `shell.openPath(filePath)` | ✅ | |
 | `shell.showItemInFolder(filePath)` | ✅ | |
 | `shell.beep()` | ✅ | Writes `\x07` to stdout |
-| `shell.trashItem()` | ❌ | |
+| `shell.trashItem(path)` | ✅ | `SHFileOperation` (shell32) with `FOF_ALLOWUNDO` — sends to Recycle Bin |
 
 ---
 
@@ -266,7 +276,7 @@ Both mechanisms map every Node.js built-in name (and its `node:` alias) to `http
 
 3. **`win.blur()` is a no-op.** WPF has no direct API to remove focus from a window programmatically.
 
-4. **`win.flashFrame()` is a no-op.** Taskbar button flashing requires P/Invoke (`FlashWindowEx`), which is not implemented.
+4. **`win.flashFrame()` flashes the taskbar button** using `FlashWindowEx` (user32). Calling with `true` flashes until the window receives focus; `false` stops flashing immediately.
 
 5. **`setFullScreen()` does not use an exclusive fullscreen mode.** It sets `WindowStyle.None` + `WindowState.Maximized` + `Topmost = true`. The WPF window frame is hidden but the taskbar may remain visible depending on system settings.
 

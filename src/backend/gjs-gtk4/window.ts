@@ -212,11 +212,21 @@ export class GjsGtk4Window implements IWindowProvider {
   >();
   private _isFullScreen = false;
   private _isResizable = true;
+  private _isMinimizable = true;
+  private _isMaximizable = true;
+  private _isClosable = true;
+  private _isMovable = true;
+  private _skipTaskbar = false;
 
   constructor(options?: BrowserWindowOptions) {
     this.options = options || {};
     this.webPreferences = this.options.webPreferences || {};
-    this._isResizable = this.options.resizable ?? true;
+    this._isResizable   = this.options.resizable    ?? true;
+    this._isMinimizable = this.options.minimizable  ?? true;
+    this._isMaximizable = this.options.maximizable  ?? true;
+    this._isClosable    = this.options.closable     ?? true;
+    this._isMovable     = this.options.movable      ?? true;
+    this._skipTaskbar   = this.options.skipTaskbar  ?? false;
   }
 
   // -------------------------------------------------------------------------
@@ -595,8 +605,73 @@ export class GjsGtk4Window implements IWindowProvider {
     console.warn('[node-with-window] win.center() is not supported on GTK4/GNOME: GTK4 removed gtk_window_set_position().');
   }
 
-  public flashFrame(_flag: boolean): void {
-    console.warn('[node-with-window] win.flashFrame() is not supported on GTK4/GNOME.');
+  public flashFrame(flag: boolean): void {
+    try {
+      this._send('FlashFrame', { flag });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  public setMinimizable(flag: boolean): void {
+    this._isMinimizable = flag;
+    try {
+      this._send('SetMinimizable', { flag });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  public isMinimizable(): boolean {
+    return this._isMinimizable;
+  }
+
+  public setMaximizable(flag: boolean): void {
+    this._isMaximizable = flag;
+    try {
+      this._send('SetMaximizable', { flag });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  public isMaximizable(): boolean {
+    return this._isMaximizable;
+  }
+
+  public setClosable(flag: boolean): void {
+    this._isClosable = flag;
+    try {
+      this._send('SetClosable', { flag });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  public isClosable(): boolean {
+    return this._isClosable;
+  }
+
+  public setMovable(flag: boolean): void {
+    this._isMovable = flag;
+    try {
+      this._send('SetMovable', { flag });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  public isMovable(): boolean {
+    return this._isMovable;
+  }
+
+  public setSkipTaskbar(flag: boolean): void {
+    this._skipTaskbar = flag;
+    try {
+      this._send('SetSkipTaskbar', { flag });
+    } catch {
+      /* ignore */
+    }
   }
 
   public onNavigationCompleted(callback: () => void): void {

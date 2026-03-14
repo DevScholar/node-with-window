@@ -15,12 +15,17 @@ using System.Runtime.InteropServices;
 
 internal static class WindowNativeMethods
 {
-    // GWL_STYLE index for GetWindowLong / SetWindowLong.
-    internal const int GWL_STYLE = -16;
+    // GWL_STYLE / GWL_EXSTYLE index for GetWindowLong / SetWindowLong.
+    internal const int GWL_STYLE   = -16;
+    internal const int GWL_EXSTYLE = -20;
 
     // Window style bits for the minimize / maximize buttons.
     internal const int WS_MINIMIZEBOX = 0x00020000;
     internal const int WS_MAXIMIZEBOX = 0x00010000;
+
+    // Extended window style: tool window is not shown in the taskbar.
+    internal const int WS_EX_TOOLWINDOW = 0x00000080;
+    internal const int WS_EX_APPWINDOW  = 0x00040000;
 
     // System-menu constants used to gray out the Close item.
     internal const uint SC_CLOSE      = 0xF060;
@@ -40,6 +45,13 @@ internal static class WindowNativeMethods
     internal const uint FLASHW_ALL       = 0x00000003;
     internal const uint FLASHW_TIMERNOFG = 0x0000000C;
 
+    // SHFileOperation constants for sending items to the recycle bin.
+    internal const uint FO_DELETE    = 0x0003;
+    internal const ushort FOF_ALLOWUNDO         = 0x0040;
+    internal const ushort FOF_NOCONFIRMATION    = 0x0010;
+    internal const ushort FOF_NOERRORUI         = 0x0400;
+    internal const ushort FOF_SILENT            = 0x0004;
+
     [StructLayout(LayoutKind.Sequential)]
     internal struct FLASHWINFO
     {
@@ -48,6 +60,20 @@ internal static class WindowNativeMethods
         public uint   dwFlags;
         public uint   uCount;
         public uint   dwTimeout;
+    }
+
+    // pFrom / pTo must be double-null-terminated; CharSet.Auto selects Unicode on NT.
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    internal struct SHFILEOPSTRUCT
+    {
+        public IntPtr  hwnd;
+        public uint    wFunc;
+        public string  pFrom;
+        public string  pTo;
+        public ushort  fFlags;
+        public bool    fAnyOperationsAborted;
+        public IntPtr  hNameMappings;
+        public string  lpszProgressTitle;
     }
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -64,6 +90,9 @@ internal static class WindowNativeMethods
 
     [DllImport("user32.dll")]
     internal static extern bool FlashWindowEx(ref FLASHWINFO pwfi);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Auto)]
+    internal static extern int SHFileOperation(ref SHFILEOPSTRUCT FileOp);
 }
 
 // ---------------------------------------------------------------------------
@@ -253,5 +282,65 @@ public static class WindowHelper
             }
         }
         return IntPtr.Zero;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Skip taskbar
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Show or hide the window in the taskbar by toggling WS_EX_TOOLWINDOW /
+    /// WS_EX_APPWINDOW on the extended window style.
+    /// </summary>
+    public static void SetSkipTaskbar(object wpfWindow, bool skip)
+    {
+        IntPtr hwnd = GetHwnd(wpfWindow);
+        if (hwnd == IntPtr.Zero) return;
+
+        int exStyle = WindowNativeMethods.GetWindowLong(hwnd, WindowNativeMethods.GWL_EXSTYLE);
+        if (skip)
+        {
+            exStyle |=  WindowNativeMethods.WS_EX_TOOLWINDOW;
+            exStyle &= ~WindowNativeMethods.WS_EX_APPWINDOW;
+        }
+        else
+        {
+            exStyle &= ~WindowNativeMethods.WS_EX_TOOLWINDOW;
+            exStyle |=  WindowNativeMethods.WS_EX_APPWINDOW;
+        }
+        WindowNativeMethods.SetWindowLong(hwnd, WindowNativeMethods.GWL_EXSTYLE, exStyle);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Trash item (Recycle Bin)
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Sends a file or directory to the Recycle Bin using SHFileOperation.
+    /// Throws on failure.
+    /// </summary>
+    public static void TrashItem(string filePath)
+    {
+        if (string.IsNullOrEmpty(filePath))
+            throw new ArgumentException("filePath must not be empty");
+
+        // pFrom must be double-null-terminated.
+        string pFrom = filePath + '\0';
+
+        WindowNativeMethods.SHFILEOPSTRUCT op = new WindowNativeMethods.SHFILEOPSTRUCT();
+        op.hwnd   = IntPtr.Zero;
+        op.wFunc  = WindowNativeMethods.FO_DELETE;
+        op.pFrom  = pFrom;
+        op.pTo    = null;
+        op.fFlags = (ushort)(
+            WindowNativeMethods.FOF_ALLOWUNDO      |
+            WindowNativeMethods.FOF_NOCONFIRMATION |
+            WindowNativeMethods.FOF_NOERRORUI      |
+            WindowNativeMethods.FOF_SILENT
+        );
+
+        int result = WindowNativeMethods.SHFileOperation(ref op);
+        if (result != 0)
+            throw new Exception(string.Format("SHFileOperation failed with error code 0x{0:X}", result));
     }
 }

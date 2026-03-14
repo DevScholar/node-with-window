@@ -1004,7 +1004,69 @@ public static class Reflection
             Protocol.RemoveBridgeObject(cmd["targetId"].ToString());
             return new Dictionary<string, object> { { "type", "void" } };
         }
-        
+
+        // ─── WinHelper — P/Invoke window chrome operations ───────────────────────
+        // Used exclusively by node-with-window to apply window properties that
+        // require direct Win32 calls (FlashWindow, taskbar visibility, etc.).
+
+        if (action == "WinHelper")
+        {
+            var windowId = cmd["windowId"].ToString();
+            var op       = cmd["op"].ToString();
+            var wpfWindow = BridgeState.ObjectStore[windowId];
+
+            if (op == "FlashWindow")
+            {
+                bool flag = cmd.ContainsKey("flag") && (bool)cmd["flag"];
+                WindowHelper.FlashWindow(wpfWindow, flag);
+            }
+            else if (op == "SetMinimizable")
+            {
+                bool flag = !cmd.ContainsKey("flag") || (bool)cmd["flag"];
+                WindowHelper.SetMinimizable(wpfWindow, flag);
+            }
+            else if (op == "SetMaximizable")
+            {
+                bool flag = !cmd.ContainsKey("flag") || (bool)cmd["flag"];
+                WindowHelper.SetMaximizable(wpfWindow, flag);
+            }
+            else if (op == "SetClosable")
+            {
+                bool flag = !cmd.ContainsKey("flag") || (bool)cmd["flag"];
+                WindowHelper.SetClosable(wpfWindow, flag);
+            }
+            else if (op == "SetMovable")
+            {
+                bool flag = !cmd.ContainsKey("flag") || (bool)cmd["flag"];
+                WindowHelper.SetMovable(wpfWindow, flag);
+            }
+            else if (op == "SetSkipTaskbar")
+            {
+                bool flag = cmd.ContainsKey("flag") && (bool)cmd["flag"];
+                WindowHelper.SetSkipTaskbar(wpfWindow, flag);
+            }
+
+            return new Dictionary<string, object> { { "type", "void" } };
+        }
+
+        if (action == "TrashItem")
+        {
+            var filePath = cmd["filePath"].ToString();
+            try
+            {
+                WindowHelper.TrashItem(filePath);
+                return new Dictionary<string, object> { { "type", "void" } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object>
+                {
+                    { "type", "error" },
+                    { "message", ex.Message }
+                };
+            }
+        }
+
         return new Dictionary<string, object> { { "type", "void" } };
     }
     
