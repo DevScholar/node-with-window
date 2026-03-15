@@ -19,6 +19,7 @@ public static class WebView2Actions
             case "StartApplication":
             case "ExecuteScript":
             case "SetResolvingCallback":
+            case "CapturePreview":
             case "SetWebViewBackground":
                 return true;
             default:
@@ -218,6 +219,44 @@ public static class WebView2Actions
                     return new Dictionary<string, object> { { "type", "primitive" }, { "value", task.Result } };
                 }
                 return new Dictionary<string, object> { { "type", "primitive" }, { "value", null } };
+            }
+            catch (Exception ex)
+            {
+                return new Dictionary<string, object> { { "type", "error" }, { "message", ex.Message } };
+            }
+        }
+
+        if (action == "CapturePreview")
+        {
+            var webViewId  = cmd["webViewId"].ToString();
+            var webViewObj = BridgeState.ObjectStore[webViewId];
+
+            var coreWebView2Prop = webViewObj.GetType().GetProperty("CoreWebView2");
+            if (coreWebView2Prop == null)
+                return new Dictionary<string, object> { { "type", "error" }, { "message", "CoreWebView2 not available" } };
+
+            var coreWebView2 = coreWebView2Prop.GetValue(webViewObj);
+            if (coreWebView2 == null)
+                return new Dictionary<string, object> { { "type", "error" }, { "message", "WebView2 not initialized" } };
+
+            // Locate CapturePreviewAsync; its first parameter is CoreWebView2CapturePreviewImageFormat (Png=0).
+            var captureMethod = coreWebView2.GetType().GetMethod("CapturePreviewAsync");
+            if (captureMethod == null)
+                return new Dictionary<string, object> { { "type", "error" }, { "message", "CapturePreviewAsync not found" } };
+
+            try
+            {
+                var formatType = captureMethod.GetParameters()[0].ParameterType;
+                var pngFormat  = Enum.Parse(formatType, "Png");
+
+                var stream = new System.IO.MemoryStream();
+                var task   = captureMethod.Invoke(coreWebView2, new object[] { pngFormat, stream })
+                             as System.Threading.Tasks.Task;
+                if (task != null) task.Wait();
+
+                var bytes  = stream.ToArray();
+                var base64 = System.Convert.ToBase64String(bytes);
+                return new Dictionary<string, object> { { "type", "primitive" }, { "value", base64 } };
             }
             catch (Exception ex)
             {

@@ -11,6 +11,7 @@ import { app } from './app.js';
 import { startSyncServer } from './node-integration.js';
 import { Menu, MENU_REMOVED } from './menu.js';
 import { WebContents } from './web-contents.js';
+import { NativeImage } from './native-image.js';
 
 /**
  * BrowserWindow - Cross-platform window with WebView support
@@ -328,5 +329,10 @@ export class BrowserWindow extends EventEmitter {
   /** Enable or disable user interaction on this window (used for modal parent blocking). */
   public setEnabled(flag: boolean): void {
     this.provider.setEnabled?.(flag);
+  }
+
+  /** Captures the WebView contents and returns a NativeImage (PNG). */
+  public capturePage(): Promise<NativeImage> {
+    return this.provider.capturePage?.() ?? Promise.resolve(new NativeImage(Buffer.alloc(0)));
   }
 }

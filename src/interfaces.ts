@@ -213,4 +213,6 @@ export interface IWindowProvider {
   getHwnd?(): string;
   /** Enable or disable user interaction on the window (used for modal parent blocking). */
   setEnabled?(flag: boolean): void;
+  /** Captures the WebView contents and returns a NativeImage (PNG). */
+  capturePage?(): Promise<import('./native-image.js').NativeImage>;
 }

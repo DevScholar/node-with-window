@@ -355,6 +355,15 @@ const dotnetProxy = new Proxy(function() {} as any, {
             };
         }
 
+        // Captures the WebView2 rendering as a PNG and returns it as a base64 string.
+        if (prop === 'capturePreview') {
+            return (webView: any): string => {
+                doInitialize();
+                const result = getIpc()!.send({ action: 'CapturePreview', webViewId: webView.__ref }) as any;
+                return (result?.value ?? '') as string;
+            };
+        }
+
         // Fall through: resolve as a .NET type name.
         return winBridge._load(prop);
     },

@@ -10,6 +10,7 @@ import {
   SaveDialogOptions,
   MenuItemOptions,
 } from '../../interfaces';
+import { NativeImage } from '../../native-image.js';
 import { ipcMain } from '../../ipc-main';
 import { generateBridgeScript, injectImportMap } from './bridge.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
@@ -1015,6 +1016,14 @@ export class NetFxWpfWindow implements IWindowProvider {
   public setEnabled(flag: boolean): void {
     if (!this.browserWindow) return;
     (dotnet as any).setWindowEnabled(this.browserWindow, flag);
+  }
+
+  /** Captures the WebView2 rendering as a PNG and returns a NativeImage. */
+  public async capturePage(): Promise<NativeImage> {
+    if (!this.webView) return new NativeImage(Buffer.alloc(0));
+    const base64 = (dotnet as any).capturePreview(this.webView) as string;
+    if (!base64) return new NativeImage(Buffer.alloc(0));
+    return new NativeImage(Buffer.from(base64, 'base64'));
   }
 
   /**

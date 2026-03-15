@@ -62,7 +62,7 @@
 | `kiosk` | ⚠️ | Accepted, not applied |
 | `skipTaskbar` | ⚠️ | Logged as warning; GTK4 removed `set_skip_taskbar_hint()`, most compositors ignore workarounds |
 | `fullscreen` | ✅ | `Window.fullscreen()` called at creation |
-| `parent`, `modal` | ❌ | No child window support |
+| `parent`, `modal` | ⚠️ | `modal` disables the parent window via `set_sensitive(false)`; no GTK `set_transient_for` (cross-process limitation) |
 | `titleBarStyle` | ❌ | |
 
 ### `webPreferences`
@@ -130,7 +130,7 @@
 | `win.showOpenDialog(options)` | ✅ | `Gtk.FileChooserDialog`; synchronous via nested GLib main loop |
 | `win.showSaveDialog(options)` | ✅ | Same |
 | `win.showMessageBox(options)` | ✅ | `Gtk.AlertDialog`; synchronous via nested GLib main loop |
-| `win.capturePage()` | ❌ | |
+| `win.capturePage()` | ✅ | `webkit_web_view_get_snapshot` (VISIBLE region, PNG); nested GLib main loop; returns `NativeImage` |
 
 ### `win.webContents`
 

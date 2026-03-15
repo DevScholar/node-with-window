@@ -5,6 +5,7 @@ import Gtk from 'gi://Gtk?version=4.0';
 import WebKit from 'gi://WebKit?version=6.0';
 import Gio from 'gi://Gio';
 import Gdk from 'gi://Gdk?version=4.0';
+import GLib from 'gi://GLib';
 
 // ---------------------------------------------------------------------------
 // Menu builder
@@ -333,6 +334,39 @@ export function handleWindowCommand(cmd, state) {
             if (state.gtkWindow) state.gtkWindow.close();
             if (state.mainLoop)  state.mainLoop.quit();
             return { type: 'void' };
+        }
+
+        case 'CaptureSnapshot': {
+            if (!state.webView) return { type: 'result', value: '' };
+
+            let done = false;
+            let base64Result = '';
+            const tmpPath = GLib.build_filenamev([GLib.get_tmp_dir(), `nww-snap-${Date.now()}.png`]);
+
+            state.webView.get_snapshot(
+                WebKit.SnapshotRegion.VISIBLE,
+                WebKit.SnapshotOptions.NONE,
+                null,
+                (_wv, asyncResult) => {
+                    try {
+                        const surface = state.webView.get_snapshot_finish(asyncResult);
+                        if (surface) {
+                            surface.writeToPNG(tmpPath);
+                            const [ok, bytes] = GLib.file_get_contents(tmpPath);
+                            if (ok && bytes) base64Result = GLib.base64_encode(bytes);
+                            try { GLib.unlink(tmpPath); } catch (_e) { /* ignore */ }
+                        }
+                    } catch (e) {
+                        console.error('[node-with-window] capturePage error:', e.message || e);
+                    }
+                    done = true;
+                }
+            );
+
+            const ctx = GLib.MainContext.default();
+            while (!done) ctx.iteration(true);
+
+            return { type: 'result', value: base64Result };
         }
 
         default:

@@ -11,3 +11,4 @@ export * from './backends.js';
 export * from './menu.js';
 export * from './shell.js';
 export * from './dialog.js';
+export * from './native-image.js';

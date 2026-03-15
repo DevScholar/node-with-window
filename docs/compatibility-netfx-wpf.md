@@ -129,7 +129,7 @@
 | `win.showOpenDialog(options)` | ✅ | Synchronous; returns `string[] \| undefined` |
 | `win.showSaveDialog(options)` | ✅ | Synchronous; returns `string \| undefined` |
 | `win.showMessageBox(options)` | ✅ | Synchronous; returns button index |
-| `win.capturePage()` | ❌ | |
+| `win.capturePage()` | ✅ | Returns `Promise<NativeImage>`; uses `CoreWebView2.CapturePreviewAsync(Png)` |
 
 ### `win.webContents`
 

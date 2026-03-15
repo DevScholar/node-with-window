@@ -12,6 +12,7 @@ import {
   MenuItemOptions,
 } from '../../interfaces';
 import { ipcMain } from '../../ipc-main';
+import { NativeImage } from '../../native-image.js';
 import { injectBridgeScript, generateBridgeScript } from './bridge.js';
 import { getSyncServerPort } from '../../node-integration.js';
 
@@ -735,6 +736,17 @@ export class GjsGtk4Window implements IWindowProvider {
       this._send('SetSensitive', { sensitive: flag });
     } catch {
       /* ignore */
+    }
+  }
+
+  public async capturePage(): Promise<NativeImage> {
+    try {
+      const res = this._send('CaptureSnapshot', {}) as { value?: string };
+      const b64 = res.value ?? '';
+      if (!b64) return new NativeImage(Buffer.alloc(0));
+      return new NativeImage(Buffer.from(b64, 'base64'));
+    } catch {
+      return new NativeImage(Buffer.alloc(0));
     }
   }
 
