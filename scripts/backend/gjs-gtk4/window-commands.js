@@ -99,7 +99,7 @@ export function handleWindowCommand(cmd, state) {
                 catch (_e) { state.alwaysOnTopPending = true; }
             }
             if (opts.icon)    state.iconPathRef.value = opts.icon;
-            if (opts.fullscreen) state.gtkWindow.fullscreen();
+            if (opts.kiosk || opts.fullscreen) state.gtkWindow.fullscreen();
 
             // frame: false — remove window chrome (title bar + border).
             // transparent also implies frameless (compositor requires undecorated window).

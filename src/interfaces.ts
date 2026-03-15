@@ -184,6 +184,8 @@ export interface IWindowProvider {
   unmaximize?(): void;
   setFullScreen?(flag: boolean): void;
   isFullScreen?(): boolean;
+  setKiosk?(flag: boolean): void;
+  isKiosk?(): boolean;
   setTitle?(title: string): void;
   getTitle?(): string;
   setSize?(width: number, height: number): void;

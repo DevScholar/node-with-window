@@ -212,6 +212,7 @@ export class GjsGtk4Window implements IWindowProvider {
     { resolve: (v: unknown) => void; reject: (e: Error) => void }
   >();
   private _isFullScreen = false;
+  private _isKiosk = false;
   private _isResizable = true;
   private _isMinimizable = true;
   private _isMaximizable = true;
@@ -543,6 +544,16 @@ export class GjsGtk4Window implements IWindowProvider {
 
   public isFullScreen(): boolean {
     return this._isFullScreen;
+  }
+
+  public setKiosk(flag: boolean): void {
+    this._isKiosk = flag;
+    this.setFullScreen(flag);
+    this.setSkipTaskbar(flag || (this.options.skipTaskbar ?? false));
+  }
+
+  public isKiosk(): boolean {
+    return this._isKiosk;
   }
 
   public setTitle(title: string): void {

@@ -185,6 +185,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   private isClosed = false;
   private _pollTimer: ReturnType<typeof setInterval> | null = null;
   private _isFullScreen = false;
+  private _isKiosk = false;
   private _isResizable = true;
   private _isMinimizable = true;
   private _isMaximizable = true;
@@ -598,8 +599,10 @@ export class NetFxWpfWindow implements IWindowProvider {
     // on the .NET side — the Node.js event loop is never blocked.
     dotnetAny.startApplication(this.app, this.browserWindow);
 
-    // Apply fullscreen option after the window is shown.
-    if (this.options.fullscreen) {
+    // Apply fullscreen / kiosk option after the window is shown.
+    if (this.options.kiosk) {
+      this.setKiosk(true);
+    } else if (this.options.fullscreen) {
       this.setFullScreen(true);
     }
 
@@ -790,6 +793,16 @@ export class NetFxWpfWindow implements IWindowProvider {
 
   public isFullScreen(): boolean {
     return this._isFullScreen;
+  }
+
+  public setKiosk(flag: boolean): void {
+    this._isKiosk = flag;
+    this.setFullScreen(flag);
+    this.setSkipTaskbar(flag || (this.options.skipTaskbar ?? false));
+  }
+
+  public isKiosk(): boolean {
+    return this._isKiosk;
   }
 
   public setTitle(title: string): void {

@@ -262,6 +262,13 @@ export class BrowserWindow extends EventEmitter {
     return this.provider.isFullScreen?.() ?? false;
   }
 
+  public setKiosk(flag: boolean): void {
+    this.provider.setKiosk?.(flag);
+  }
+  public isKiosk(): boolean {
+    return this.provider.isKiosk?.() ?? false;
+  }
+
   public setTitle(title: string): void {
     this.provider.setTitle?.(title);
   }
