@@ -203,31 +203,32 @@ Because `node-with-window-examples` resolves the library via a `file:` symlink i
 
 ## Known Limitations
 
-### Windows — transparent window mouse click-through
+### Windows — transparent window
 
-When `transparent: true` is used with WPF + WebView2, clicks on the WebView2 area
-pass through to windows beneath instead of reaching the web content. This is a
-fundamental limitation of the Windows layered-window model:
+`transparent: true` is implemented using WPF `WindowChrome` with
+`GlassFrameThickness="-1"` (hardware DirectX renderer + DWM compositor glass)
+instead of `AllowsTransparency=true`. This avoids the `WS_EX_LAYERED`
+per-pixel alpha hit-testing that would cause clicks on the WebView2 area to
+pass through to windows beneath.
 
-- `AllowsTransparency=true` forces WPF into software-renderer mode
-  (`WS_EX_LAYERED` + `UpdateLayeredWindow`). In this mode Windows performs
-  OS-level per-pixel alpha hit-testing before dispatching `WM_NCHITTEST`.
-- WebView2 renders via DirectComposition into its own child HWND, so the WPF
-  bitmap has alpha=0 everywhere the WebView2 sits. Those pixels are filtered by
-  the OS before any hook can intercept them.
-- The `WM_NCHITTEST` hook approach cannot fix this because it never fires for
-  alpha=0 pixels.
+**Previously attempted approaches that did not work:**
+- `AllowsTransparency=true` (SWRT mode) — OS-level alpha filtering occurs
+  before `WM_NCHITTEST` fires; WebView2's alpha=0 area in the WPF bitmap
+  makes the entire WebView2 unclickable.
+- Raw `DwmExtendFrameIntoClientArea` P/Invoke without `WindowChrome` — WPF's
+  hardware render target is not wired up to the DWM glass, so the window
+  appears black.
 
-**No upstream fix is available.** The WebView2 team's recommended solution is
-`CoreWebView2CompositionController`, which renders into a visual instead of a
-child HWND, giving the host application full control over hit-testing. This is
-not yet implemented in node-with-window.
+`CoreWebView2CompositionController` (renders WebView2 into a visual instead of
+a child HWND) would allow full per-pixel hit-test control and is a possible
+future improvement, but is not currently implemented.
 
 ### Linux — transparent window background
 
-On Linux, `transparent: true` removes the window chrome and sets the WebKit
-background to transparent, but the GTK window background may still appear opaque
-(white) depending on the compositor and GTK theme. On Wayland desktops with a
-compositing window manager (e.g. GNOME Shell, KDE Plasma) true transparency
-works correctly. WSL2's WSLg compositor has limited support and may show an
-opaque background.
+`transparent: true` removes the window chrome (`set_decorated(false)`) and applies a
+CSS override (`.nww-transparent { background-color: transparent; }`) to the GTK window
+and sets the WebKit background to transparent.
+
+Transparency requires a compositing window manager. On Wayland desktops with a compositor
+(GNOME Shell, KDE Plasma, etc.) it works correctly. WSL2's WSLg compositor has limited
+compositing support and may show an opaque background.
