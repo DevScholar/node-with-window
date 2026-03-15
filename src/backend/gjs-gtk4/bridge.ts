@@ -17,7 +17,7 @@ import { generateNodeBridgeIife, generateNodeBridgeStub } from '../bridge-shared
  * Windows version so that application code is fully cross-platform.
  */
 
-export function generateBridgeScript(webPreferences: WebPreferences, syncServerPort = 0, authToken = ''): string {
+export function generateBridgeScript(webPreferences: WebPreferences, syncServerPort = 0): string {
   const nodeIntegration = webPreferences.nodeIntegration;
 
   let nodeBridge = '';
@@ -31,13 +31,12 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
     const injectedPort    = syncServerPort;
 
     if (injectedPort > 0) {
-      const tokenSuffix = authToken ? `?token=${authToken}` : '';
       const base = `http://127.0.0.1:${injectedPort}/__nww_esm__/`;
       const imports: Record<string, string> = {};
-      imports['@devscholar/node-with-window'] = base + '@devscholar/node-with-window' + tokenSuffix;
+      imports['@devscholar/node-with-window'] = base + '@devscholar/node-with-window';
       for (const name of NODE_BUILTINS) {
-        imports[name] = base + name + tokenSuffix;
-        imports[`node:${name}`] = base + name + tokenSuffix;
+        imports[name] = base + name;
+        imports[`node:${name}`] = base + name;
       }
       const importMapJson = JSON.stringify(JSON.stringify({ imports }));
 
@@ -49,7 +48,6 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
         injectedEnv,
         injectedCwd,
         importMapJson,
-        authToken,
       });
     } else {
       // Fallback stubs when no sync server is running (nodeIntegration without
@@ -133,7 +131,6 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
             var xhr = new XMLHttpRequest();
             xhr.open('POST', 'http://127.0.0.1:${syncServerPort}/__nww_ipc_sync__', false);
             xhr.setRequestHeader('Content-Type', 'application/json');
-            xhr.setRequestHeader('Authorization', 'Bearer ${authToken}');
             xhr.send(JSON.stringify({ channel: channel, args: args }));
             if (xhr.status !== 200) return undefined;
             try { return JSON.parse(xhr.responseText).result; } catch(e) { return undefined; }
@@ -173,10 +170,10 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
  * The importmap must precede the bridge script so that `import 'fs'` in any
  * subsequent `<script type="module">` resolves via the shim server.
  */
-export function injectBridgeScript(html: string, webPreferences: WebPreferences, syncServerPort = 0, authToken = ''): string {
-  const bridgeTag = `<script>${generateBridgeScript(webPreferences, syncServerPort, authToken)}</script>`;
+export function injectBridgeScript(html: string, webPreferences: WebPreferences, syncServerPort = 0): string {
+  const bridgeTag = `<script>${generateBridgeScript(webPreferences, syncServerPort)}</script>`;
   const importMapTag = (webPreferences.nodeIntegration && syncServerPort > 0)
-    ? generateImportMapTag(syncServerPort, authToken)
+    ? generateImportMapTag(syncServerPort)
     : '';
   // importmap must come BEFORE the bridge script so it is registered before
   // any module scripts the bridge might trigger.

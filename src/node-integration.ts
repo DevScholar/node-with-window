@@ -1,6 +1,5 @@
 import * as http from 'node:http';
 import { createRequire } from 'node:module';
-import { randomBytes } from 'node:crypto';
 import { ipcMain } from './ipc-main.js';
 
 /**
@@ -41,7 +40,6 @@ import { ipcMain } from './ipc-main.js';
  */
 
 let _port = 0;
-let _token = '';
 let _ready: Promise<number> | null = null;
 
 /** All currently connected SSE clients (one per renderer page). */
@@ -57,16 +55,6 @@ const refRegistry = new Map<string, unknown>();
 /** Returns the port once startSyncServer() has resolved, 0 otherwise. */
 export function getSyncServerPort(): number {
   return _port;
-}
-
-/**
- * Returns the per-session auth token once startSyncServer() has resolved.
- * The token is injected into the renderer bridge and validated on every
- * request — providing defense-in-depth against other local processes that
- * do not know the token (not a protection against same-user sniffing).
- */
-export function getSyncServerToken(): string {
-  return _token;
 }
 
 /** Push a callback invocation to every connected SSE client. */
@@ -161,10 +149,6 @@ async function _findAvailablePort(): Promise<number> {
 export function startSyncServer(): Promise<number> {
   if (_ready) return _ready;
 
-  // Generate a per-session token before the server starts.
-  // The token is injected into the renderer bridge and checked on every request.
-  _token = randomBytes(16).toString('hex');
-
   // Resolve modules relative to this file so Node.js builtins always work.
   // npm packages installed in the user's project are NOT on this path;
   // that is a known limitation (builtins cover the common Electron use cases).
@@ -177,7 +161,7 @@ export function startSyncServer(): Promise<number> {
           // Add CORS headers so file:// pages in WebView2 can reach us.
           res.setHeader('Access-Control-Allow-Origin', '*');
           res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-          res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+          res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
           if (req.method === 'OPTIONS') {
             res.writeHead(204);
@@ -185,31 +169,11 @@ export function startSyncServer(): Promise<number> {
             return;
           }
 
-          // ── Auth token validation ─────────────────────────────────────
-          // POST requests carry the token in the Authorization header.
-          // GET requests (SSE, ESM shims, module keys) carry it as ?token=.
-          // This is defense-in-depth: prevents casual access from other
-          // local processes that do not know the per-session token.
-          {
-            let ok = false;
-            if (req.method === 'POST') {
-              ok = req.headers['authorization'] === `Bearer ${_token}`;
-            } else {
-              const tokenParam = new URL('http://x' + (req.url ?? '')).searchParams.get('token');
-              ok = tokenParam === _token;
-            }
-            if (!ok) {
-              res.writeHead(403, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: 'Forbidden' }));
-              return;
-            }
-          }
-
           // ── SSE endpoint ─────────────────────────────────────────────────
           // The renderer opens a persistent EventSource here so that callbacks
           // registered via window.require can fire multiple times (fs.watch,
           // EventEmitter.on, etc.).
-          if (req.method === 'GET' && req.url?.startsWith('/__nww_events__')) {
+          if (req.method === 'GET' && req.url === '/__nww_events__') {
         res.writeHead(200, {
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
@@ -260,8 +224,7 @@ export function startSyncServer(): Promise<number> {
       // still go through the existing sync-XHR mechanism. The key list is
       // resolved server-side so the export names are accurate.
       if (req.method === 'GET' && req.url?.startsWith('/__nww_esm__/')) {
-        const parsedEsm = new URL('http://x' + req.url);
-        const moduleName = parsedEsm.pathname.slice('/__nww_esm__/'.length);
+        const moduleName = req.url.slice('/__nww_esm__/'.length);
         if (!moduleName) {
           res.writeHead(400); res.end(); return;
         }

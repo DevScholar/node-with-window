@@ -18,7 +18,7 @@ import { generateNodeBridgeIife, generateNodeBridgeStub } from '../bridge-shared
  *    - window.ipcRenderer.on() - receive messages from main process
  */
 
-export function generateBridgeScript(webPreferences: WebPreferences, syncServerPort = 0, authToken = ''): string {
+export function generateBridgeScript(webPreferences: WebPreferences, syncServerPort = 0): string {
   const nodeIntegration = webPreferences.nodeIntegration;
 
   let nodeBridge = '';
@@ -32,13 +32,12 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
     const injectedPort    = syncServerPort;
 
     if (injectedPort > 0) {
-      const tokenSuffix = authToken ? `?token=${authToken}` : '';
       const base = `http://127.0.0.1:${injectedPort}/__nww_esm__/`;
       const imports: Record<string, string> = {};
-      imports['@devscholar/node-with-window'] = base + '@devscholar/node-with-window' + tokenSuffix;
+      imports['@devscholar/node-with-window'] = base + '@devscholar/node-with-window';
       for (const name of NODE_BUILTINS) {
-        imports[name] = base + name + tokenSuffix;
-        imports[`node:${name}`] = base + name + tokenSuffix;
+        imports[name] = base + name;
+        imports[`node:${name}`] = base + name;
       }
       // Build the importmap JSON for the dynamic injection guard.
       // The MutationObserver importmap-injection block makes 'import { x } from "fs"'
@@ -55,7 +54,6 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
         injectedEnv,
         injectedCwd,
         importMapJson,
-        authToken,
       });
     } else {
       // Fallback stubs when no sync server is running.
@@ -150,7 +148,6 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
             var xhr = new XMLHttpRequest();
             xhr.open('POST', 'http://127.0.0.1:${syncServerPort}/__nww_ipc_sync__', false);
             xhr.setRequestHeader('Content-Type', 'application/json');
-            xhr.setRequestHeader('Authorization', 'Bearer ${authToken}');
             xhr.send(JSON.stringify({ channel: channel, args: args }));
             if (xhr.status !== 200) return undefined;
             try { return JSON.parse(xhr.responseText).result; } catch (e) { return undefined; }
@@ -191,8 +188,8 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
  * @param syncServerPort - Port for the sync server
  * @returns Modified HTML with bridge script inserted
  */
-export function injectBridgeScript(html: string, webPreferences: WebPreferences, syncServerPort = 0, authToken = ''): string {
-  const script = `<script>${generateBridgeScript(webPreferences, syncServerPort, authToken)}</script>`;
+export function injectBridgeScript(html: string, webPreferences: WebPreferences, syncServerPort = 0): string {
+  const script = `<script>${generateBridgeScript(webPreferences, syncServerPort)}</script>`;
 
   if (/<head[^>]*>/i.test(html)) return html.replace(/(<head[^>]*>)/i, `$1${script}`);
   if (/<body[^>]*>/i.test(html)) return html.replace(/(<body[^>]*>)/i, `$1${script}`);
@@ -213,14 +210,12 @@ export function injectBridgeScript(html: string, webPreferences: WebPreferences,
  * @param webPreferences  Only reads .nodeIntegration
  * @param syncServerPort  Port the sync server is listening on
  * @param baseHref        Optional base URL, e.g. 'file:///C:/myapp/src/'
- * @param authToken       Per-session auth token appended as ?token= to importmap URLs
  */
 export function injectImportMap(
   html: string,
   webPreferences: WebPreferences,
   syncServerPort: number,
   baseHref?: string,
-  authToken = '',
 ): string {
   if (!webPreferences.nodeIntegration || syncServerPort <= 0) {
     if (!baseHref) return html;
@@ -229,7 +224,7 @@ export function injectImportMap(
     return `<head>${baseTag}</head>${html}`;
   }
 
-  const importMapTag = generateImportMapTag(syncServerPort, authToken);
+  const importMapTag = generateImportMapTag(syncServerPort);
   const baseTag = baseHref ? `<base href="${baseHref}">` : '';
   const injection = baseTag + importMapTag;
 
