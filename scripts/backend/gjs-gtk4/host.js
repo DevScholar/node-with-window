@@ -1,4 +1,4 @@
-// scripts/linux/host.js
+// scripts/backend/gjs-gtk4/host.js
 // GJS host script for the node-with-window Linux backend.
 // Spawned by GjsGtk4Window via: gjs -m host.js
 // IPC: fd 3 = read commands from Node.js, fd 4 = write responses to Node.js

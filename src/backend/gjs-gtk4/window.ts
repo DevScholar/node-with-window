@@ -20,7 +20,7 @@ import { getSyncServerPort } from '../../node-integration.js';
  *
  * Architecture overview
  * ─────────────────────
- * A dedicated GJS script (scripts/linux/host.js) is spawned as a child process.
+ * A dedicated GJS script (scripts/backend/gjs-gtk4/host.js) is spawned as a child process.
  * It runs the GLib main loop and owns the GTK window + WebKit WebView.
  * Node.js communicates with it over two Unix FIFOs:
  *
@@ -126,7 +126,7 @@ function findGjsPath(): string {
 }
 
 /**
- * Locate scripts/linux/host.js by walking up the directory tree from
+ * Locate scripts/backend/gjs-gtk4/host.js by walking up the directory tree from
  * `import.meta.url`.
  *
  * Why not a fixed relative path?
@@ -134,8 +134,8 @@ function findGjsPath(): string {
  * points to the *bundle* file (e.g. dist/notepad/notepad.js), not to
  * dist/backend/gjs-gtk4/window.js.  A fixed "../../.." would resolve to the
  * wrong directory.  Walking up and checking both the package-root pattern
- * ("scripts/linux/host.js") and the node_modules installation pattern
- * ("node_modules/@devscholar/node-with-window/scripts/linux/host.js")
+ * ("scripts/backend/gjs-gtk4/host.js") and the node_modules installation pattern
+ * ("node_modules/@devscholar/node-with-window/scripts/backend/gjs-gtk4/host.js")
  * handles both the bundled case and the unbundled/development case.
  */
 function findHostScript(): string {
@@ -145,7 +145,7 @@ function findHostScript(): string {
   for (let i = 0; i < 12; i++) {
     const candidates = [
       // Package root (unbundled: dist/backend/gjs-gtk4/ → ../../.. → root)
-      path.join(dir, 'scripts', 'linux', 'host.js'),
+      path.join(dir, 'scripts', 'backend', 'gjs-gtk4', 'host.js'),
       // npm install / file: link (bundled: walk up to node_modules)
       path.join(
         dir,
@@ -153,7 +153,8 @@ function findHostScript(): string {
         '@devscholar',
         'node-with-window',
         'scripts',
-        'linux',
+        'backend',
+        'gjs-gtk4',
         'host.js'
       ),
     ];
@@ -166,7 +167,7 @@ function findHostScript(): string {
   }
 
   throw new Error(
-    `[node-with-window] Cannot locate scripts/linux/host.js.\n` +
+    `[node-with-window] Cannot locate scripts/backend/gjs-gtk4/host.js.\n` +
       `Searched upward from: ${startDir}\n` +
       `Run \`npm run build\` inside node-with-window and ensure the package is properly installed.`
   );

@@ -1,6 +1,6 @@
 // src/backend/netfx-wpf/dotnet/index.ts
 // Self-contained WinBridge client for node-with-window.
-// Spawns scripts/windows/WinHost.ps1 and communicates via named pipe.
+// Spawns scripts/backend/netfx-wpf/WinHost.ps1 and communicates via named pipe.
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as cp from 'node:child_process';
@@ -15,25 +15,25 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
- * Searches common locations for scripts/windows/WinHost.ps1.
+ * Searches common locations for scripts/backend/netfx-wpf/WinHost.ps1.
  * Handles both direct installs and esbuild-bundled scenarios where __dirname
  * points to the bundle output rather than the original package tree.
  */
 function findWinHostScript(): string {
     const candidates = [
-        // tsc output: dist/backend/netfx-wpf/dotnet/ → ../../../../scripts/windows/
-        path.resolve(__dirname, '..', '..', '..', '..', 'scripts', 'windows', 'WinHost.ps1'),
-        // esbuild bundle output one level deep: dist/<app>/ → ../../scripts/windows/
-        path.resolve(__dirname, '..', '..', 'scripts', 'windows', 'WinHost.ps1'),
+        // tsc output: dist/backend/netfx-wpf/dotnet/ → ../../../../scripts/backend/netfx-wpf/
+        path.resolve(__dirname, '..', '..', '..', '..', 'scripts', 'backend', 'netfx-wpf', 'WinHost.ps1'),
+        // esbuild bundle output one level deep: dist/<app>/ → ../../scripts/backend/netfx-wpf/
+        path.resolve(__dirname, '..', '..', 'scripts', 'backend', 'netfx-wpf', 'WinHost.ps1'),
         // installed as npm package
-        path.resolve(process.cwd(), 'node_modules', '@devscholar', 'node-with-window', 'scripts', 'windows', 'WinHost.ps1'),
-        path.resolve(process.cwd(), '..', 'node_modules', '@devscholar', 'node-with-window', 'scripts', 'windows', 'WinHost.ps1'),
-        path.resolve(process.cwd(), '..', '..', 'node_modules', '@devscholar', 'node-with-window', 'scripts', 'windows', 'WinHost.ps1'),
-        path.resolve(process.cwd(), '..', '..', '..', 'node_modules', '@devscholar', 'node-with-window', 'scripts', 'windows', 'WinHost.ps1'),
+        path.resolve(process.cwd(), 'node_modules', '@devscholar', 'node-with-window', 'scripts', 'backend', 'netfx-wpf', 'WinHost.ps1'),
+        path.resolve(process.cwd(), '..', 'node_modules', '@devscholar', 'node-with-window', 'scripts', 'backend', 'netfx-wpf', 'WinHost.ps1'),
+        path.resolve(process.cwd(), '..', '..', 'node_modules', '@devscholar', 'node-with-window', 'scripts', 'backend', 'netfx-wpf', 'WinHost.ps1'),
+        path.resolve(process.cwd(), '..', '..', '..', 'node_modules', '@devscholar', 'node-with-window', 'scripts', 'backend', 'netfx-wpf', 'WinHost.ps1'),
         // monorepo sibling
-        path.resolve(process.cwd(), '..', 'node-with-window', 'scripts', 'windows', 'WinHost.ps1'),
+        path.resolve(process.cwd(), '..', 'node-with-window', 'scripts', 'backend', 'netfx-wpf', 'WinHost.ps1'),
         // cwd fallback
-        path.resolve(process.cwd(), 'scripts', 'windows', 'WinHost.ps1'),
+        path.resolve(process.cwd(), 'scripts', 'backend', 'netfx-wpf', 'WinHost.ps1'),
     ];
     for (const p of candidates) {
         if (fs.existsSync(p)) return p;

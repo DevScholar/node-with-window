@@ -2,7 +2,7 @@
 
 **Platform:** Windows
 **Stack:** WPF (Windows Presentation Foundation) + WebView2 (Chromium-based)
-**Bridge:** Self-contained — `scripts/windows/WinHost.ps1` compiles the C# bridge via PowerShell `Add-Type` and communicates over a Named Pipe; Node.js polls for events at 16 ms intervals.
+**Bridge:** Self-contained — `scripts/backend/netfx-wpf/WinHost.ps1` compiles the C# bridge via PowerShell `Add-Type` and communicates over a Named Pipe; Node.js polls for events at 16 ms intervals.
 
 ---
 

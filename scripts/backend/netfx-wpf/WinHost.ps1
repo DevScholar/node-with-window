@@ -1,4 +1,4 @@
-# scripts/windows/WinHost.ps1
+# scripts/backend/netfx-wpf/WinHost.ps1
 # Entry point for the node-with-window Windows backend process.
 # Spawned by the Node.js backend with -PipeName <name>.
 param($PipeName)

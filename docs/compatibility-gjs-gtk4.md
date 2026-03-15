@@ -2,7 +2,7 @@
 
 **Platform:** Linux
 **Stack:** GTK 4 + WebKitGTK 6 (WebKit2GTK)
-**Bridge:** GJS host process (`scripts/linux/host.js`) spawned as a child; Node.js communicates over two Unix FIFOs at 16 ms poll intervals.
+**Bridge:** GJS host process (`scripts/backend/gjs-gtk4/host.js`) spawned as a child; Node.js communicates over two Unix FIFOs at 16 ms poll intervals.
 
 ---
 

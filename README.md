@@ -177,7 +177,7 @@ Because `node-with-window-examples` resolves the library via a `file:` symlink i
 
 ### Windows (WPF + WebView2)
 
-- `node-with-window` spawns `scripts/windows/WinHost.ps1` as a child process. The script compiles the WPF/WebView2 C# bridge (`scripts/windows/*.cs`) at startup via PowerShell's `Add-Type` and communicates over a Windows Named Pipe using a synchronous JSON request/response protocol.
+- `node-with-window` spawns `scripts/backend/netfx-wpf/WinHost.ps1` as a child process. The script compiles the WPF/WebView2 C# bridge (`scripts/backend/netfx-wpf/*.cs`) at startup via PowerShell's `Add-Type` and communicates over a Windows Named Pipe using a synchronous JSON request/response protocol.
 - `show()` sends a `StartApplication` command to the .NET host, which immediately acknowledges and then calls `Application.Run(window)` — blocking the .NET thread in the WPF message loop without blocking the Node.js event loop.
 - Node.js polls for events every 16 ms with a `Poll` command that drains a thread-safe queue. WPF event handlers (like `WebMessageReceived`) enqueue their payload instead of blocking on synchronous IPC, so `async ipcMain.handle()` callbacks work normally.
 - When `loadFile` is called, the HTML is read, the `ipcRenderer` bridge is injected into `<head>`, and the modified HTML is sent to the WPF host before `Application.Run()`.
@@ -186,7 +186,7 @@ Because `node-with-window-examples` resolves the library via a `file:` symlink i
 
 ### Linux (GJS + GTK 4 + WebKitGTK)
 
-- `GjsGtk4Window` spawns `scripts/linux/host.js` as a child process via GJS.
+- `GjsGtk4Window` spawns `scripts/backend/gjs-gtk4/host.js` as a child process via GJS.
   The host script runs the GTK 4 main loop (`GLib.MainLoop`) and owns the `Gtk.Window` + `WebKit.WebView`.
 - Node.js and the GJS host communicate over two Unix FIFOs (passed as fd 3 and fd 4) using
   a synchronous newline-delimited JSON request/response protocol.

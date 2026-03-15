@@ -22,14 +22,14 @@ import { callbackRegistry, createProxy, createProxyWithInlineProps } from './dot
  *
  * On Windows, we use WebView2 (Microsoft's Chromium-based webview) combined with
  * WPF (Windows Presentation Foundation) for the window frame. The .NET interop is
- * handled by a self-contained PowerShell/C# bridge in scripts/windows/.
+ * handled by a self-contained PowerShell/C# bridge in scripts/backend/netfx-wpf/.
  *
  * Why this architecture?
  * - Node.js runs in a single-threaded event loop
  * - .NET/WPF also runs on its own thread and message loop
  * - We need to communicate between these two runtimes in a way that doesn't block either
  *
- * The Windows backend spawns a hidden PowerShell process (scripts/windows/WinHost.ps1)
+ * The Windows backend spawns a hidden PowerShell process (scripts/backend/netfx-wpf/WinHost.ps1)
  * that compiles and hosts the C# bridge. Communication happens through a named pipe
  * using synchronous JSON-line messages.
  */
