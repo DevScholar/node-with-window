@@ -58,11 +58,10 @@
 | `transparent` | ✅ | `WindowStyle.None` + `AllowsTransparency = true` + `Background = Transparent`; WebView2 `DefaultBackgroundColor = Color.Transparent` |
 | `frame` | ✅ | `WindowStyle.None` — removes title bar and border |
 | `backgroundColor` | ✅ | WebView2 `DefaultBackgroundColor` via `System.Drawing.Color.FromArgb`; accepts `#RGB`, `#RRGGBB`, `#AARRGGBB` |
-| `kiosk` | ⚠️ | Accepted, not applied |
+| `kiosk` | ✅ | `setFullScreen(true)` + `setSkipTaskbar(true)`; exit restores previous state |
 | `skipTaskbar` | ✅ | `SetWindowLong` WS_EX_TOOLWINDOW / WS_EX_APPWINDOW on extended style |
 | `fullscreen` | ✅ | Applied at window creation via `setFullScreen(true)` |
-| `backgroundColor` | ❌ | |
-| `parent`, `modal` | ❌ | No child window support |
+| `parent`, `modal` | ✅ | `parent` sets WPF `WindowInteropHelper.Owner`; `modal` disables the parent window until the child closes |
 | `titleBarStyle` | ❌ | |
 
 ### `webPreferences`

@@ -315,4 +315,18 @@ export class BrowserWindow extends EventEmitter {
   public flashFrame(flag: boolean): void {
     this.provider.flashFrame?.(flag);
   }
+
+  public setBackgroundColor(color: string): void {
+    this.provider.setBackgroundColor?.(color);
+  }
+
+  /** Returns the native window HWND as a decimal string (Windows only; '0' on Linux). */
+  public getHwnd(): string {
+    return this.provider.getHwnd?.() ?? '0';
+  }
+
+  /** Enable or disable user interaction on this window (used for modal parent blocking). */
+  public setEnabled(flag: boolean): void {
+    this.provider.setEnabled?.(flag);
+  }
 }

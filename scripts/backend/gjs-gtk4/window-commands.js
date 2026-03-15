@@ -321,6 +321,13 @@ export function handleWindowCommand(cmd, state) {
             return { type: 'void' };
         }
 
+        case 'SetSensitive': {
+            if (state.gtkWindow) {
+                try { state.gtkWindow.set_sensitive(cmd.sensitive !== false); } catch (_e) { /* ignore */ }
+            }
+            return { type: 'void' };
+        }
+
         case 'Close': {
             state.isClosedRef.value = true;
             if (state.gtkWindow) state.gtkWindow.close();

@@ -329,6 +329,32 @@ const dotnetProxy = new Proxy(function() {} as any, {
             };
         }
 
+        // Returns the Win32 HWND of a WPF window as a decimal string.
+        // Only valid after the window has been shown (Application.Run called).
+        if (prop === 'getHwnd') {
+            return (window: any): string => {
+                doInitialize();
+                const result = getIpc()!.send({ action: 'GetHwnd', windowId: window.__ref }) as any;
+                return (result?.value ?? '0').toString();
+            };
+        }
+
+        // Sets the owner HWND of a child WPF window (parent/modal support).
+        if (prop === 'setOwnerByHwnd') {
+            return (childWindow: any, ownerHwnd: string): void => {
+                doInitialize();
+                getIpc()!.send({ action: 'SetOwnerByHwnd', windowId: childWindow.__ref, ownerHwnd });
+            };
+        }
+
+        // Enables or disables user interaction on a WPF window (modal blocking).
+        if (prop === 'setWindowEnabled') {
+            return (window: any, enabled: boolean): void => {
+                doInitialize();
+                getIpc()!.send({ action: 'SetWindowEnabled', windowId: window.__ref, enabled });
+            };
+        }
+
         // Fall through: resolve as a .NET type name.
         return winBridge._load(prop);
     },

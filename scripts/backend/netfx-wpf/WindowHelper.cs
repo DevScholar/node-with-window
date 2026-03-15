@@ -148,13 +148,7 @@ public static class WindowHelper
     {
         if (wpfWindow == null) return IntPtr.Zero;
 
-        Type helperType = null;
-        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-        {
-            if (asm.GetName().Name != "PresentationFramework") continue;
-            helperType = asm.GetType("System.Windows.Interop.WindowInteropHelper");
-            if (helperType != null) break;
-        }
+        Type helperType = Type.GetType("System.Windows.Interop.WindowInteropHelper, PresentationFramework");
         if (helperType == null) return IntPtr.Zero;
 
         object helper = Activator.CreateInstance(helperType, new object[] { wpfWindow });
@@ -264,15 +258,8 @@ public static class WindowHelper
     private static void InstallMovingHook(IntPtr hwnd)
     {
         // Locate HwndSource (PresentationCore) and HwndSourceHook delegate type.
-        Type hwndSourceType = null;
-        Type hookDelegateType = null;
-        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-        {
-            if (asm.GetName().Name != "PresentationCore") continue;
-            hwndSourceType    = asm.GetType("System.Windows.Interop.HwndSource");
-            hookDelegateType  = asm.GetType("System.Windows.Interop.HwndSourceHook");
-            break;
-        }
+        Type hwndSourceType   = Type.GetType("System.Windows.Interop.HwndSource, PresentationCore");
+        Type hookDelegateType = Type.GetType("System.Windows.Interop.HwndSourceHook, PresentationCore");
         if (hwndSourceType == null || hookDelegateType == null) return;
 
         MethodInfo fromHwndMethod = hwndSourceType.GetMethod(
@@ -373,15 +360,8 @@ public static class WindowHelper
 
     private static void InstallHitTestHook(IntPtr hwnd)
     {
-        Type hwndSourceType = null;
-        Type hookDelegateType = null;
-        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-        {
-            if (asm.GetName().Name != "PresentationCore") continue;
-            hwndSourceType   = asm.GetType("System.Windows.Interop.HwndSource");
-            hookDelegateType = asm.GetType("System.Windows.Interop.HwndSourceHook");
-            break;
-        }
+        Type hwndSourceType   = Type.GetType("System.Windows.Interop.HwndSource, PresentationCore");
+        Type hookDelegateType = Type.GetType("System.Windows.Interop.HwndSourceHook, PresentationCore");
         if (hwndSourceType == null || hookDelegateType == null) return;
 
         MethodInfo fromHwndMethod = hwndSourceType.GetMethod(
@@ -471,15 +451,8 @@ public static class WindowHelper
     {
         Type windowType = wpfWindow.GetType();
 
-        Type windowStyleType = null;
-        Type windowStateType = null;
-        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-        {
-            if (asm.GetName().Name != "PresentationFramework") continue;
-            windowStyleType = asm.GetType("System.Windows.WindowStyle");
-            windowStateType = asm.GetType("System.Windows.WindowState");
-            break;
-        }
+        Type windowStyleType = Type.GetType("System.Windows.WindowStyle, PresentationFramework");
+        Type windowStateType = Type.GetType("System.Windows.WindowState, PresentationFramework");
         if (windowStyleType == null || windowStateType == null) return;
 
         var propWindowStyle = windowType.GetProperty("WindowStyle");
@@ -520,13 +493,7 @@ public static class WindowHelper
     public static void Minimize(object wpfWindow)
     {
         Type windowType = wpfWindow.GetType();
-        Type windowStateType = null;
-        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-        {
-            if (asm.GetName().Name != "PresentationFramework") continue;
-            windowStateType = asm.GetType("System.Windows.WindowState");
-            break;
-        }
+        Type windowStateType = Type.GetType("System.Windows.WindowState, PresentationFramework");
         if (windowStateType == null) return;
 
         var propWindowState = windowType.GetProperty("WindowState");
@@ -570,6 +537,40 @@ public static class WindowHelper
     }
 
     // ---------------------------------------------------------------------------
+    // Parent / modal
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Sets the owner HWND of a WPF window via WindowInteropHelper.Owner.
+    /// Must be called before or after Show() — WPF applies it either way.
+    /// Enables the owned window to stay above the owner and close with it.
+    /// </summary>
+    public static void SetOwnerByHwnd(object childWindow, long ownerHwnd)
+    {
+        Type wihType = Type.GetType("System.Windows.Interop.WindowInteropHelper, PresentationFramework");
+        if (wihType == null) return;
+        object wih = Activator.CreateInstance(wihType, new object[] { childWindow });
+        PropertyInfo ownerProp = wihType.GetProperty("Owner");
+        if (ownerProp != null) ownerProp.SetValue(wih, new IntPtr(ownerHwnd), null);
+    }
+
+    /// <summary>
+    /// Enables or disables user input on the WPF window (IsEnabled property).
+    /// Used to block a parent window while a modal child is open.
+    /// </summary>
+    public static void SetWindowEnabled(object wpfWindow, bool enabled)
+    {
+        PropertyInfo prop = null;
+        Type t = wpfWindow.GetType();
+        while (t != null && prop == null)
+        {
+            prop = t.GetProperty("IsEnabled");
+            t = t.BaseType;
+        }
+        if (prop != null) prop.SetValue(wpfWindow, enabled, null);
+    }
+
+    // ---------------------------------------------------------------------------
     // WindowChrome transparency (recommended approach for WebView2)
     // ---------------------------------------------------------------------------
 
@@ -591,16 +592,11 @@ public static class WindowHelper
     /// </summary>
     public static void ApplyWindowChrome(object wpfWindow)
     {
-        Type windowChromeType = null;
-        Type thicknessType = null;
-        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-        {
-            if (windowChromeType == null)
-                windowChromeType = asm.GetType("System.Windows.Shell.WindowChrome");
-            if (thicknessType == null)
-                thicknessType = asm.GetType("System.Windows.Thickness");
-            if (windowChromeType != null && thicknessType != null) break;
-        }
+        // Use assembly-qualified Type.GetType() — the WPF assemblies are already loaded
+        // at this point (we just created a Window), so this is effectively a dictionary
+        // lookup and avoids iterating every assembly in the AppDomain.
+        Type windowChromeType = Type.GetType("System.Windows.Shell.WindowChrome, PresentationFramework");
+        Type thicknessType    = Type.GetType("System.Windows.Thickness, PresentationCore");
         if (windowChromeType == null || thicknessType == null) return;
 
         object chrome = Activator.CreateInstance(windowChromeType);

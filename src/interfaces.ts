@@ -53,6 +53,13 @@ export interface BrowserWindowOptions {
   icon?: string;
   /** Backend to use for this window. Defaults to the app-level backend or platform default. */
   backend?: string;
+  /**
+   * Parent BrowserWindow. The child window stays above the parent and closes with it.
+   * Typed as `unknown` to avoid a circular import; pass a BrowserWindow instance.
+   */
+  parent?: unknown;
+  /** When true (and parent is set), the parent window is blocked until this window is closed. */
+  modal?: boolean;
   webPreferences?: WebPreferences;
 }
 
@@ -186,6 +193,7 @@ export interface IWindowProvider {
   isFullScreen?(): boolean;
   setKiosk?(flag: boolean): void;
   isKiosk?(): boolean;
+  setBackgroundColor?(color: string): void;
   setTitle?(title: string): void;
   getTitle?(): string;
   setSize?(width: number, height: number): void;
@@ -201,4 +209,8 @@ export interface IWindowProvider {
   flashFrame?(flag: boolean): void;
   executeJavaScript?(code: string): Promise<unknown>;
   onNavigationCompleted?(callback: () => void): void;
+  /** Returns the native window HWND (Windows) as a decimal string, or '0' if unavailable. */
+  getHwnd?(): string;
+  /** Enable or disable user interaction on the window (used for modal parent blocking). */
+  setEnabled?(flag: boolean): void;
 }

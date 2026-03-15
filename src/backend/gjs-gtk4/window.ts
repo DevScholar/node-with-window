@@ -726,6 +726,18 @@ export class GjsGtk4Window implements IWindowProvider {
     }
   }
 
+  public getHwnd(): string {
+    return '0'; // X11 XIDs are not exposed via this API
+  }
+
+  public setEnabled(flag: boolean): void {
+    try {
+      this._send('SetSensitive', { sensitive: flag });
+    } catch {
+      /* ignore */
+    }
+  }
+
   public onNavigationCompleted(callback: () => void): void {
     this._navCompletedCallback = callback;
   }

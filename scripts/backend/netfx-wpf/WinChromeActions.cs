@@ -10,7 +10,8 @@ public static class WinChromeActions
     {
         return action == "WinHelper" || action == "TrashItem"
             || action == "FixTransparentInput" || action == "FixTransparentInputChildren"
-            || action == "DwmTransparent" || action == "ApplyWindowChrome";
+            || action == "DwmTransparent" || action == "ApplyWindowChrome"
+            || action == "GetHwnd" || action == "SetOwnerByHwnd" || action == "SetWindowEnabled";
     }
 
     public static Dictionary<string, object> Execute(Dictionary<string, object> cmd)
@@ -126,6 +127,32 @@ public static class WinChromeActions
                     { "message", ex.Message }
                 };
             }
+        }
+
+        if (action == "GetHwnd")
+        {
+            var wpfWindow = BridgeState.ObjectStore[cmd["windowId"].ToString()];
+            IntPtr hwnd = WindowHelper.GetHwnd(wpfWindow);
+            return new Dictionary<string, object>
+            {
+                { "type", "primitive" }, { "value", hwnd.ToInt64().ToString() }
+            };
+        }
+
+        if (action == "SetOwnerByHwnd")
+        {
+            var childWindow = BridgeState.ObjectStore[cmd["windowId"].ToString()];
+            long ownerHwnd = long.Parse(cmd["ownerHwnd"].ToString());
+            WindowHelper.SetOwnerByHwnd(childWindow, ownerHwnd);
+            return new Dictionary<string, object> { { "type", "void" } };
+        }
+
+        if (action == "SetWindowEnabled")
+        {
+            var wpfWindow = BridgeState.ObjectStore[cmd["windowId"].ToString()];
+            bool enabled = bool.Parse(cmd["enabled"].ToString());
+            WindowHelper.SetWindowEnabled(wpfWindow, enabled);
+            return new Dictionary<string, object> { { "type", "void" } };
         }
 
         throw new Exception("WinChromeActions: unhandled action: " + action);

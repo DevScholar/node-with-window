@@ -120,6 +120,12 @@ function findWebView2Runtime(): string {
 const POLL_INTERVAL_MS = 16;
 
 /**
+ * True once the first window's Application.Run() has been called.
+ * Subsequent windows skip Application creation and just call Show().
+ */
+let _wpfStarted = false;
+
+/**
  * Parses a CSS hex color string into ARGB components (each 0–255).
  * Accepts: #RGB, #RRGGBB, #AARRGGBB (Electron uses AA-prefixed alpha).
  * Returns null if the string is not a recognised hex color.
@@ -192,6 +198,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   private _isClosable = true;
   private _isMovable = true;
   private _skipTaskbar = false;
+  private _isSecondaryWindow = false;
   private _navCompletedCallback: (() => void) | null = null;
   private _pendingExecs = new Map<
     string,
@@ -573,6 +580,49 @@ export class NetFxWpfWindow implements IWindowProvider {
     }
 
     const dotnetAny = dotnet as any;
+
+    // ── Secondary-window path ────────────────────────────────────────────────
+    // WPF message loop is already running (another window called Application.Run).
+    // Just wire the close handler and call Show() — no new Application or timer.
+    if (_wpfStarted) {
+      this._isSecondaryWindow = true;
+      this.app = true; // mark as started so re-calls above take the fast path
+
+      if (this.pendingMenu) {
+        buildWpfMenu(Object.assign(this, { pendingMenu: this.pendingMenu }));
+      }
+
+      (this.browserWindow as unknown as { add_Closed: (cb: () => void) => void }).add_Closed(() => {
+        this._onWindowClosed();
+      });
+
+      // Set WPF Owner before Show() if a parent window is provided.
+      if (this.options.parent) {
+        const parentHwnd = (this.options.parent as any).getHwnd?.() as string | undefined;
+        if (parentHwnd && parentHwnd !== '0') {
+          dotnetAny.setOwnerByHwnd(this.browserWindow, parentHwnd);
+        }
+      }
+
+      (this.browserWindow as unknown as { Show: () => void }).Show();
+
+      if (this.options.kiosk) {
+        this.setKiosk(true);
+      } else if (this.options.fullscreen) {
+        this.setFullScreen(true);
+      }
+      this._applyWindowChrome();
+
+      // Disable parent for modal windows.
+      if (this.options.modal && this.options.parent) {
+        (this.options.parent as any).setEnabled?.(false);
+      }
+      return;
+    }
+
+    // ── Primary-window path ──────────────────────────────────────────────────
+    _wpfStarted = true;
+
     const System = dotnetAny.System;
     const Windows = System.Windows;
 
@@ -641,6 +691,18 @@ export class NetFxWpfWindow implements IWindowProvider {
   private _onWindowClosed(): void {
     if (this.isClosed) return;
     this.isClosed = true;
+
+    // Re-enable the parent if this was a modal window.
+    if (this.options.modal && this.options.parent) {
+      (this.options.parent as any).setEnabled?.(true);
+    }
+
+    if (this._isSecondaryWindow) {
+      // Secondary window: don't exit the process, just clean up.
+      this.cleanupUserData();
+      return;
+    }
+
     if (this._pollTimer) {
       clearInterval(this._pollTimer);
       this._pollTimer = null;
@@ -805,6 +867,14 @@ export class NetFxWpfWindow implements IWindowProvider {
     return this._isKiosk;
   }
 
+  public setBackgroundColor(color: string): void {
+    if (!this.webView) return;
+    const parsed = parseBackgroundColor(color);
+    if (parsed) {
+      (dotnet as any).setWebViewBackground(this.webView, parsed.a, parsed.r, parsed.g, parsed.b);
+    }
+  }
+
   public setTitle(title: string): void {
     if (!this.browserWindow) return;
     (this.browserWindow as unknown as { Title: string }).Title = title;
@@ -933,6 +1003,18 @@ export class NetFxWpfWindow implements IWindowProvider {
     this._skipTaskbar = flag;
     if (!this.browserWindow) return;
     (dotnet as any).winHelper(this.browserWindow, 'SetSkipTaskbar', flag);
+  }
+
+  /** Returns the Win32 HWND as a decimal string (valid after show()). */
+  public getHwnd(): string {
+    if (!this.browserWindow) return '0';
+    return (dotnet as any).getHwnd(this.browserWindow) as string;
+  }
+
+  /** Enable or disable user interaction (used to block a parent for modal children). */
+  public setEnabled(flag: boolean): void {
+    if (!this.browserWindow) return;
+    (dotnet as any).setWindowEnabled(this.browserWindow, flag);
   }
 
   /**
