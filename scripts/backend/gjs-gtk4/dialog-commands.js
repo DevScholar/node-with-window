@@ -3,12 +3,16 @@
 import Gtk from 'gi://Gtk?version=4.0';
 import GLib from 'gi://GLib';
 
-// Runs a nested GLib event loop iteration until getDone() returns true.
+// Runs a nested GLib event loop until getDone() returns true or the timeout elapses.
 // This lets modal dialogs process events without returning control to the
-// outer io_add_watch handler.
+// outer io_add_watch handler. Without a timeout, a dialog that never responds
+// (e.g. compositor crash) would freeze the GJS host indefinitely.
+const NESTED_LOOP_TIMEOUT_MS = 30_000;
+
 function runNestedLoop(getDone) {
     const ctx = GLib.MainContext.default();
-    while (!getDone()) ctx.iteration(true);
+    const deadline = Date.now() + NESTED_LOOP_TIMEOUT_MS;
+    while (!getDone() && Date.now() < deadline) ctx.iteration(true);
 }
 
 export function showOpenDialog(gtkWindow, options) {

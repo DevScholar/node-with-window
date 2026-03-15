@@ -60,8 +60,8 @@ class LinuxIpc {
     while (true) {
       const nl = this.readBuf.indexOf(10 /* \n */);
       if (nl !== -1) {
-        const line = this.readBuf.slice(0, nl).toString('utf8');
-        this.readBuf = this.readBuf.slice(nl + 1);
+        const line = this.readBuf.subarray(0, nl).toString('utf8');
+        this.readBuf = this.readBuf.subarray(nl + 1);
         return line;
       }
       let n: number;
@@ -78,7 +78,7 @@ class LinuxIpc {
         }
         return null;
       }
-      this.readBuf = Buffer.concat([this.readBuf, chunk.slice(0, n)]);
+      this.readBuf = Buffer.concat([this.readBuf, chunk.subarray(0, n)]);
     }
   }
 
@@ -263,6 +263,11 @@ export class GjsGtk4Window implements IWindowProvider {
 
     const fdWrite = fs.openSync(this.reqPath, 'w');
     const fdRead = fs.openSync(this.resPath, 'r');
+    // Unlink immediately after both ends are open: the kernel keeps the FIFOs
+    // alive via the open file descriptors but removes the directory entries,
+    // so no orphan files survive a crash (SIGKILL or otherwise).
+    try { fs.unlinkSync(this.reqPath); } catch { /* ignore */ }
+    try { fs.unlinkSync(this.resPath); } catch { /* ignore */ }
     this.ipc = new LinuxIpc(fdRead, fdWrite);
 
     // Register cleanup handlers
@@ -761,12 +766,21 @@ export class GjsGtk4Window implements IWindowProvider {
         return;
       }
       const id = Math.random().toString(36).substring(2, 11);
-      this._pendingExecs.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        if (this._pendingExecs.delete(id)) {
+          reject(new Error('executeJavaScript timed out after 10000ms'));
+        }
+      }, 10_000);
+      this._pendingExecs.set(id, {
+        resolve: (v) => { clearTimeout(timer); resolve(v); },
+        reject:  (e) => { clearTimeout(timer); reject(e); },
+      });
       const payload = JSON.stringify({ type: 'exec', id, code });
       const script = `window.__ipcDispatch(${JSON.stringify(payload)})`;
       try {
         this._send('SendToRenderer', { script });
       } catch (e) {
+        clearTimeout(timer);
         this._pendingExecs.delete(id);
         reject(e);
       }
@@ -800,8 +814,11 @@ export class GjsGtk4Window implements IWindowProvider {
     let resp: { type: string; message?: string };
     try {
       resp = this._send('Poll', {}) as typeof resp;
-    } catch {
-      // Pipe closed — the GJS process exited (window was closed externally)
+    } catch (e: unknown) {
+      // EINTR (signal) and EAGAIN (non-blocking) are transient — skip this tick.
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === 'EINTR' || code === 'EAGAIN') return;
+      // Any other error (EBADF, EIO, EOF) means the GJS process has gone away.
       this._onWindowClosed();
       return;
     }
@@ -904,6 +921,10 @@ export class GjsGtk4Window implements IWindowProvider {
       clearInterval(this.keepAliveTimer);
       this.keepAliveTimer = null;
     }
+    for (const pending of this._pendingExecs.values()) {
+      pending.reject(new Error('Window closed'));
+    }
+    this._pendingExecs.clear();
     this._cleanup();
     process.exit(0);
   }
@@ -918,15 +939,6 @@ export class GjsGtk4Window implements IWindowProvider {
         this.proc.kill('SIGKILL');
       } catch {
         /* ignore */
-      }
-    }
-    for (const p of [this.reqPath, this.resPath]) {
-      if (p && fs.existsSync(p)) {
-        try {
-          fs.unlinkSync(p);
-        } catch {
-          /* ignore */
-        }
       }
     }
   }

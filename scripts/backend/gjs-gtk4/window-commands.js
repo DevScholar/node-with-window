@@ -246,7 +246,10 @@ export function handleWindowCommand(cmd, state) {
         }
 
         case 'SetAlwaysOnTop': {
-            if (state.gtkWindow) state.gtkWindow.set_keep_above(cmd.flag);
+            if (state.gtkWindow) {
+                try { state.gtkWindow.set_keep_above(cmd.flag); }
+                catch (_e) { /* compositor may not support set_keep_above; ignore */ }
+            }
             return { type: 'void' };
         }
 
@@ -364,7 +367,8 @@ export function handleWindowCommand(cmd, state) {
             );
 
             const ctx = GLib.MainContext.default();
-            while (!done) ctx.iteration(true);
+            const deadline = Date.now() + 10_000;
+            while (!done && Date.now() < deadline) ctx.iteration(true);
 
             return { type: 'result', value: base64Result };
         }

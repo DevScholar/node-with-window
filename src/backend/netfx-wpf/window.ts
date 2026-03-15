@@ -371,13 +371,21 @@ export class NetFxWpfWindow implements IWindowProvider {
       };
       if (evt.IsSuccess) {
         this.coreWebView2 = (this.webView as unknown as { CoreWebView2: unknown }).CoreWebView2;
-        this.setupIpcBridge();
+        try {
+          this.setupIpcBridge();
+        } catch (e) {
+          console.error('[node-with-window] setupIpcBridge failed:', e);
+        }
         this.isWebViewReady = true;
 
         while (this.navigationQueue.length > 0) {
           const action = this.navigationQueue.shift();
           if (action) action();
         }
+      } else {
+        const msg = evt.InitializationException?.Message ?? 'unknown error';
+        console.error('[node-with-window] WebView2 initialization failed:', msg);
+        this.navigationQueue = [];
       }
     });
   }
@@ -521,7 +529,15 @@ export class NetFxWpfWindow implements IWindowProvider {
         return;
       }
       const id = Math.random().toString(36).substring(2, 11);
-      this._pendingExecs.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        if (this._pendingExecs.delete(id)) {
+          reject(new Error('executeJavaScript timed out after 10000ms'));
+        }
+      }, 10_000);
+      this._pendingExecs.set(id, {
+        resolve: (v) => { clearTimeout(timer); resolve(v); },
+        reject:  (e) => { clearTimeout(timer); reject(e); },
+      });
       const payload = JSON.stringify({ type: 'exec', id, code });
       (
         this.coreWebView2 as unknown as { PostWebMessageAsString: (s: string) => void }
@@ -698,6 +714,11 @@ export class NetFxWpfWindow implements IWindowProvider {
       (this.options.parent as any).setEnabled?.(true);
     }
 
+    for (const pending of this._pendingExecs.values()) {
+      pending.reject(new Error('Window closed'));
+    }
+    this._pendingExecs.clear();
+
     if (this._isSecondaryWindow) {
       // Secondary window: don't exit the process, just clean up.
       this.cleanupUserData();
@@ -718,8 +739,11 @@ export class NetFxWpfWindow implements IWindowProvider {
     let resp: { type: string; message?: string };
     try {
       resp = (dotnet as any).pollEvent() as typeof resp;
-    } catch {
-      // Pipe closed — .NET process exited unexpectedly
+    } catch (e: unknown) {
+      // EINTR / EAGAIN are transient — skip this tick.
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === 'EINTR' || code === 'EAGAIN') return;
+      // Pipe closed — .NET process exited unexpectedly.
       this._onWindowClosed();
       return;
     }
@@ -756,20 +780,36 @@ export class NetFxWpfWindow implements IWindowProvider {
       }
     } else if (msg.type === 'ipc-invoke') {
       const handler = ipcMain.handlers.get(msg.channel);
-      const event = { sender: this, frameId: 0, reply: () => {} };
-      const resultOrPromise = handler ? handler(event, ...(msg.args ?? [])) : undefined;
       const requestId = msg.requestId;
+      const event = { sender: this, frameId: 0, reply: () => {} };
 
-      const sendReply = (result: unknown) => {
+      const sendReply = (result: unknown, error?: string) => {
         if (!this.coreWebView2) return;
         (this.coreWebView2 as unknown as { PostWebMessageAsString: (s: string) => void })
-          .PostWebMessageAsString(JSON.stringify({ type: 'ipc-reply', requestId, result }));
+          .PostWebMessageAsString(JSON.stringify({
+            type: 'ipc-reply', requestId,
+            result: result ?? null,
+            error: error ?? null,
+          }));
       };
+
+      if (!handler) {
+        sendReply(null, `No handler for channel: ${msg.channel}`);
+        return;
+      }
+
+      let resultOrPromise: unknown;
+      try {
+        resultOrPromise = handler(event, ...(msg.args ?? []));
+      } catch (e: unknown) {
+        sendReply(null, (e as Error).message || String(e));
+        return;
+      }
 
       if (resultOrPromise && typeof (resultOrPromise as Promise<unknown>).then === 'function') {
         (resultOrPromise as Promise<unknown>)
-          .then(sendReply)
-          .catch((e: unknown) => console.error('[node-with-window] async ipc handler error:', e));
+          .then(r => sendReply(r))
+          .catch((e: unknown) => sendReply(null, (e as Error).message || String(e)));
       } else {
         sendReply(resultOrPromise);
       }
