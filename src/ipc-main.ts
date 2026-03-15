@@ -1,17 +1,9 @@
 import { EventEmitter } from 'node:events';
+import type { IpcMainEvent } from './interfaces.js';
+
+export type { IpcMainEvent };
 
 type IpcHandler = (event: IpcMainEvent, ...args: unknown[]) => unknown;
-
-/**
- * Event object passed to ipcMain.handle() and ipcMain.on() handlers.
- * Compatible with Electron's IpcMainEvent shape.
- */
-interface IpcMainEvent {
-  sender: unknown;
-  frameId: number;
-  reply: (channel: string, ...args: unknown[]) => void;
-  returnValue?: unknown;
-}
 
 /**
  * IPC main — manages channels between the renderer and the main process.

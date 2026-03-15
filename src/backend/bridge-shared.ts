@@ -1,0 +1,242 @@
+/**
+ * Shared node-bridge code generator.
+ *
+ * Both the Windows (netfx-wpf) and Linux (gjs-gtk4) bridges include an
+ * identical ~200-line JavaScript IIFE that wires up window.require(),
+ * window.process, and the ref/callback serialization layer.  This module
+ * generates that IIFE so the two bridge files don't diverge.
+ *
+ * Platform-specific differences:
+ *   - process.platform value
+ *   - process.exit() uses the platform's postMessage API
+ *   - Linux defers the EventSource connection with setTimeout(0) to avoid
+ *     a cold-start freeze in WebKitGTK
+ */
+
+export interface NodeBridgeOptions {
+  port: number;
+  platform: 'win32' | 'linux';
+  /** JSON.stringify'd arch string ready for direct embedding. */
+  injectedArch: string;
+  /** JSON.stringify'd version string ready for direct embedding. */
+  injectedVersion: string;
+  /**
+   * Double-encoded env string: JSON.stringify(JSON.stringify(process.env)).
+   * Rendered in the script as: env: JSON.parse(${injectedEnv})
+   * The double-encoding keeps </script> sequences in env values from breaking
+   * the surrounding <script> tag.
+   */
+  injectedEnv: string;
+  /** JSON.stringify'd cwd string ready for direct embedding. */
+  injectedCwd: string;
+  /**
+   * Double-encoded import map JSON string, or the string 'null'.
+   * Rendered in the script as: if (importMapJson !== null) { ... }
+   */
+  importMapJson: string;
+}
+
+/**
+ * Generate the lightweight node-bridge stub for when the sync server is not
+ * running (nodeIntegration=true but port===0).  Provides window.process and
+ * a warning-emitting window.require().
+ */
+export function generateNodeBridgeStub(
+  opts: Pick<NodeBridgeOptions, 'platform' | 'injectedArch' | 'injectedVersion' | 'injectedEnv' | 'injectedCwd'>,
+): string {
+  const { platform, injectedArch, injectedVersion, injectedEnv, injectedCwd } = opts;
+  const postMessage =
+    platform === 'win32'
+      ? `window.chrome.webview.postMessage`
+      : `window.webkit.messageHandlers.ipc.postMessage`;
+  return `(function() {
+    if (window.__nodeBridge) return;
+    window.__nodeBridge = true;
+    window.require = function(m) {
+        if (m === '@devscholar/node-with-window') {
+            return { ipcRenderer: window.ipcRenderer };
+        }
+        console.warn('[node-with-window] window.require() stub: sync server not available.');
+        return null;
+    };
+    window.process = {
+        platform: '${platform}', arch: ${injectedArch},
+        version: ${injectedVersion},
+        env: JSON.parse(${injectedEnv}),
+        cwd: function() { return ${injectedCwd}; },
+        exit: function(code) {
+            ${postMessage}(
+                JSON.stringify({ type: 'send', channel: 'process:exit', args: [code] }));
+        }
+    };
+})();`;
+}
+
+/**
+ * Generate the full node-bridge IIFE for the given platform and options.
+ * Returns a JavaScript string starting with `(function() {` and ending with `})();`
+ */
+export function generateNodeBridgeIife(opts: NodeBridgeOptions): string {
+  const { port, platform, injectedArch, injectedVersion, injectedEnv, injectedCwd, importMapJson } = opts;
+
+  const postMessage =
+    platform === 'win32'
+      ? `window.chrome.webview.postMessage`
+      : `window.webkit.messageHandlers.ipc.postMessage`;
+
+  // Linux defers the EventSource open to avoid blocking GDK seat initialisation.
+  const evtSrcBlock =
+    platform === 'linux'
+      ? `    // Defer EventSource connection to avoid blocking the GDK seat
+    // initialization on first run in WebKitGTK (cold-start freeze).
+    var __nwwEvtSrc = null;
+    setTimeout(function() {
+        __nwwEvtSrc = new EventSource('http://127.0.0.1:${port}/__nww_events__');
+        __nwwEvtSrc.onmessage = function(e) {
+            var msg = JSON.parse(e.data);
+            var cb = window.__nwwCallbacks[msg.id];
+            if (cb) cb.apply(null, msg.args.map(__nwwWrapResult));
+        };
+    }, 0);`
+      : `    var __nwwEvtSrc = new EventSource('http://127.0.0.1:${port}/__nww_events__');
+    __nwwEvtSrc.onmessage = function(e) {
+        var msg = JSON.parse(e.data);
+        var cb = window.__nwwCallbacks[msg.id];
+        if (cb) cb.apply(null, msg.args.map(__nwwWrapResult));
+    };`;
+
+  return `(function() {
+    if (window.__nodeBridge) return;
+    window.__nodeBridge = true;
+
+    window.__nwwCallbacks = {};
+
+${evtSrcBlock}
+
+    function __nwwSerializeArg(a) {
+        if (typeof a === 'function') {
+            var id = Math.random().toString(36).substring(2, 11);
+            window.__nwwCallbacks[id] = a;
+            return { __nww_cb: id };
+        }
+        if (a !== null && typeof a === 'object' && typeof a.__nww_ref === 'string') {
+            return { __nww_ref: a.__nww_ref };
+        }
+        return a;
+    }
+
+    function __nwwWrapResult(result) {
+        if (result !== null && typeof result === 'object' && typeof result.__nww_ref === 'string') {
+            return __nwwMakeRef(result.__nww_ref);
+        }
+        return result;
+    }
+
+    window.__nwwLiveRefs = new Set();
+    var __nwwPendingRelease = [];
+    var __nwwReleaseTimer = null;
+
+    var __nwwRefFinalizer = new FinalizationRegistry(function(id) {
+        window.__nwwLiveRefs.delete(id);
+        __nwwPendingRelease.push(id);
+        if (!__nwwReleaseTimer) {
+            __nwwReleaseTimer = setTimeout(function() {
+                __nwwReleaseTimer = null;
+                var batch = __nwwPendingRelease.splice(0);
+                if (batch.length === 0) return;
+                fetch('http://127.0.0.1:${port}/__nww_release__', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ refs: batch })
+                }).catch(function() {});
+            }, 0);
+        }
+    });
+
+    function __nwwMakeRef(refId) {
+        var proxy = new Proxy({ __nww_ref: refId }, {
+            get: function(target, prop) {
+                if (prop === '__nww_ref') return refId;
+                if (typeof prop !== 'string') return undefined;
+                if (prop === 'then') return undefined;
+                return function() {
+                    var args = Array.prototype.slice.call(arguments);
+                    var xhr = new XMLHttpRequest();
+                    xhr.open('POST', 'http://127.0.0.1:${port}/__nww_sync__', false);
+                    xhr.setRequestHeader('Content-Type', 'application/json');
+                    xhr.send(JSON.stringify({ ref: refId, methodName: prop, args: args.map(__nwwSerializeArg) }));
+                    var resp = JSON.parse(xhr.responseText);
+                    if (xhr.status !== 200) throw new Error(resp.error || 'ref call failed');
+                    return __nwwWrapResult(resp.result);
+                };
+            }
+        });
+        window.__nwwLiveRefs.add(refId);
+        __nwwRefFinalizer.register(proxy, refId);
+        return proxy;
+    }
+
+    window.require = function(moduleName) {
+        if (moduleName === '@devscholar/node-with-window') {
+            return { ipcRenderer: window.ipcRenderer };
+        }
+        return new Proxy({}, {
+            get: function(target, methodName) {
+                if (typeof methodName !== 'string') return undefined;
+                if (methodName === 'then') return undefined;
+                return function() {
+                    var args = Array.prototype.slice.call(arguments);
+                    var xhr = new XMLHttpRequest();
+                    xhr.open('POST', 'http://127.0.0.1:${port}/__nww_sync__', false);
+                    xhr.setRequestHeader('Content-Type', 'application/json');
+                    xhr.send(JSON.stringify({ moduleName: moduleName, methodName: methodName, args: args.map(__nwwSerializeArg) }));
+                    var resp = JSON.parse(xhr.responseText);
+                    if (xhr.status !== 200) throw new Error(resp.error || 'require failed');
+                    return __nwwWrapResult(resp.result);
+                };
+            }
+        });
+    };
+
+    window.addEventListener('unload', function() {
+        if (window.__nwwLiveRefs.size === 0) return;
+        var ids = Array.from(window.__nwwLiveRefs);
+        window.__nwwLiveRefs.clear();
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', 'http://127.0.0.1:${port}/__nww_release__', false);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        try { xhr.send(JSON.stringify({ refs: ids })); } catch (_e) {}
+    });
+
+    window.process = {
+        platform: '${platform}',
+        arch: ${injectedArch},
+        version: ${injectedVersion},
+        env: JSON.parse(${injectedEnv}),
+        cwd: function() { return ${injectedCwd}; },
+        exit: function(code) {
+            ${postMessage}(
+                JSON.stringify({ type: 'send', channel: 'process:exit', args: [code] }));
+        }
+    };
+
+    if (${importMapJson} !== null) {
+        var __nwwImportMapJson = ${importMapJson};
+        function __nwwDoInjectImportMap() {
+            if (!document.head) return false;
+            if (document.querySelector('script[type="importmap"]')) return true;
+            var s = document.createElement('script');
+            s.type = 'importmap';
+            s.textContent = __nwwImportMapJson;
+            document.head.insertBefore(s, document.head.firstChild);
+            return true;
+        }
+        if (!__nwwDoInjectImportMap()) {
+            var __nwwImportMapObs = new MutationObserver(function(m, o) {
+                if (__nwwDoInjectImportMap()) o.disconnect();
+            });
+            __nwwImportMapObs.observe(document, { childList: true, subtree: true });
+        }
+    }
+})();`;
+}

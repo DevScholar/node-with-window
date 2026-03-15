@@ -82,7 +82,6 @@ function writeLine(obj) {
 function executeCommand(cmd) {
     // Initialise the Gio.SimpleActionGroup once Gtk is available (after CreateWindow).
     if (cmd.action === 'CreateWindow') {
-        const Gio = imports.gi.Gio; // already imported at top, but re-use module binding
         state.menuActions = new Gio.SimpleActionGroup();
     }
 

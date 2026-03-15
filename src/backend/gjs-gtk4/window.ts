@@ -118,6 +118,22 @@ class LinuxIpc {
 /** How often (ms) Node.js polls the GJS host for queued WebKit IPC messages. */
 const POLL_INTERVAL_MS = 16;
 
+// Single global SIGINT handler registered once for all GjsGtk4Window instances.
+// Prevents SIGKILL'd windows from leaving orphan GJS processes.
+let _sigintRegistered = false;
+const _allInstances = new Set<GjsGtk4Window>();
+
+function _ensureGlobalSigint(): void {
+  if (_sigintRegistered) return;
+  _sigintRegistered = true;
+  process.on('SIGINT', () => {
+    for (const win of _allInstances) {
+      try { win['_cleanup'](); } catch { /* ignore */ }
+    }
+    process.exit(0);
+  });
+}
+
 function findGjsPath(): string {
   try {
     return cp.execSync('which gjs', { encoding: 'utf-8' }).trim() || 'gjs';
@@ -187,6 +203,8 @@ function isVMware(): boolean {
 export class GjsGtk4Window implements IWindowProvider {
   public options: BrowserWindowOptions;
   public webPreferences: WebPreferences;
+  /** Registered by BrowserWindow; called when the GTK window is closed externally. */
+  public onClosed?: () => void;
 
   private ipc: LinuxIpc | null = null;
   private proc: cp.ChildProcess | null = null;
@@ -219,7 +237,6 @@ export class GjsGtk4Window implements IWindowProvider {
   private _isMaximizable = true;
   private _isClosable = true;
   private _isMovable = true;
-  private _skipTaskbar = false;
 
   constructor(options?: BrowserWindowOptions) {
     this.options = options || {};
@@ -229,7 +246,8 @@ export class GjsGtk4Window implements IWindowProvider {
     this._isMaximizable = this.options.maximizable  ?? true;
     this._isClosable    = this.options.closable     ?? true;
     this._isMovable     = this.options.movable      ?? true;
-    this._skipTaskbar   = this.options.skipTaskbar  ?? false;
+    _allInstances.add(this);
+    _ensureGlobalSigint();
   }
 
   // -------------------------------------------------------------------------
@@ -269,14 +287,6 @@ export class GjsGtk4Window implements IWindowProvider {
     try { fs.unlinkSync(this.reqPath); } catch { /* ignore */ }
     try { fs.unlinkSync(this.resPath); } catch { /* ignore */ }
     this.ipc = new LinuxIpc(fdRead, fdWrite);
-
-    // Register cleanup handlers
-    process.once('beforeExit', () => this._cleanup());
-    process.once('exit', () => this._cleanup());
-    process.once('SIGINT', () => {
-      this._cleanup();
-      process.exit(0);
-    });
 
     // Resolve icon path to absolute before sending to GJS
     const options = { ...this.options };
@@ -346,7 +356,7 @@ export class GjsGtk4Window implements IWindowProvider {
       /* pipe may already be closed */
     }
     this._cleanup();
-    process.exit(0);
+    // Do NOT call process.exit() here — BrowserWindow._handleClosed() owns exit logic.
   }
 
   // -------------------------------------------------------------------------
@@ -708,7 +718,6 @@ export class GjsGtk4Window implements IWindowProvider {
   }
 
   public setSkipTaskbar(flag: boolean): void {
-    this._skipTaskbar = flag;
     try {
       this._send('SetSkipTaskbar', { flag });
     } catch {
@@ -775,8 +784,23 @@ export class GjsGtk4Window implements IWindowProvider {
         resolve: (v) => { clearTimeout(timer); resolve(v); },
         reject:  (e) => { clearTimeout(timer); reject(e); },
       });
-      const payload = JSON.stringify({ type: 'exec', id, code });
-      const script = `window.__ipcDispatch(${JSON.stringify(payload)})`;
+      // Send the eval code as a self-contained IIFE so renderer scripts cannot
+      // call the same entry point to forge execResult messages.
+      const eid = JSON.stringify(id);
+      const src = JSON.stringify(code);
+      const script =
+        `(function(){var eid=${eid};` +
+        `try{var r=eval(${src});` +
+        `if(r&&typeof r.then==='function'){` +
+        `r.then(function(v){window.webkit.messageHandlers.ipc.postMessage(` +
+        `JSON.stringify({type:'execResult',id:eid,result:v==null?null:v}));})` +
+        `.catch(function(ex){window.webkit.messageHandlers.ipc.postMessage(` +
+        `JSON.stringify({type:'execResult',id:eid,error:String(ex)}));});` +
+        `}else{window.webkit.messageHandlers.ipc.postMessage(` +
+        `JSON.stringify({type:'execResult',id:eid,result:r==null?null:r}));}` +
+        `}catch(ex){window.webkit.messageHandlers.ipc.postMessage(` +
+        `JSON.stringify({type:'execResult',id:eid,error:String(ex)}));}` +
+        `})()`;
       try {
         this._send('SendToRenderer', { script });
       } catch (e) {
@@ -926,10 +950,13 @@ export class GjsGtk4Window implements IWindowProvider {
     }
     this._pendingExecs.clear();
     this._cleanup();
-    process.exit(0);
+    // Notify BrowserWindow, which will emit 'closed', 'window-all-closed', and
+    // call process.exit(0) if no listener handles window-all-closed.
+    this.onClosed?.();
   }
 
   private _cleanup(): void {
+    _allInstances.delete(this);
     if (this.ipc) {
       this.ipc.close();
       this.ipc = null;

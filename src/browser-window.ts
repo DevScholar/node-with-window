@@ -38,6 +38,8 @@ export class BrowserWindow extends EventEmitter {
   private _id: number;
   private static _allWindows: Map<number, BrowserWindow> = new Map();
   private static _lastId = 0;
+  /** The window that most recently received focus (via focus() API call). */
+  private static _focusedId: number | null = null;
   private _isCreated = false;
   /** True once setMenu() has been called explicitly on this window. */
   private _menuSet = false;
@@ -57,25 +59,25 @@ export class BrowserWindow extends EventEmitter {
     this._backendName = backend.name;
     this.provider = backend.createProvider(options);
 
+    // Register the external-close callback BEFORE createWindow() so that any
+    // close triggered during initialization (unlikely but possible) is handled.
+    this.provider.onClosed = () => this._handleClosed();
+
     this.webContents = new WebContents({
       sendToRenderer: (channel, ...args) => {
-        if (this.provider.sendToRenderer) this.provider.sendToRenderer(channel, ...args);
+        this.provider.sendToRenderer(channel, ...args);
       },
       openDevTools: () => {
-        if (this.provider.openDevTools) this.provider.openDevTools();
+        this.provider.openDevTools();
       },
       reload: () => {
-        if (this.provider.reload) this.provider.reload();
+        this.provider.reload();
       },
       loadURL: url => this.loadURL(url),
       loadFile: filePath => this.loadFile(filePath),
-      executeJavaScript: code => {
-        if (!this.provider.executeJavaScript)
-          return Promise.reject(new Error('executeJavaScript not supported by this backend'));
-        return this.provider.executeJavaScript(code);
-      },
+      executeJavaScript: code => this.provider.executeJavaScript(code),
       onNavigationCompleted: cb => {
-        this.provider.onNavigationCompleted?.(cb);
+        this.provider.onNavigationCompleted(cb);
       },
     });
 
@@ -108,6 +110,34 @@ export class BrowserWindow extends EventEmitter {
   }
 
   /**
+   * Called when the provider signals its window was closed externally
+   * (e.g. the user clicked the X button). Also called from close() after
+   * provider.close() completes.
+   *
+   * Emits 'closed' on this window, removes it from the all-windows registry,
+   * and — when the last window is gone — emits 'window-all-closed' on app.
+   * If no listener handles 'window-all-closed', the process exits with code 0,
+   * matching Electron's default behaviour.
+   */
+  private _handleClosed(): void {
+    if (!BrowserWindow._allWindows.has(this._id)) return; // already handled
+    BrowserWindow._allWindows.delete(this._id);
+    if (BrowserWindow._focusedId === this._id) BrowserWindow._focusedId = null;
+
+    this.emit('closed');
+
+    if (BrowserWindow._allWindows.size === 0) {
+      // Emit window-all-closed. If no listener is registered, default to exit
+      // (same as Electron on non-macOS platforms).
+      if (app.listenerCount('window-all-closed') === 0) {
+        process.exit(0);
+      } else {
+        app.emit('window-all-closed');
+      }
+    }
+  }
+
+  /**
    * Synchronous factory — equivalent to `new BrowserWindow(options)`.
    * Kept for backward compatibility; `await BrowserWindow.create(opts)`
    * continues to work because awaiting a non-Promise value returns it as-is.
@@ -132,7 +162,16 @@ export class BrowserWindow extends EventEmitter {
     return Array.from(BrowserWindow._allWindows.values());
   }
 
+  /**
+   * Returns the window that most recently received focus via the focus() API.
+   * Falls back to the first open window when no focus has been recorded.
+   * Note: focus gained via mouse click is not tracked without platform events.
+   */
   public static getFocusedWindow(): BrowserWindow | undefined {
+    if (BrowserWindow._focusedId !== null) {
+      const focused = BrowserWindow._allWindows.get(BrowserWindow._focusedId);
+      if (focused) return focused;
+    }
     return BrowserWindow.getAllWindows()[0];
   }
 
@@ -181,12 +220,8 @@ export class BrowserWindow extends EventEmitter {
   }
 
   public close(): void {
-    BrowserWindow._allWindows.delete(this._id);
     this.provider.close();
-    this.emit('closed');
-    if (BrowserWindow._allWindows.size === 0) {
-      app.emit('window-all-closed');
-    }
+    this._handleClosed();
   }
 
   public setMenu(menu: MenuItemOptions[] | Menu): void {
@@ -236,52 +271,53 @@ export class BrowserWindow extends EventEmitter {
   }
 
   public focus(): void {
-    this.provider.focus?.();
+    BrowserWindow._focusedId = this._id;
+    this.provider.focus();
   }
   public blur(): void {
-    this.provider.blur?.();
+    this.provider.blur();
   }
 
   public minimize(): void {
-    this.provider.minimize?.();
+    this.provider.minimize();
   }
   public maximize(): void {
-    this.provider.maximize?.();
+    this.provider.maximize();
   }
   public unmaximize(): void {
-    this.provider.unmaximize?.();
+    this.provider.unmaximize();
   }
   /** Alias for unmaximize(). */
   public restore(): void {
-    this.provider.unmaximize?.();
+    this.provider.unmaximize();
   }
 
   public setFullScreen(flag: boolean): void {
-    this.provider.setFullScreen?.(flag);
+    this.provider.setFullScreen(flag);
   }
   public isFullScreen(): boolean {
-    return this.provider.isFullScreen?.() ?? false;
+    return this.provider.isFullScreen();
   }
 
   public setKiosk(flag: boolean): void {
-    this.provider.setKiosk?.(flag);
+    this.provider.setKiosk(flag);
   }
   public isKiosk(): boolean {
-    return this.provider.isKiosk?.() ?? false;
+    return this.provider.isKiosk();
   }
 
   public setTitle(title: string): void {
-    this.provider.setTitle?.(title);
+    this.provider.setTitle(title);
   }
   public getTitle(): string {
-    return this.provider.getTitle?.() ?? '';
+    return this.provider.getTitle();
   }
 
   public setSize(width: number, height: number): void {
-    this.provider.setSize?.(width, height);
+    this.provider.setSize(width, height);
   }
   public getSize(): [number, number] {
-    return this.provider.getSize?.() ?? [0, 0];
+    return this.provider.getSize();
   }
 
   public setPosition(x: number, y: number): void {
@@ -299,40 +335,40 @@ export class BrowserWindow extends EventEmitter {
   }
 
   public setResizable(resizable: boolean): void {
-    this.provider.setResizable?.(resizable);
+    this.provider.setResizable(resizable);
   }
   public isResizable(): boolean {
-    return this.provider.isResizable?.() ?? true;
+    return this.provider.isResizable();
   }
 
   public setAlwaysOnTop(flag: boolean): void {
-    this.provider.setAlwaysOnTop?.(flag);
+    this.provider.setAlwaysOnTop(flag);
   }
 
   public center(): void {
-    this.provider.center?.();
+    this.provider.center();
   }
 
   public flashFrame(flag: boolean): void {
-    this.provider.flashFrame?.(flag);
+    this.provider.flashFrame(flag);
   }
 
   public setBackgroundColor(color: string): void {
-    this.provider.setBackgroundColor?.(color);
+    this.provider.setBackgroundColor(color);
   }
 
   /** Returns the native window HWND as a decimal string (Windows only; '0' on Linux). */
   public getHwnd(): string {
-    return this.provider.getHwnd?.() ?? '0';
+    return this.provider.getHwnd();
   }
 
   /** Enable or disable user interaction on this window (used for modal parent blocking). */
   public setEnabled(flag: boolean): void {
-    this.provider.setEnabled?.(flag);
+    this.provider.setEnabled(flag);
   }
 
   /** Captures the WebView contents and returns a NativeImage (PNG). */
   public capturePage(): Promise<NativeImage> {
-    return this.provider.capturePage?.() ?? Promise.resolve(new NativeImage(Buffer.alloc(0)));
+    return this.provider.capturePage();
   }
 }

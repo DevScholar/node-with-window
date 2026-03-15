@@ -154,7 +154,15 @@ export function startSyncServer(): Promise<number> {
         });
         res.write('\n'); // initial flush so EventSource fires 'open'
         sseClients.add(res);
-        req.on('close', () => sseClients.delete(res));
+        req.on('close', () => {
+          sseClients.delete(res);
+          // When the last renderer disconnects (page navigation or close), all
+          // server-side refs created during that session become unreachable.
+          // Clear them to prevent unbounded memory growth.
+          if (sseClients.size === 0) {
+            refRegistry.clear();
+          }
+        });
         return;
       }
 

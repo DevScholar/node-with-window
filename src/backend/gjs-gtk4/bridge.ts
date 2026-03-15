@@ -1,12 +1,17 @@
 import { WebPreferences } from '../../interfaces';
 import { generateImportMapTag, NODE_BUILTINS } from '../../esm-importmap.js';
+import { generateNodeBridgeIife, generateNodeBridgeStub } from '../bridge-shared.js';
 
 /**
  * Linux Bridge — WebKit JavaScript Injection
  *
  * Mirrors the Windows bridge (bridge.ts) but uses the WebKit messaging API:
  *   - Renderer -> Main:  window.webkit.messageHandlers.ipc.postMessage(json)
- *   - Main -> Renderer:  window.__ipcDispatch(json)   (called via evaluate_javascript)
+ *   - Main -> Renderer (IPC):  window.__ipcDispatch(json)   (called via evaluate_javascript)
+ *   - Main -> Renderer (eval): self-contained IIFE injected via SendToRenderer
+ *
+ * executeJavaScript() sends eval code as a standalone IIFE rather than routing
+ * it through __ipcDispatch, so renderer scripts cannot forge exec requests.
  *
  * ipcRenderer API exposed in the renderer is intentionally identical to the
  * Windows version so that application code is fully cross-platform.
@@ -19,10 +24,12 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
   if (nodeIntegration) {
     const injectedCwd     = JSON.stringify(process.cwd());
     const injectedVersion = JSON.stringify(process.version);
-    const injectedEnv     = JSON.stringify(process.env);
+    // Double-encode env so </script> sequences inside env values cannot break the
+    // enclosing <script> tag (the outer JSON.stringify produces a safe string literal).
+    const injectedEnv     = JSON.stringify(JSON.stringify(process.env));
+    const injectedArch    = JSON.stringify(process.arch);
     const injectedPort    = syncServerPort;
 
-    let injectedImportMapJson = 'null';
     if (injectedPort > 0) {
       const base = `http://127.0.0.1:${injectedPort}/__nww_esm__/`;
       const imports: Record<string, string> = {};
@@ -31,189 +38,27 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
         imports[name] = base + name;
         imports[`node:${name}`] = base + name;
       }
-      injectedImportMapJson = JSON.stringify(JSON.stringify({ imports }));
-    }
+      const importMapJson = JSON.stringify(JSON.stringify({ imports }));
 
-    if (injectedPort > 0) {
-      // Full implementation: synchronous XHR to the local require server.
-      // SSE connection delivers callbacks (fs.watch, EventEmitter.on, etc.).
-      // FinalizationRegistry + unload handler keep server-side ref memory tidy.
-      nodeBridge = `
-(function() {
-    if (window.__nodeBridge) return;
-    window.__nodeBridge = true;
-
-    window.__nwwCallbacks = {};
-
-    // Defer EventSource connection to avoid blocking the GDK seat
-    // initialization on first run in WebKitGTK (cold-start freeze).
-    var __nwwEvtSrc = null;
-    setTimeout(function() {
-        __nwwEvtSrc = new EventSource('http://127.0.0.1:${injectedPort}/__nww_events__');
-        __nwwEvtSrc.onmessage = function(e) {
-            var msg = JSON.parse(e.data);
-            var cb = window.__nwwCallbacks[msg.id];
-            if (cb) cb.apply(null, msg.args.map(__nwwWrapResult));
-        };
-    }, 0);
-
-    function __nwwSerializeArg(a) {
-        if (typeof a === 'function') {
-            var id = Math.random().toString(36).substring(2, 11);
-            window.__nwwCallbacks[id] = a;
-            return { __nww_cb: id };
-        }
-        if (a !== null && typeof a === 'object' && typeof a.__nww_ref === 'string') {
-            return { __nww_ref: a.__nww_ref };
-        }
-        return a;
-    }
-
-    function __nwwWrapResult(result) {
-        if (result !== null && typeof result === 'object' && typeof result.__nww_ref === 'string') {
-            return __nwwMakeRef(result.__nww_ref);
-        }
-        return result;
-    }
-
-    window.__nwwLiveRefs = new Set();
-    var __nwwPendingRelease = [];
-    var __nwwReleaseTimer = null;
-
-    var __nwwRefFinalizer = new FinalizationRegistry(function(id) {
-        window.__nwwLiveRefs.delete(id);
-        __nwwPendingRelease.push(id);
-        if (!__nwwReleaseTimer) {
-            __nwwReleaseTimer = setTimeout(function() {
-                __nwwReleaseTimer = null;
-                var batch = __nwwPendingRelease.splice(0);
-                if (batch.length === 0) return;
-                fetch('http://127.0.0.1:${injectedPort}/__nww_release__', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ refs: batch })
-                }).catch(function() {});
-            }, 0);
-        }
-    });
-
-    function __nwwMakeRef(refId) {
-        var proxy = new Proxy({ __nww_ref: refId }, {
-            get: function(target, prop) {
-                if (prop === '__nww_ref') return refId;
-                if (typeof prop !== 'string') return undefined;
-                if (prop === 'then') return undefined;
-                return function() {
-                    var args = Array.prototype.slice.call(arguments);
-                    var xhr = new XMLHttpRequest();
-                    xhr.open('POST', 'http://127.0.0.1:${injectedPort}/__nww_sync__', false);
-                    xhr.setRequestHeader('Content-Type', 'application/json');
-                    xhr.send(JSON.stringify({ ref: refId, methodName: prop, args: args.map(__nwwSerializeArg) }));
-                    var resp = JSON.parse(xhr.responseText);
-                    if (xhr.status !== 200) throw new Error(resp.error || 'ref call failed');
-                    return __nwwWrapResult(resp.result);
-                };
-            }
-        });
-        window.__nwwLiveRefs.add(refId);
-        __nwwRefFinalizer.register(proxy, refId);
-        return proxy;
-    }
-
-    window.require = function(moduleName) {
-        if (moduleName === '@devscholar/node-with-window') {
-            return { ipcRenderer: window.ipcRenderer };
-        }
-        return new Proxy({}, {
-            get: function(target, methodName) {
-                if (typeof methodName !== 'string') return undefined;
-                if (methodName === 'then') return undefined;
-                return function() {
-                    var args = Array.prototype.slice.call(arguments);
-                    var xhr = new XMLHttpRequest();
-                    xhr.open('POST', 'http://127.0.0.1:${injectedPort}/__nww_sync__', false);
-                    xhr.setRequestHeader('Content-Type', 'application/json');
-                    xhr.send(JSON.stringify({ moduleName: moduleName, methodName: methodName, args: args.map(__nwwSerializeArg) }));
-                    var resp = JSON.parse(xhr.responseText);
-                    if (xhr.status !== 200) throw new Error(resp.error || 'require failed');
-                    return __nwwWrapResult(resp.result);
-                };
-            }
-        });
-    };
-
-    window.addEventListener('unload', function() {
-        if (window.__nwwLiveRefs.size === 0) return;
-        var ids = Array.from(window.__nwwLiveRefs);
-        window.__nwwLiveRefs.clear();
-        var xhr = new XMLHttpRequest();
-        xhr.open('POST', 'http://127.0.0.1:${injectedPort}/__nww_release__', false);
-        xhr.setRequestHeader('Content-Type', 'application/json');
-        try { xhr.send(JSON.stringify({ refs: ids })); } catch (_e) {}
-    });
-
-    window.process = {
+      nodeBridge = generateNodeBridgeIife({
+        port: injectedPort,
         platform: 'linux',
-        arch: 'x64',
-        version: ${injectedVersion},
-        env: ${injectedEnv},
-        cwd: function() { return ${injectedCwd}; },
-        exit: function(code) {
-            window.webkit.messageHandlers.ipc.postMessage(
-                JSON.stringify({ type: 'send', channel: 'process:exit', args: [code] }));
-        }
-    };
-
-    if (${injectedImportMapJson} !== null) {
-        var __nwwImportMapJson = ${injectedImportMapJson};
-        function __nwwDoInjectImportMap() {
-            if (!document.head) return false;
-            if (document.querySelector('script[type="importmap"]')) return true;
-            var s = document.createElement('script');
-            s.type = 'importmap';
-            s.textContent = __nwwImportMapJson;
-            document.head.insertBefore(s, document.head.firstChild);
-            return true;
-        }
-        if (!__nwwDoInjectImportMap()) {
-            var __nwwImportMapObs = new MutationObserver(function(m, o) {
-                if (__nwwDoInjectImportMap()) o.disconnect();
-            });
-            __nwwImportMapObs.observe(document, { childList: true, subtree: true });
-        }
-    }
-})();`;
+        injectedArch,
+        injectedVersion,
+        injectedEnv,
+        injectedCwd,
+        importMapJson,
+      });
     } else {
       // Fallback stubs when no sync server is running (nodeIntegration without
       // a running server should not happen in normal use, but degrade gracefully).
-      nodeBridge = `
-(function() {
-    if (window.__nodeBridge) return;
-    window.__nodeBridge = true;
-    var stub = function(m, n) {
-        return function() {
-            console.warn('[node-with-window] ' + m + '.' + n + '() is not available. Use ipcRenderer.invoke() instead.');
-            return null;
-        };
-    };
-    window.require = function(m) {
-        if (m === '@devscholar/node-with-window') {
-            return { ipcRenderer: window.ipcRenderer };
-        }
-        console.warn('[node-with-window] window.require() stub: sync server not available.');
-        return null;
-    };
-    window.process = {
-        platform: 'linux', arch: 'x64',
-        version: ${injectedVersion},
-        env: ${injectedEnv},
-        cwd: function() { return ${injectedCwd}; },
-        exit: function(code) {
-            window.webkit.messageHandlers.ipc.postMessage(
-                JSON.stringify({ type: 'send', channel: 'process:exit', args: [code] }));
-        }
-    };
-})();`;
+      nodeBridge = generateNodeBridgeStub({
+        platform: 'linux',
+        injectedArch,
+        injectedVersion,
+        injectedEnv,
+        injectedCwd,
+      });
     }
   }
 
@@ -225,7 +70,7 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
      * Outgoing (renderer -> main):
      *   window.webkit.messageHandlers.ipc.postMessage(jsonString)
      *
-     * Incoming (main -> renderer):
+     * Incoming (main -> renderer, IPC replies/push):
      *   window.__ipcDispatch(jsonString)  — called by evaluate_javascript() in the host
      *
      * Message format (same as Windows):
@@ -243,33 +88,13 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
     // Registered on() listeners keyed by channel
     window.__ipcListeners = {};
 
-    // Called by the main process (via evaluate_javascript) to deliver replies,
-    // push messages to on() listeners, or execute arbitrary JS (executeJavaScript).
+    // Called by the main process (via evaluate_javascript) to deliver replies
+    // and push messages to on() listeners.
+    // NOTE: executeJavaScript() eval is NOT routed through here — it is sent
+    // as a self-contained IIFE so renderer scripts cannot forge exec requests.
     window.__ipcDispatch = function(json) {
         var msg;
         try { msg = JSON.parse(json); } catch(e) { return; }
-        if (msg.type === 'exec') {
-            var eid = msg.id;
-            try {
-                var r = eval(msg.code);
-                if (r && typeof r.then === 'function') {
-                    r.then(function(v) {
-                        window.webkit.messageHandlers.ipc.postMessage(
-                            JSON.stringify({type:'execResult',id:eid,result:v==null?null:v}));
-                    }).catch(function(ex) {
-                        window.webkit.messageHandlers.ipc.postMessage(
-                            JSON.stringify({type:'execResult',id:eid,error:String(ex)}));
-                    });
-                } else {
-                    window.webkit.messageHandlers.ipc.postMessage(
-                        JSON.stringify({type:'execResult',id:eid,result:r==null?null:r}));
-                }
-            } catch(ex) {
-                window.webkit.messageHandlers.ipc.postMessage(
-                    JSON.stringify({type:'execResult',id:eid,error:String(ex)}));
-            }
-            return;
-        }
         if (msg.type === 'reply') {
             var p = window.__ipcPending[msg.id];
             if (p) {

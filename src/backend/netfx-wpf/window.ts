@@ -189,6 +189,8 @@ export class NetFxWpfWindow implements IWindowProvider {
   private _pendingAbsFilePath: string | null = null;
   public userDataPath: string;
   public pendingMenu: MenuItemOptions[] | null = null;
+  /** Registered by BrowserWindow; called when the WPF window is closed externally. */
+  public onClosed?: () => void;
   private isClosed = false;
   private _pollTimer: ReturnType<typeof setInterval> | null = null;
   private _isFullScreen = false;
@@ -199,7 +201,6 @@ export class NetFxWpfWindow implements IWindowProvider {
   private _isClosable = true;
   private _isMovable = true;
   private _skipTaskbar = false;
-  private _isSecondaryWindow = false;
   private _navCompletedCallback: (() => void) | null = null;
   private _pendingExecs = new Map<
     string,
@@ -602,7 +603,6 @@ export class NetFxWpfWindow implements IWindowProvider {
     // WPF message loop is already running (another window called Application.Run).
     // Just wire the close handler and call Show() — no new Application or timer.
     if (_wpfStarted) {
-      this._isSecondaryWindow = true;
       this.app = true; // mark as started so re-calls above take the fast path
 
       if (this.pendingMenu) {
@@ -697,7 +697,7 @@ export class NetFxWpfWindow implements IWindowProvider {
       }
     }
     this.cleanupUserData();
-    process.exit(0);
+    // Do NOT call process.exit() here — BrowserWindow._handleClosed() owns exit logic.
   }
 
   // -------------------------------------------------------------------------
@@ -719,18 +719,16 @@ export class NetFxWpfWindow implements IWindowProvider {
     }
     this._pendingExecs.clear();
 
-    if (this._isSecondaryWindow) {
-      // Secondary window: don't exit the process, just clean up.
-      this.cleanupUserData();
-      return;
-    }
-
     if (this._pollTimer) {
       clearInterval(this._pollTimer);
       this._pollTimer = null;
     }
     this.cleanupUserData();
-    process.exit(0);
+    // Notify BrowserWindow, which will emit 'closed', 'window-all-closed', and
+    // call process.exit(0) if no listener handles window-all-closed.
+    // Secondary windows: BrowserWindow._handleClosed() does NOT exit when other
+    // windows remain open, so this is safe for both primary and secondary windows.
+    this.onClosed?.();
   }
 
   /** Poll the .NET host for one queued event and dispatch it. */
@@ -759,10 +757,11 @@ export class NetFxWpfWindow implements IWindowProvider {
   /**
    * Dispatches a JSON message from the WebView2 renderer to the appropriate handler.
    *
-   * Message shapes (from preload-script.ts):
-   *   { type: 'ipc-invoke', channel, requestId, args }  — ipcMain.handle()
-   *   { type: 'ipc-send',   channel, args }             — ipcMain.on()
-   *   { type: 'event',      callbackId, args }          — .NET event callbacks (menu, WebView2 events, etc.)
+   * Message shapes:
+   *   { type: 'event', callbackId, args }  — .NET event callbacks (menu, WebView2 events, etc.)
+   *
+   * IPC messages (send/invoke/execResult) are handled directly in the
+   * add_WebMessageReceived callback registered during createWindow(), not here.
    */
   private _dispatchRendererMessage(raw: string): void {
     let msg: any;
@@ -778,43 +777,6 @@ export class NetFxWpfWindow implements IWindowProvider {
         });
         try { cb(...wrappedArgs); } catch (e) { console.error('[node-with-window] .NET event callback error:', e); }
       }
-    } else if (msg.type === 'ipc-invoke') {
-      const handler = ipcMain.handlers.get(msg.channel);
-      const requestId = msg.requestId;
-      const event = { sender: this, frameId: 0, reply: () => {} };
-
-      const sendReply = (result: unknown, error?: string) => {
-        if (!this.coreWebView2) return;
-        (this.coreWebView2 as unknown as { PostWebMessageAsString: (s: string) => void })
-          .PostWebMessageAsString(JSON.stringify({
-            type: 'ipc-reply', requestId,
-            result: result ?? null,
-            error: error ?? null,
-          }));
-      };
-
-      if (!handler) {
-        sendReply(null, `No handler for channel: ${msg.channel}`);
-        return;
-      }
-
-      let resultOrPromise: unknown;
-      try {
-        resultOrPromise = handler(event, ...(msg.args ?? []));
-      } catch (e: unknown) {
-        sendReply(null, (e as Error).message || String(e));
-        return;
-      }
-
-      if (resultOrPromise && typeof (resultOrPromise as Promise<unknown>).then === 'function') {
-        (resultOrPromise as Promise<unknown>)
-          .then(r => sendReply(r))
-          .catch((e: unknown) => sendReply(null, (e as Error).message || String(e)));
-      } else {
-        sendReply(resultOrPromise);
-      }
-    } else if (msg.type === 'ipc-send') {
-      ipcMain.emit(msg.channel, { sender: this }, ...(msg.args ?? []));
     }
   }
 

@@ -150,6 +150,8 @@ export interface IpcMainEvent {
   sender: unknown;
   frameId: number;
   reply: (channel: string, ...args: unknown[]) => void;
+  /** Set this to return a value from ipcRenderer.sendSync(). */
+  returnValue?: unknown;
 }
 
 /**
@@ -164,6 +166,11 @@ export interface IpcRendererEvent {
  * IWindowProvider - Interface for platform-specific window implementations
  *
  * Abstracts the differences between Windows (WPF+WebView2) and Linux (GTK+WebKit).
+ *
+ * Lifecycle contract for process exit:
+ *   When the window is closed (either via close() or by the user clicking X),
+ *   the provider must call this.onClosed?.() — NEVER call process.exit() directly.
+ *   BrowserWindow registers onClosed and owns the decision to emit events and exit.
  */
 export interface IWindowProvider {
   createWindow(): Promise<void>;
@@ -180,39 +187,53 @@ export interface IWindowProvider {
     message: string;
     buttons?: string[];
   }): number;
-  sendToRenderer?(channel: string, ...args: unknown[]): void;
-  cleanupUserData?(): void;
-  reload?(): void;
-  openDevTools?(): void;
-  focus?(): void;
-  blur?(): void;
-  minimize?(): void;
-  maximize?(): void;
-  unmaximize?(): void;
-  setFullScreen?(flag: boolean): void;
-  isFullScreen?(): boolean;
-  setKiosk?(flag: boolean): void;
-  isKiosk?(): boolean;
-  setBackgroundColor?(color: string): void;
-  setTitle?(title: string): void;
-  getTitle?(): string;
-  setSize?(width: number, height: number): void;
-  getSize?(): [number, number];
+
+  /**
+   * Called by BrowserWindow immediately after createWindow() succeeds.
+   * The provider must call this when the underlying window is closed by
+   * any means other than a direct close() call (e.g. the user clicks X).
+   * Must NOT be called from close() — BrowserWindow handles that path itself.
+   */
+  onClosed?: () => void;
+
+  // ── Methods required by all backends ──────────────────────────────────────
+  sendToRenderer(channel: string, ...args: unknown[]): void;
+  reload(): void;
+  openDevTools(): void;
+  focus(): void;
+  blur(): void;
+  minimize(): void;
+  maximize(): void;
+  unmaximize(): void;
+  setFullScreen(flag: boolean): void;
+  isFullScreen(): boolean;
+  setKiosk(flag: boolean): void;
+  isKiosk(): boolean;
+  setBackgroundColor(color: string): void;
+  setTitle(title: string): void;
+  getTitle(): string;
+  setSize(width: number, height: number): void;
+  getSize(): [number, number];
+  setResizable(resizable: boolean): void;
+  isResizable(): boolean;
+  setAlwaysOnTop(flag: boolean): void;
+  center(): void;
+  flashFrame(flag: boolean): void;
+  executeJavaScript(code: string): Promise<unknown>;
+  onNavigationCompleted(callback: () => void): void;
+  getHwnd(): string;
+  setEnabled(flag: boolean): void;
+  capturePage(): Promise<import('./native-image.js').NativeImage>;
+
+  // ── Platform-limited methods (optional — may warn or return defaults) ─────
+  /** GTK4: window placement is managed by compositor; warns and is a no-op. */
   setPosition?(x: number, y: number): void;
+  /** GTK4: not supported; warns and returns [0, 0]. */
   getPosition?(): [number, number];
+  /** GTK4: gtk_widget_set_opacity was removed; warns and is a no-op. */
   setOpacity?(opacity: number): void;
+  /** GTK4: not supported; warns and returns 1.0. */
   getOpacity?(): number;
-  setResizable?(resizable: boolean): void;
-  isResizable?(): boolean;
-  setAlwaysOnTop?(flag: boolean): void;
-  center?(): void;
-  flashFrame?(flag: boolean): void;
-  executeJavaScript?(code: string): Promise<unknown>;
-  onNavigationCompleted?(callback: () => void): void;
-  /** Returns the native window HWND (Windows) as a decimal string, or '0' if unavailable. */
-  getHwnd?(): string;
-  /** Enable or disable user interaction on the window (used for modal parent blocking). */
-  setEnabled?(flag: boolean): void;
-  /** Captures the WebView contents and returns a NativeImage (PNG). */
-  capturePage?(): Promise<import('./native-image.js').NativeImage>;
+  /** Windows-only. */
+  cleanupUserData?(): void;
 }
