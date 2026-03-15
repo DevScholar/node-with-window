@@ -1,6 +1,6 @@
 {
   "name": "@devscholar/node-with-window",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Cross-platform window library with WebView support",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
