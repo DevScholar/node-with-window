@@ -14,7 +14,7 @@ import {
 import { ipcMain } from '../../ipc-main';
 import { NativeImage } from '../../native-image.js';
 import { injectBridgeScript, generateBridgeScript } from './bridge.js';
-import { getSyncServerPort } from '../../node-integration.js';
+import { getSyncServerPort, getSyncServerToken } from '../../node-integration.js';
 
 /**
  * GjsGtk4Window — IWindowProvider implementation for Linux using GTK4 + WebKitGTK.
@@ -303,7 +303,7 @@ export class GjsGtk4Window implements IWindowProvider {
     // that it fires on every page navigation, including loadURL().
     // For loadFile() the bridge is also injected into the HTML directly; the
     // window.__nodeBridge / window.ipcRenderer guards prevent double-execution.
-    let userScript = generateBridgeScript(this.webPreferences, getSyncServerPort());
+    let userScript = generateBridgeScript(this.webPreferences, getSyncServerPort(), getSyncServerToken());
     const preloadPath = this.webPreferences.preload;
     if (preloadPath) {
       const absPreload = path.isAbsolute(preloadPath)
@@ -374,7 +374,7 @@ export class GjsGtk4Window implements IWindowProvider {
   public async loadFile(filePath: string): Promise<void> {
     const absPath = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
     const rawHtml = fs.readFileSync(absPath, 'utf-8');
-    const html = injectBridgeScript(rawHtml, this.webPreferences, getSyncServerPort());
+    const html = injectBridgeScript(rawHtml, this.webPreferences, getSyncServerPort(), getSyncServerToken());
     const baseUri = `file://${absPath}`;
 
     if (!this.ipc) {

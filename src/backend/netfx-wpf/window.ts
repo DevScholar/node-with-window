@@ -15,7 +15,7 @@ import { ipcMain } from '../../ipc-main';
 import { generateBridgeScript, injectImportMap } from './bridge.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 import { buildWpfMenu } from './menu.js';
-import { getSyncServerPort } from '../../node-integration.js';
+import { getSyncServerPort, getSyncServerToken } from '../../node-integration.js';
 import { callbackRegistry, createProxy, createProxyWithInlineProps } from './dotnet/proxy.js';
 
 /**
@@ -408,7 +408,7 @@ export class NetFxWpfWindow implements IWindowProvider {
     // In polling mode we cannot Task.Wait() on the UI thread (deadlock), so the
     // dedicated AddScriptAndNavigate action uses Task.ContinueWith to call Navigate()
     // only after the ack arrives — guaranteeing the script runs on the first document.
-    let bridgeScript = generateBridgeScript(this.webPreferences, getSyncServerPort());
+    let bridgeScript = generateBridgeScript(this.webPreferences, getSyncServerPort(), getSyncServerToken());
     const preloadPath = this.webPreferences.preload;
     if (preloadPath) {
       const absPreload = path.isAbsolute(preloadPath)
@@ -431,7 +431,7 @@ export class NetFxWpfWindow implements IWindowProvider {
       const rawHtml = fs.readFileSync(this._pendingAbsFilePath, 'utf-8');
       const dir = path.dirname(this._pendingAbsFilePath);
       const baseHref = 'file:///' + dir.replace(/\\/g, '/') + '/';
-      const html = injectImportMap(rawHtml, this.webPreferences, getSyncServerPort(), baseHref);
+      const html = injectImportMap(rawHtml, this.webPreferences, getSyncServerPort(), baseHref, getSyncServerToken());
       (dotnet as any).addScriptAndNavigateToString(this.coreWebView2, bridgeScript, html);
       this._pendingAbsFilePath = null;
     } else {
