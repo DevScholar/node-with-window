@@ -330,8 +330,9 @@ export class NetFxWpfWindow implements IWindowProvider {
     }
 
     // frame: false — remove title bar and window border.
-    // transparent also implies frameless (WindowChrome requires WindowStyle.None).
-    const needFrameless = this.options.frame === false || this.options.transparent === true;
+    // transparent and titleBarStyle:'hidden'/'hiddenInset' also imply WindowStyle.None.
+    const needFrameless = this.options.frame === false || this.options.transparent === true
+      || this.options.titleBarStyle === 'hidden' || this.options.titleBarStyle === 'hiddenInset';
     if (needFrameless) {
       (this.browserWindow as unknown as { WindowStyle: unknown }).WindowStyle =
         Windows.WindowStyle.None;
@@ -354,6 +355,18 @@ export class NetFxWpfWindow implements IWindowProvider {
         Windows.Media.Brushes.Transparent;
       (dotnet as any).applyWindowChrome(this.browserWindow);
       (dotnet as any).setWebViewBackground(this.webView, 0, 0, 0, 0);
+    } else if (this.options.frame !== false &&
+        (this.options.titleBarStyle === 'hidden' || this.options.titleBarStyle === 'hiddenInset')) {
+      // titleBarStyle:'hidden'/'hiddenInset' — remove the native title bar while keeping
+      // the resize border (4 px on all sides).  The app is expected to implement its own
+      // drag region in HTML (e.g. -webkit-app-region: drag via a custom CSS class).
+      (dotnet as any).applyHiddenTitleBar(this.browserWindow);
+      if (this.options.backgroundColor) {
+        const parsed = parseBackgroundColor(this.options.backgroundColor);
+        if (parsed) {
+          (dotnet as any).setWebViewBackground(this.webView, parsed.a, parsed.r, parsed.g, parsed.b);
+        }
+      }
     } else if (this.options.backgroundColor) {
       const parsed = parseBackgroundColor(this.options.backgroundColor);
       if (parsed) {
@@ -850,7 +863,8 @@ export class NetFxWpfWindow implements IWindowProvider {
   public setFullScreen(flag: boolean): void {
     if (!this.browserWindow) return;
     this._isFullScreen = flag;
-    const needFrameless = this.options.frame === false || this.options.transparent === true;
+    const needFrameless = this.options.frame === false || this.options.transparent === true
+      || this.options.titleBarStyle === 'hidden' || this.options.titleBarStyle === 'hiddenInset';
     (dotnet as any).setFullScreen(
       this.browserWindow, flag, needFrameless, this.options.alwaysOnTop ?? false
     );

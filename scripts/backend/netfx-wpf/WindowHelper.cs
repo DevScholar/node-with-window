@@ -605,11 +605,18 @@ public static class WindowHelper
     /// </summary>
     public static void ApplyWindowChrome(object wpfWindow)
     {
-        // Use assembly-qualified Type.GetType() — the WPF assemblies are already loaded
-        // at this point (we just created a Window), so this is effectively a dictionary
-        // lookup and avoids iterating every assembly in the AppDomain.
-        Type windowChromeType = Type.GetType("System.Windows.Shell.WindowChrome, PresentationFramework");
-        Type thicknessType    = Type.GetType("System.Windows.Thickness, PresentationCore");
+        // Resolve via AppDomain iteration — Type.GetType() with a partial assembly name
+        // (no Version/Culture/PublicKeyToken) is unreliable from Add-Type no-context
+        // assemblies and silently returns null.  Both types live in PresentationFramework.
+        Type windowChromeType = null;
+        Type thicknessType    = null;
+        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            if (asm.GetName().Name != "PresentationFramework") continue;
+            windowChromeType = asm.GetType("System.Windows.Shell.WindowChrome");
+            thicknessType    = asm.GetType("System.Windows.Thickness");
+            break;
+        }
         if (windowChromeType == null || thicknessType == null) return;
 
         object chrome = Activator.CreateInstance(windowChromeType);
@@ -625,6 +632,50 @@ public static class WindowHelper
 
         if (glassProp   != null) glassProp.SetValue(chrome, negThickness, null);
         if (resizeProp  != null) resizeProp.SetValue(chrome, zeroThickness, null);
+        if (captionProp != null) captionProp.SetValue(chrome, 0.0, null);
+        if (aeroProp    != null) aeroProp.SetValue(chrome, false, null);
+
+        MethodInfo setMethod = windowChromeType.GetMethod(
+            "SetWindowChrome", BindingFlags.Public | BindingFlags.Static);
+        if (setMethod != null) setMethod.Invoke(null, new object[] { wpfWindow, chrome });
+    }
+
+    /// <summary>
+    /// Applies a WindowChrome configuration for titleBarStyle:'hidden'/'hiddenInset'.
+    ///
+    /// Removes the native title bar (caller must already have set WindowStyle.None)
+    /// while keeping the standard 4 px WM resize border on all sides.
+    ///
+    ///   GlassFrameThickness  = 0   — no DWM glass (cf. ApplyWindowChrome which uses -1)
+    ///   ResizeBorderThickness = 4  — restore the system resize grab zone
+    ///   CaptionHeight        = 0   — no WPF caption drag area; app handles dragging in HTML
+    ///   UseAeroCaptionButtons = false
+    /// </summary>
+    public static void ApplyHiddenTitleBar(object wpfWindow)
+    {
+        Type windowChromeType = null;
+        Type thicknessType    = null;
+        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            if (asm.GetName().Name != "PresentationFramework") continue;
+            windowChromeType = asm.GetType("System.Windows.Shell.WindowChrome");
+            thicknessType    = asm.GetType("System.Windows.Thickness");
+            break;
+        }
+        if (windowChromeType == null || thicknessType == null) return;
+
+        object chrome = Activator.CreateInstance(windowChromeType);
+
+        object zeroThickness   = Activator.CreateInstance(thicknessType, new object[] { 0.0, 0.0, 0.0, 0.0 });
+        object resizeThickness = Activator.CreateInstance(thicknessType, new object[] { 4.0, 4.0, 4.0, 4.0 });
+
+        PropertyInfo glassProp   = windowChromeType.GetProperty("GlassFrameThickness");
+        PropertyInfo resizeProp  = windowChromeType.GetProperty("ResizeBorderThickness");
+        PropertyInfo captionProp = windowChromeType.GetProperty("CaptionHeight");
+        PropertyInfo aeroProp    = windowChromeType.GetProperty("UseAeroCaptionButtons");
+
+        if (glassProp   != null) glassProp.SetValue(chrome, zeroThickness, null);
+        if (resizeProp  != null) resizeProp.SetValue(chrome, resizeThickness, null);
         if (captionProp != null) captionProp.SetValue(chrome, 0.0, null);
         if (aeroProp    != null) aeroProp.SetValue(chrome, false, null);
 

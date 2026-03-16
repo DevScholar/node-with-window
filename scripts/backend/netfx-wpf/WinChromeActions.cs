@@ -10,7 +10,7 @@ public static class WinChromeActions
     {
         return action == "WinHelper" || action == "TrashItem"
             || action == "FixTransparentInput" || action == "FixTransparentInputChildren"
-            || action == "DwmTransparent" || action == "ApplyWindowChrome"
+            || action == "DwmTransparent" || action == "ApplyWindowChrome" || action == "ApplyHiddenTitleBar"
             || action == "GetHwnd" || action == "SetOwnerByHwnd" || action == "SetWindowEnabled";
     }
 
@@ -101,6 +101,13 @@ public static class WinChromeActions
         {
             var wpfWindow = BridgeState.ObjectStore[cmd["windowId"].ToString()];
             WindowHelper.ApplyWindowChrome(wpfWindow);
+            return new Dictionary<string, object> { { "type", "void" } };
+        }
+
+        if (action == "ApplyHiddenTitleBar")
+        {
+            var wpfWindow = BridgeState.ObjectStore[cmd["windowId"].ToString()];
+            WindowHelper.ApplyHiddenTitleBar(wpfWindow);
             return new Dictionary<string, object> { { "type", "void" } };
         }
 

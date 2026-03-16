@@ -108,6 +108,16 @@ export function handleWindowCommand(cmd, state) {
                 state.gtkWindow.set_decorated(false);
             }
 
+            // titleBarStyle: 'hidden'/'hiddenInset' — replace the default GTK headerbar
+            // with an empty zero-height box so the window retains its resize border while
+            // the native title bar is hidden.  Only applied when frame is not already false
+            // (which calls set_decorated(false) above, removing all chrome including borders).
+            if (opts.frame !== false && !opts.transparent &&
+                    (opts.titleBarStyle === 'hidden' || opts.titleBarStyle === 'hiddenInset')) {
+                const emptyBar = new Gtk.Box({ height_request: 0 });
+                state.gtkWindow.set_titlebar(emptyBar);
+            }
+
             // transparent: true — transparent window + WebView background.
             // GTK4 removes gtk_widget_set_app_paintable; use CSS instead.
             if (opts.transparent === true) {

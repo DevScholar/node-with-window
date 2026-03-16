@@ -314,6 +314,12 @@ const dotnetProxy = new Proxy(function() {} as any, {
                 getIpc()!.send({ action: 'ApplyWindowChrome', windowId: window.__ref });
             };
         }
+        if (prop === 'applyHiddenTitleBar') {
+            return (window: any): void => {
+                doInitialize();
+                getIpc()!.send({ action: 'ApplyHiddenTitleBar', windowId: window.__ref });
+            };
+        }
 
         // Enables DWM glass transparency for the entire client area.
         // Use this instead of AllowsTransparency=true when hosting WebView2.

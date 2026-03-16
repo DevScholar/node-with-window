@@ -42,6 +42,14 @@ export interface BrowserWindowOptions {
   title?: string;
   show?: boolean;
   frame?: boolean;
+  /**
+   * Controls the style of the window title bar.
+   * - 'default':      the standard OS-themed title bar (same as frame: true)
+   * - 'hidden':       the title bar is removed; resize borders are kept
+   * - 'hiddenInset':  same as 'hidden' on Windows/Linux (macOS-specific inset
+   *                   traffic-light buttons are not emulated on other platforms)
+   */
+  titleBarStyle?: 'default' | 'hidden' | 'hiddenInset';
   transparent?: boolean;
   /** CSS hex color for the window/webview background (#RGB, #RRGGBB, or #AARRGGBB). */
   backgroundColor?: string;
