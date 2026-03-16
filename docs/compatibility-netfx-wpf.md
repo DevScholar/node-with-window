@@ -55,14 +55,14 @@
 | `movable` | ✅ | `HwndSource` `WM_NCHITTEST` hook blocks title-bar drag when `false` |
 | `minimizable`, `maximizable` | ✅ | `GetWindowLong`/`SetWindowLong` WS_MINIMIZEBOX / WS_MAXIMIZEBOX |
 | `closable` | ✅ | `EnableMenuItem` on the system menu's `SC_CLOSE` item |
-| `transparent` | ✅ | `WindowStyle.None` + `AllowsTransparency = true` + `Background = Transparent`; WebView2 `DefaultBackgroundColor = Color.Transparent` |
+| `transparent` | ✅ | `WindowStyle.None` + `AllowsTransparency = false` + `Background = Transparent` + `WindowChrome(GlassFrameThickness = -1)` + `ResizeMode = NoResize`; WebView2 background alpha set to 0. Uses the hardware DX renderer path (not WS_EX_LAYERED) so WebView2 receives mouse clicks correctly. |
 | `frame` | ✅ | `WindowStyle.None` — removes title bar and border |
 | `backgroundColor` | ✅ | WebView2 `DefaultBackgroundColor` via `System.Drawing.Color.FromArgb`; accepts `#RGB`, `#RRGGBB`, `#AARRGGBB` |
 | `kiosk` | ✅ | `setFullScreen(true)` + `setSkipTaskbar(true)`; exit restores previous state |
 | `skipTaskbar` | ✅ | `SetWindowLong` WS_EX_TOOLWINDOW / WS_EX_APPWINDOW on extended style |
 | `fullscreen` | ✅ | Applied at window creation via `setFullScreen(true)` |
 | `parent`, `modal` | ✅ | `parent` sets WPF `WindowInteropHelper.Owner`; `modal` disables the parent window until the child closes |
-| `titleBarStyle` | ❌ | |
+| `titleBarStyle` | ✅ | `'hidden'`/`'hiddenInset'`: `WindowStyle.None` + `WindowChrome(GlassFrameThickness = 0, ResizeBorderThickness = 4, CaptionHeight = 0)`; title bar removed, 4 px resize border kept. `'default'`: standard title bar (no-op). |
 
 ### `webPreferences`
 
@@ -90,9 +90,9 @@
 | API | Status | Notes |
 |---|---|---|
 | `win.loadURL(url)` | ✅ | Queued until WebView2 is ready |
-| `win.loadFile(path)` | ✅ | Converted to `file:///` URI |
+| `win.loadFile(path)` | ✅ | HTML read from disk; importmap injected into `<head>` (when `nodeIntegration` is on); passed to WebView2 via `NavigateToString` |
 | `win.show()` | ✅ | Starts WPF `Application.Run()`; subsequent calls call `Window.Show()` |
-| `win.close()` | ✅ | Calls `Window.Close()`, cleans up user-data dir, exits process |
+| `win.close()` | ✅ | Calls `Window.Close()`, stops poll timer, cleans up user-data dir; process exit is managed by the BrowserWindow close-event chain |
 | `win.destroy()` | ✅ | Alias for `close()` |
 | `win.focus()` | ✅ | `Window.Activate()` |
 | `win.blur()` | ✅ | No-op — WPF has no programmatic blur API |
@@ -225,7 +225,7 @@
 | Multi-fire callbacks (e.g. `fs.watch`, `EventEmitter.on`) | ✅ | Same SSE mechanism |
 | Non-serializable return values (Buffer, FSWatcher, Stream, …) | ✅ | Stored in ref registry; renderer gets a Proxy |
 | `window.process.platform` | ✅ | `'win32'` |
-| `window.process.arch` | ✅ | `'x64'` |
+| `window.process.arch` | ✅ | Reflects actual `process.arch` from the main process |
 | `window.process.version` | ✅ | Injected from main process |
 | `window.process.env` | ✅ | Snapshot of `process.env` from the main process at window creation time |
 | `window.process.cwd()` | ✅ | Injected from main process |
@@ -285,4 +285,4 @@ Both mechanisms map every Node.js built-in name (and its `node:` alias) to `http
 
 6. **`webSecurity: false`** passes `--disable-web-security` to the WebView2 browser process via `CoreWebView2CreationProperties.AdditionalBrowserArguments`. Requires WebView2 SDK ≥ 1.0.1661.
 
-7. **`transparent: true` requires no host-page CSS.** The WPF window uses `AllowsTransparency = true` with a transparent `Background`, and WebView2's `DefaultBackgroundColor` is set to `Color.Transparent`. Regions of the page with a transparent CSS background will show the desktop behind the window. `frame: false` is implied (WPF requires `WindowStyle.None` before enabling transparency).
+7. **`transparent: true` requires no host-page CSS.** The WPF window uses `AllowsTransparency = false` (hardware DX renderer) combined with `WindowChrome(GlassFrameThickness = -1)` to extend DWM glass over the entire client area, and WPF `Background` is set to `Transparent`. WebView2's background alpha is also set to 0. This approach avoids the WS_EX_LAYERED path so mouse clicks reach WebView2 on fully transparent pixels. `frame: false` is implied (`WindowStyle.None` is required for WindowChrome transparency).

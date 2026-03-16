@@ -63,13 +63,13 @@
 | `skipTaskbar` | ⚠️ | Logged as warning; GTK4 removed `set_skip_taskbar_hint()`, most compositors ignore workarounds |
 | `fullscreen` | ✅ | `Window.fullscreen()` called at creation |
 | `parent`, `modal` | ⚠️ | `modal` disables the parent window via `set_sensitive(false)`; no GTK `set_transient_for` (cross-process limitation) |
-| `titleBarStyle` | ❌ | |
+| `titleBarStyle` | ✅ | `'hidden'`/`'hiddenInset'`: empty `Gtk.Box` with `height_request = 0` replaces the default CSD headerbar via `set_titlebar()`; WM resize border is preserved. `'default'`: standard headerbar (no-op). Only effective when `frame !== false` and `transparent !== true`. |
 
 ### `webPreferences`
 
 | Option | Status | Notes |
 |---|---|---|
-| `nodeIntegration` | ⚠️ | Injects stub `window.require` — calls log a warning and return `null`. Use `ipcMain`/`ipcRenderer` for all Node.js access on Linux. |
+| `nodeIntegration` | ✅ | Enables `window.require` (sync XHR) and `window.process`; same mechanism as the `netfx-wpf` backend |
 | `contextIsolation` | ✅ | `false` (default) injects `window.ipcRenderer` |
 | `partition` | ⚠️ | Accepted, not applied — WebKitGTK uses a default profile |
 | `preload` | ✅ | Supported via `webPreferences.preload` |
@@ -93,7 +93,7 @@
 | `win.loadURL(url)` | ✅ | Queued until GJS host is ready |
 | `win.loadFile(path)` | ✅ | Read as HTML, bridge script injected, sent as `LoadHTML` |
 | `win.show()` | ✅ | `Window.present()` |
-| `win.close()` | ✅ | Sends `Close` command to GJS host; cleans up FIFOs; exits process |
+| `win.close()` | ✅ | Sends `Close` command to GJS host; cleans up FIFOs and kills GJS process; process exit is managed by the BrowserWindow close-event chain |
 | `win.destroy()` | ✅ | Alias for `close()` |
 | `win.focus()` | ✅ | `Window.present()` |
 | `win.blur()` | ⚠️ | No-op + console warning; GNOME compositor controls focus |
@@ -213,31 +213,19 @@
 
 ## Node.js Integration in Renderer (`nodeIntegration: true`)
 
-> **Linux limitation:** `window.require` on GTK4/WebKit is stub-only. All calls log a console warning and return `null`. The underlying sync XHR mechanism used on Windows does not work with WebKitGTK (no synchronous XHR to loopback, no SSE buffering during XHR block).
-
-Use `ipcMain.handle` + `ipcRenderer.invoke` for all Node.js access from the renderer on Linux:
-
-```js
-// main process
-import * as fs from 'node:fs';
-ipcMain.handle('read-file', (_event, path) => fs.readFileSync(path, 'utf-8'));
-
-// renderer (works on both Windows and Linux)
-const content = await ipcRenderer.invoke('read-file', '/path/to/file');
-```
-
 | Feature | Status | Notes |
 |---|---|---|
-| `window.require('fs')` | ✅ | Full sync-XHR bridge; all Node.js builtins accessible |
-| `window.require('path')` | ✅ | Full sync-XHR bridge |
-| `window.require('os')` | ✅ | Full sync-XHR bridge |
+| `window.require(moduleName)` | ✅ | Sync XHR to local HTTP server; all Node.js built-ins work; npm packages in user's project not accessible |
+| Callback arguments (e.g. `fs.readFile(path, cb)`) | ✅ | Serialized as `{__nww_cb: id}`; fired via SSE |
+| Multi-fire callbacks (e.g. `fs.watch`, `EventEmitter.on`) | ✅ | Same SSE mechanism |
+| Non-serializable return values (Buffer, FSWatcher, Stream, …) | ✅ | Stored in ref registry; renderer gets a Proxy |
 | `window.process.platform` | ✅ | `'linux'` |
-| `window.process.arch` | ✅ | `'x64'` |
+| `window.process.arch` | ✅ | Reflects actual `process.arch` from the main process |
 | `window.process.version` | ✅ | Injected from main process |
 | `window.process.env` | ✅ | Snapshot of `process.env` from the main process at window creation time |
 | `window.process.cwd()` | ✅ | Injected from main process |
 | `window.process.exit(code)` | ✅ | Sends IPC to main process |
-| `import { x } from 'fs'` | ✅ | Standard static ESM import; works with both `loadFile()` and `loadURL()` |
+| `import { x } from 'fs'` | ✅ | Importmap injected into `<head>`; works with `loadFile()` and `loadURL()` |
 
 ---
 
@@ -249,10 +237,6 @@ const content = await ipcRenderer.invoke('read-file', '/path/to/file');
 
 3. **Preload scripts** are supported. Set `webPreferences.preload` to an absolute or relative path. The script is registered via `WebKit.UserContentManager.add_script()` so it fires on every page navigation before the page's own scripts.
 
-4. **`ipcMain.on()` is absent.** Use `ipcMain.handle()` for all renderer→main communication.
+4. **`webPreferences.partition` is ignored.** WebKitGTK uses a single default profile; per-window session isolation is not supported.
 
-5. **`Menu.setApplicationMenu()` is absent.** Use `win.setMenu(menu)` on the `BrowserWindow` instance.
-
-6. **`webPreferences.partition` is ignored.** WebKitGTK uses a single default profile; per-window session isolation is not supported.
-
-7. **WebKit sandbox is only disabled inside VMware.** The library reads `/sys/class/dmi/id/sys_vendor` at startup; if it contains `"vmware"`, `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` is set for the GJS child process. On bare-metal and other hypervisors the sandbox runs normally.
+5. **WebKit sandbox is only disabled inside VMware.** The library reads `/sys/class/dmi/id/sys_vendor` at startup; if it contains `"vmware"`, `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` is set for the GJS child process. On bare-metal and other hypervisors the sandbox runs normally.

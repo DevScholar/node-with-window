@@ -180,7 +180,7 @@ Because `node-with-window-examples` resolves the library via a `file:` symlink i
 - `node-with-window` spawns `scripts/backend/netfx-wpf/WinHost.ps1` as a child process. The script compiles the WPF/WebView2 C# bridge (`scripts/backend/netfx-wpf/*.cs`) at startup via PowerShell's `Add-Type` and communicates over a Windows Named Pipe using a synchronous JSON request/response protocol.
 - `show()` sends a `StartApplication` command to the .NET host, which immediately acknowledges and then calls `Application.Run(window)` — blocking the .NET thread in the WPF message loop without blocking the Node.js event loop.
 - Node.js polls for events every 16 ms with a `Poll` command that drains a thread-safe queue. WPF event handlers (like `WebMessageReceived`) enqueue their payload instead of blocking on synchronous IPC, so `async ipcMain.handle()` callbacks work normally.
-- When `loadFile` is called, the HTML is read, the `ipcRenderer` bridge is injected into `<head>`, and the modified HTML is sent to the WPF host before `Application.Run()`.
+- When `loadFile` is called before `show()`, the file path is queued. After `Application.Run()` starts and CoreWebView2 finishes initializing, the bridge script is registered via `AddScriptToExecuteOnDocumentCreatedAsync` and the HTML (with an importmap injected into `<head>` when `nodeIntegration` is enabled) is passed to WebView2 via `NavigateToString`.
 - The `WebMessageReceived` handler enqueues the raw JSON payload. The next `Poll` delivers it to Node.js, which dispatches it to the registered `ipcMain` handler and sends the reply via `PostWebMessageAsString`.
 - Node integration uses a loopback HTTP server started in the main process; the renderer calls `window.require(module)` via synchronous XHR. Callbacks are delivered via a persistent `EventSource`.
 
@@ -193,6 +193,8 @@ Because `node-with-window-examples` resolves the library via a `file:` symlink i
 - **WebKit → Node.js IPC:** the HTML renderer posts messages via
   `window.webkit.messageHandlers.ipc.postMessage(json)`. The GJS host queues them.
   Node.js drains the queue every 16 ms with a `Poll` command.
+- **Window closed:** the GJS host sends `type: 'exit'`; Node.js calls `onClosed()`, which bubbles
+  up to `BrowserWindow` and triggers `process.exit(0)` when no other windows remain open.
 - **Node.js → WebKit IPC:** replies and push messages are delivered by sending a
   `SendToRenderer` command, which calls `webView.evaluate_javascript()` in GJS.
 - Async `ipcMain.handle()` handlers are fully supported (the Node.js event loop stays alive
