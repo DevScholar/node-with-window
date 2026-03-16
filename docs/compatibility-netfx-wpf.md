@@ -90,7 +90,7 @@
 | API | Status | Notes |
 |---|---|---|
 | `win.loadURL(url)` | ✅ | Queued until WebView2 is ready |
-| `win.loadFile(path)` | ✅ | HTML read from disk; importmap injected into `<head>` (when `nodeIntegration` is on); passed to WebView2 via `NavigateToString` |
+| `win.loadFile(path)` | ✅ | Navigates to `file:///` URI; bridge script injected via `AddScriptToExecuteOnDocumentCreatedAsync`; importmap injected by MutationObserver in bridge script |
 | `win.show()` | ✅ | Starts WPF `Application.Run()`; subsequent calls call `Window.Show()` |
 | `win.close()` | ✅ | Calls `Window.Close()`, stops poll timer, cleans up user-data dir; process exit is managed by the BrowserWindow close-event chain |
 | `win.destroy()` | ✅ | Alias for `close()` |
