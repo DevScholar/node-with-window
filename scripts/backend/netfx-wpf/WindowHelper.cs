@@ -451,8 +451,15 @@ public static class WindowHelper
     {
         Type windowType = wpfWindow.GetType();
 
-        Type windowStyleType = Type.GetType("System.Windows.WindowStyle, PresentationFramework");
-        Type windowStateType = Type.GetType("System.Windows.WindowState, PresentationFramework");
+        Type windowStyleType = null;
+        Type windowStateType = null;
+        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            if (asm.GetName().Name != "PresentationFramework") continue;
+            windowStyleType = asm.GetType("System.Windows.WindowStyle");
+            windowStateType = asm.GetType("System.Windows.WindowState");
+            break;
+        }
         if (windowStyleType == null || windowStateType == null) return;
 
         var propWindowStyle = windowType.GetProperty("WindowStyle");
@@ -493,7 +500,13 @@ public static class WindowHelper
     public static void Minimize(object wpfWindow)
     {
         Type windowType = wpfWindow.GetType();
-        Type windowStateType = Type.GetType("System.Windows.WindowState, PresentationFramework");
+        Type windowStateType = null;
+        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            if (asm.GetName().Name != "PresentationFramework") continue;
+            windowStateType = asm.GetType("System.Windows.WindowState");
+            break;
+        }
         if (windowStateType == null) return;
 
         var propWindowState = windowType.GetProperty("WindowState");
