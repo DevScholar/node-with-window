@@ -33,6 +33,20 @@ export class Menu {
   }
 
   /**
+   * Pops up this menu as a context menu.
+   * options.window — the BrowserWindow to associate the popup with.
+   * options.x, options.y — screen coordinates (defaults to cursor position if omitted).
+   */
+  popup(options?: { window?: unknown; x?: number; y?: number }): void {
+    const win = options?.window;
+    if (!win) return;
+    const provider = (win as any).provider as { popupMenu?: (...a: unknown[]) => void } | undefined;
+    if (typeof provider?.popupMenu === 'function') {
+      provider.popupMenu(this._items, options?.x, options?.y);
+    }
+  }
+
+  /**
    * Sets the application menu for all windows.
    * Pass null to remove the menu bar entirely (matching Electron behaviour).
    */

@@ -8,14 +8,63 @@ import Gdk from 'gi://Gdk?version=4.0';
 import GLib from 'gi://GLib';
 
 // ---------------------------------------------------------------------------
+// Accelerator helpers
+// ---------------------------------------------------------------------------
+
+/** Convert an Electron accelerator string to a GTK accelerator string. */
+function electronAccelToGtk(accel) {
+    const parts = accel.split('+');
+    let mods = '';
+    let keyPart = '';
+    for (const p of parts) {
+        switch (p.toLowerCase()) {
+            case 'ctrl': case 'control': case 'cmdorctrl': case 'cmd': case 'command':
+                mods += '<Ctrl>'; break;
+            case 'shift': mods += '<Shift>'; break;
+            case 'alt':   mods += '<Alt>';   break;
+            case 'meta': case 'super': case 'windows': mods += '<Super>'; break;
+            default: keyPart = p;
+        }
+    }
+    if (!keyPart) return null;
+    const key = _electronKeyToGtk(keyPart);
+    if (!key) return null;
+    return mods + key;
+}
+
+function _electronKeyToGtk(key) {
+    const k = key.toLowerCase();
+    if (k.length === 1) return k; // letters and digits pass through as-is
+    const map = {
+        'f1': 'F1',  'f2': 'F2',  'f3': 'F3',  'f4': 'F4',
+        'f5': 'F5',  'f6': 'F6',  'f7': 'F7',  'f8': 'F8',
+        'f9': 'F9',  'f10': 'F10', 'f11': 'F11', 'f12': 'F12',
+        'tab': 'Tab',
+        'enter': 'Return', 'return': 'Return',
+        'escape': 'Escape', 'esc': 'Escape',
+        'space': 'space', 'backspace': 'BackSpace',
+        'delete': 'Delete', 'del': 'Delete',
+        'insert': 'Insert',
+        'home': 'Home', 'end': 'End',
+        'pageup': 'Page_Up', 'pagedown': 'Page_Down',
+        'left': 'Left', 'up': 'Up', 'right': 'Right', 'down': 'Down',
+        'plus': 'plus', 'minus': 'minus', '-': 'minus',
+    };
+    return map[k] || null;
+}
+
+// ---------------------------------------------------------------------------
 // Menu builder
 // ---------------------------------------------------------------------------
 
-export function buildGtkMenu(gtkWindow, webView, windowBoxRef, menuActions, menuActionIndexRef, ipcQueue, items) {
+export function buildGtkMenu(gtkWindow, webView, windowBoxRef, menuActions, menuActionIndexRef, ipcQueue, items, state) {
     if (!gtkWindow || !webView) return;
 
     menuActionIndexRef.value = 0;
     const menuModel = new Gio.Menu();
+
+    // Collect (gtkAccel, win-group action name) pairs for ShortcutController.
+    const accelEntries = [];
 
     function buildItems(parent, list) {
         for (const item of list) {
@@ -35,6 +84,12 @@ export function buildGtkMenu(gtkWindow, webView, windowBoxRef, menuActions, menu
                 });
                 menuActions.add_action(action);
                 parent.append(item.label || '', `win.${name}`);
+
+                // Register keyboard shortcut for items that have an accelerator.
+                if (item.accelerator) {
+                    const gtkAccel = electronAccelToGtk(item.accelerator);
+                    if (gtkAccel) accelEntries.push({ gtkAccel, name });
+                }
             }
         }
     }
@@ -50,6 +105,29 @@ export function buildGtkMenu(gtkWindow, webView, windowBoxRef, menuActions, menu
     newBox.append(webView);
     windowBoxRef.value = newBox;
     gtkWindow.set_child(newBox);
+
+    // Install (or replace) a ShortcutController for keyboard accelerators.
+    if (state) {
+        if (state.shortcutController) {
+            try { gtkWindow.remove_controller(state.shortcutController); } catch (_e) {}
+            state.shortcutController = null;
+        }
+        if (accelEntries.length > 0) {
+            try {
+                const sc = new Gtk.ShortcutController();
+                sc.set_scope(Gtk.ShortcutScope.GLOBAL);
+                for (const entry of accelEntries) {
+                    const trigger = Gtk.ShortcutTrigger.parse_string(entry.gtkAccel);
+                    const shortcutAction = Gtk.ShortcutAction.parse_string(`action(win.${entry.name})`);
+                    if (trigger && shortcutAction) {
+                        sc.add_shortcut(new Gtk.Shortcut({ trigger, action: shortcutAction }));
+                    }
+                }
+                gtkWindow.add_controller(sc);
+                state.shortcutController = sc;
+            } catch (_e) { /* accelerators are best-effort */ }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -94,13 +172,25 @@ export function handleWindowCommand(cmd, state) {
             });
 
             if (opts.resizable === false) state.gtkWindow.set_resizable(false);
+            // Kiosk mode: fullscreen + prevent resizing out of fullscreen.
+            if (opts.kiosk) {
+                state.gtkWindow.fullscreen();
+                state.gtkWindow.set_resizable(false);
+            } else if (opts.fullscreen) {
+                state.gtkWindow.fullscreen();
+            }
             // set_keep_above was removed in GTK4; try it and fall back silently.
             if (opts.alwaysOnTop) {
                 try { state.gtkWindow.set_keep_above(true); }
                 catch (_e) { state.alwaysOnTopPending = true; }
             }
             if (opts.icon)    state.iconPathRef.value = opts.icon;
-            if (opts.kiosk || opts.fullscreen) state.gtkWindow.fullscreen();
+            if (opts.minWidth > 0 || opts.minHeight > 0) {
+                state.gtkWindow.set_size_request(
+                    opts.minWidth  > 0 ? opts.minWidth  : -1,
+                    opts.minHeight > 0 ? opts.minHeight : -1
+                );
+            }
 
             // frame: false — remove window chrome (title bar + border).
             // transparent also implies frameless (compositor requires undecorated window).
@@ -197,7 +287,7 @@ export function handleWindowCommand(cmd, state) {
             buildGtkMenu(
                 state.gtkWindow, state.webView, state.windowBoxRef,
                 state.menuActions, state.menuActionIndexRef, state.ipcQueue,
-                cmd.menu || []
+                cmd.menu || [], state
             );
             return { type: 'void' };
         }
@@ -381,6 +471,65 @@ export function handleWindowCommand(cmd, state) {
             while (!done && Date.now() < deadline) ctx.iteration(true);
 
             return { type: 'result', value: base64Result };
+        }
+
+        case 'SetMinSize': {
+            if (state.gtkWindow) {
+                state.gtkWindow.set_size_request(
+                    cmd.minWidth  > 0 ? cmd.minWidth  : -1,
+                    cmd.minHeight > 0 ? cmd.minHeight : -1
+                );
+            }
+            return { type: 'void' };
+        }
+
+        case 'PopupMenu': {
+            if (!state.gtkWindow || !state.webView) return { type: 'void' };
+            const popupActions = new Gio.SimpleActionGroup();
+            const popupModel = new Gio.Menu();
+            let pidx = 0;
+
+            function buildPopupItems(parent, list) {
+                for (const item of list) {
+                    if (item.type === 'separator') {
+                        parent.append_section(null, new Gio.Menu());
+                    } else if (item.submenu && item.submenu.length > 0) {
+                        const sub = new Gio.Menu();
+                        buildPopupItems(sub, item.submenu);
+                        parent.append_submenu(item.label || '', sub);
+                    } else {
+                        const pname = `p${pidx}`;
+                        const pidxCaptured = pidx++;
+                        const paction = new Gio.SimpleAction({ name: pname });
+                        if (item.enabled === false) paction.set_enabled(false);
+                        paction.connect('activate', () => {
+                            state.ipcQueue.push(JSON.stringify({ type: 'popupMenuClick', id: pidxCaptured }));
+                        });
+                        popupActions.add_action(paction);
+                        parent.append(item.label || '', `popup.${pname}`);
+                    }
+                }
+            }
+
+            buildPopupItems(popupModel, cmd.items || []);
+            state.gtkWindow.insert_action_group('popup', popupActions);
+
+            const popover = new Gtk.PopoverMenu({ menu_model: popupModel });
+            popover.set_parent(state.webView);
+
+            if (cmd.x !== undefined && cmd.y !== undefined) {
+                try {
+                    const rect = new Gdk.Rectangle();
+                    rect.x = Math.round(cmd.x);
+                    rect.y = Math.round(cmd.y);
+                    rect.width  = 1;
+                    rect.height = 1;
+                    popover.set_pointing_to(rect);
+                } catch (_e) { /* positioning is best-effort */ }
+            }
+
+            popover.popup();
+            return { type: 'void' };
         }
 
         default:

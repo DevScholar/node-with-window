@@ -12,7 +12,7 @@ public static class WinChromeActions
             || action == "FixTransparentInput" || action == "FixTransparentInputChildren"
             || action == "DwmTransparent" || action == "ApplyWindowChrome" || action == "ApplyHiddenTitleBar"
             || action == "GetHwnd" || action == "SetOwnerByHwnd" || action == "SetWindowEnabled"
-            || action == "SetWindowIcon";
+            || action == "SetWindowIcon" || action == "RegisterWindowAccelerators";
     }
 
     public static Dictionary<string, object> Execute(Dictionary<string, object> cmd)
@@ -168,6 +168,24 @@ public static class WinChromeActions
             var wpfWindow = BridgeState.ObjectStore[cmd["windowId"].ToString()];
             var iconPath  = cmd["iconPath"].ToString();
             WindowHelper.SetWindowIcon(wpfWindow, iconPath);
+            return new Dictionary<string, object> { { "type", "void" } };
+        }
+
+        if (action == "RegisterWindowAccelerators")
+        {
+            var windowId  = cmd["windowId"].ToString();
+            var wpfWindow = BridgeState.ObjectStore[windowId];
+            var rawList   = cmd["shortcuts"] as System.Collections.IList;
+            var shortcuts = new System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, object>>();
+            if (rawList != null)
+            {
+                foreach (var item in rawList)
+                {
+                    var d = item as System.Collections.Generic.Dictionary<string, object>;
+                    if (d != null) shortcuts.Add(d);
+                }
+            }
+            WindowHelper.RegisterAccelerators(windowId, wpfWindow, shortcuts, BridgeState.EventQueue);
             return new Dictionary<string, object> { { "type", "void" } };
         }
 

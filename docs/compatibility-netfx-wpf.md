@@ -46,7 +46,7 @@
 | `minWidth`, `minHeight` | ✅ | WPF `MinWidth`/`MinHeight` |
 | `maxWidth`, `maxHeight` | ✅ | WPF `MaxWidth`/`MaxHeight` |
 | `title` | ✅ | Also auto-synced from `document.title` |
-| `icon` | ✅ | Absolute or relative path; PNG/JPG; best-effort |
+| `icon` | ✅ | Absolute or relative path; ICO (full multi-size via `BitmapFrame`), PNG, JPG; best-effort |
 | `resizable` | ✅ | WPF `ResizeMode.NoResize` when `false` |
 | `show` | ✅ | Pass `false` to prevent auto-show |
 | `x`, `y` | ✅ | Sets `WindowStartupLocation.Manual` + `Left`/`Top` |
@@ -126,6 +126,9 @@
 | `win.setBackgroundColor(color)` | ✅ | WebView2 `DefaultBackgroundColor`; same format as `backgroundColor` constructor option |
 | `win.setMenu(menu)` | ✅ | Accepts `Menu` instance or `MenuItemOptions[]` |
 | `win.removeMenu()` | ✅ | Clears the menu bar |
+| `win.popupMenu(items, x?, y?)` | ✅ | WPF `ContextMenu`; opened at cursor position or explicit screen coordinates |
+| `win.setMinimumSize(w, h)` | ✅ | `Window.MinWidth` / `MinHeight` |
+| `win.setMaximumSize(w, h)` | ✅ | `Window.MaxWidth` / `MaxHeight` |
 | `win.showOpenDialog(options)` | ✅ | Synchronous; returns `string[] \| undefined` |
 | `win.showSaveDialog(options)` | ✅ | Synchronous; returns `string \| undefined` |
 | `win.showMessageBox(options)` | ✅ | Synchronous; returns button index |
@@ -204,9 +207,12 @@
 | `Menu.buildFromTemplate(template)` | ✅ | |
 | `new Menu()` / `menu.append()` / `menu.insert()` | ✅ | |
 | `Menu.setApplicationMenu(menu)` | ✅ | Sets the default menu for all windows; `null` removes the menu bar |
-| `menu.popup()` | ❌ | Context menus not implemented |
-| `label`, `type`, `click`, `submenu`, `enabled`, `visible`, `checked`, `accelerator`, `role` | ✅ | `accelerator` is displayed; keyboard shortcuts are not enforced natively |
-| `id`, `icon`, `sublabel`, `toolTip` | ❌ | |
+| `menu.popup()` | ✅ | WPF `ContextMenu`; call as `menu.popup({ window, x?, y? })` |
+| `label`, `type`, `click`, `submenu`, `enabled`, `visible`, `checked`, `role` | ✅ | |
+| `accelerator` | ✅ | Displayed as `InputGestureText`; keyboard shortcuts enforced via C# `PreviewKeyDown` hook |
+| `toolTip` | ✅ | WPF `MenuItem.ToolTip` |
+| `icon` | ✅ | WPF `MenuItem.Icon` (`BitmapImage` 16×16); best-effort |
+| `id`, `sublabel` | ❌ | |
 
 ---
 

@@ -332,6 +332,18 @@ const dotnetProxy = new Proxy(function() {} as any, {
             };
         }
 
+        // Registers keyboard accelerators for a WPF window via a PreviewKeyDown hook.
+        // shortcuts — array of { vk: number, modifiers: number, callbackId: string }.
+        // The callbackId must already be registered in callbackRegistry before calling this.
+        // When the user presses the matching key combo, .NET pushes a callbackRegistry event
+        // to the EventQueue, which is picked up by the next Poll.
+        if (prop === 'registerWindowAccelerators') {
+            return (window: any, shortcuts: Array<{ vk: number; modifiers: number; callbackId: string }>): void => {
+                doInitialize();
+                getIpc()!.send({ action: 'RegisterWindowAccelerators', windowId: window.__ref, shortcuts });
+            };
+        }
+
         // Enables DWM glass transparency for the entire client area.
         // Use this instead of AllowsTransparency=true when hosting WebView2.
         // AllowsTransparency=true (WS_EX_LAYERED + UpdateLayeredWindow) filters

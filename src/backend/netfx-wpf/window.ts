@@ -797,6 +797,114 @@ export class NetFxWpfWindow implements IWindowProvider {
     }
   }
 
+  /** Show a context menu at screen position (x, y) or at cursor if not specified. */
+  public popupMenu(items: MenuItemOptions[], x?: number, y?: number): void {
+    if (!this.browserWindow) return;
+    const dotnetAny = dotnet as any;
+    const ContextMenuType = dotnetAny['System.Windows.Controls.ContextMenu'];
+    const MenuItemType    = dotnetAny['System.Windows.Controls.MenuItem'];
+    const SeparatorType   = dotnetAny['System.Windows.Controls.Separator'];
+    if (!ContextMenuType) return;
+
+    const cm = new ContextMenuType();
+
+    const buildItems = (parent: unknown, list: MenuItemOptions[]) => {
+      for (const item of list) {
+        if (item.type === 'separator') {
+          (parent as any).Items.Add(new SeparatorType());
+        } else {
+          const mi = new MenuItemType();
+          (mi as any).Header = item.label || '';
+          if (item.enabled === false) (mi as any).IsEnabled = false;
+          if (item.toolTip) (mi as any).ToolTip = item.toolTip;
+
+          // Icon (best-effort)
+          if (item.icon) {
+            try {
+              const iconAbs = path.isAbsolute(item.icon)
+                ? item.icon : path.resolve(process.cwd(), item.icon);
+              const BitmapImageType = dotnetAny['System.Windows.Media.Imaging.BitmapImage'];
+              const ImageType       = dotnetAny['System.Windows.Controls.Image'];
+              const UriType         = dotnetAny['System.Uri'];
+              if (BitmapImageType && ImageType && UriType) {
+                const uri = new UriType('file:///' + iconAbs.replace(/\\/g, '/'));
+                const bmp = new BitmapImageType(uri);
+                const img = new ImageType();
+                (img as any).Source = bmp;
+                (img as any).Width  = 16;
+                (img as any).Height = 16;
+                (mi as any).Icon = img;
+              }
+            } catch { /* best-effort */ }
+          }
+
+          const clickFn = item.click ?? (item.role ? this._wpfRoleClick(item.role) : undefined);
+          if (clickFn) (mi as any).add_Click(() => { clickFn(); });
+          if (item.submenu) buildItems(mi, item.submenu);
+          (parent as any).Items.Add(mi);
+        }
+      }
+    };
+
+    buildItems(cm, items);
+
+    // Explicit screen position
+    if (x !== undefined && y !== undefined) {
+      try {
+        const PlacementModeType = dotnetAny['System.Windows.Controls.Primitives.PlacementMode'];
+        const absolutePoint = (PlacementModeType as any).AbsolutePoint;
+        (cm as any).Placement       = absolutePoint;
+        (cm as any).HorizontalOffset = x;
+        (cm as any).VerticalOffset   = y;
+      } catch { /* placement is best-effort */ }
+    }
+
+    (cm as any).IsOpen = true;
+  }
+
+  /** Role→action mapping used by popupMenu (mirrors buildWpfMenu's roleClick). */
+  private _wpfRoleClick(role: string): (() => void) | undefined {
+    switch (role) {
+      case 'close':            return () => this.close();
+      case 'minimize':         return () => { (dotnet as any).minimize(this.browserWindow); };
+      case 'reload':
+      case 'forceReload':      return () => this.reload();
+      case 'toggleDevTools':   return () => this.openDevTools();
+      case 'togglefullscreen': return () => this.setFullScreen(!this.isFullScreen());
+      case 'resetZoom':        return () => { if (this.webView) (this.webView as any).ZoomFactor = 1.0; };
+      case 'zoomIn':           return () => { if (this.webView) (this.webView as any).ZoomFactor = Math.min(((this.webView as any).ZoomFactor as number) + 0.1, 5.0); };
+      case 'zoomOut':          return () => { if (this.webView) (this.webView as any).ZoomFactor = Math.max(((this.webView as any).ZoomFactor as number) - 0.1, 0.25); };
+      case 'undo':      return () => this.executeJavaScript("document.execCommand('undo')");
+      case 'redo':      return () => this.executeJavaScript("document.execCommand('redo')");
+      case 'cut':       return () => this.executeJavaScript("document.execCommand('cut')");
+      case 'copy':      return () => this.executeJavaScript("document.execCommand('copy')");
+      case 'paste':     return () => this.executeJavaScript("document.execCommand('paste')");
+      case 'selectAll': return () => this.executeJavaScript("document.execCommand('selectAll')");
+      default:          return undefined;
+    }
+  }
+
+  /** Set the minimum window size (applied immediately if window exists). */
+  public setMinimumSize(width: number, height: number): void {
+    if (!this.browserWindow) {
+      // Store for later — window.ts constructor options are already read; we'll apply in show()
+      (this as any)._pendingMinSize = [width, height];
+      return;
+    }
+    (this.browserWindow as any).MinWidth  = width;
+    (this.browserWindow as any).MinHeight = height;
+  }
+
+  /** Set the maximum window size (applied immediately if window exists). */
+  public setMaximumSize(width: number, height: number): void {
+    if (!this.browserWindow) {
+      (this as any)._pendingMaxSize = [width, height];
+      return;
+    }
+    (this.browserWindow as any).MaxWidth  = width > 0 ? width  : Infinity;
+    (this.browserWindow as any).MaxHeight = height > 0 ? height : Infinity;
+  }
+
   /**
    * Reloads the current page in WebView2.
    */

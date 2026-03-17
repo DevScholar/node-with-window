@@ -235,6 +235,14 @@ export class BrowserWindow extends EventEmitter {
     this.provider.setMenu([]);
   }
 
+  /**
+   * Pops up a context menu at the given screen coordinates (or cursor position if omitted).
+   * items — flat or nested MenuItemOptions array (same format as setMenu).
+   */
+  public popupMenu(items: MenuItemOptions[], x?: number, y?: number): void {
+    this.provider.popupMenu?.(items, x, y);
+  }
+
   public showOpenDialog(options: OpenDialogOptions): string[] | undefined {
     return this.provider.showOpenDialog(options);
   }
@@ -325,6 +333,13 @@ export class BrowserWindow extends EventEmitter {
   }
   public getPosition(): [number, number] {
     return this.provider.getPosition?.() ?? [0, 0];
+  }
+
+  public setMinimumSize(width: number, height: number): void {
+    this.provider.setMinimumSize?.(width, height);
+  }
+  public setMaximumSize(width: number, height: number): void {
+    this.provider.setMaximumSize?.(width, height);
   }
 
   public setOpacity(opacity: number): void {

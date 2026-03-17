@@ -159,6 +159,12 @@ public static class WindowHelper
     // console window after we pass it to SendMessage(WM_SETICON).
     private static System.Drawing.Icon _consoleIconRef = null;
 
+    // Keyboard accelerator state: one handler and one shortcut list per windowId.
+    private static Dictionary<string, System.Windows.Input.KeyEventHandler> _accelHandlers =
+        new Dictionary<string, System.Windows.Input.KeyEventHandler>();
+    private static Dictionary<string, List<Tuple<int, int, string>>> _accelMaps =
+        new Dictionary<string, List<Tuple<int, int, string>>>();
+
     // ---------------------------------------------------------------------------
     // Window icon (title bar, taskbar, Alt+Tab)
     // ---------------------------------------------------------------------------
@@ -849,6 +855,83 @@ public static class WindowHelper
         MethodInfo setMethod = windowChromeType.GetMethod(
             "SetWindowChrome", BindingFlags.Public | BindingFlags.Static);
         if (setMethod != null) setMethod.Invoke(null, new object[] { wpfWindow, chrome });
+    }
+
+    // ---------------------------------------------------------------------------
+    // Keyboard accelerators (PreviewKeyDown hook)
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Registers (or replaces) a set of keyboard accelerators for a WPF window.
+    ///
+    /// Installs a PreviewKeyDown event handler on the window that checks incoming
+    /// key events against the provided shortcut list.  When a match is found the
+    /// corresponding callbackId is pushed to the EventQueue so the Node.js Poll
+    /// loop can fire the registered callback.
+    ///
+    /// Calling this again for the same windowId replaces the previous handler and
+    /// shortcut list atomically.
+    /// </summary>
+    public static void RegisterAccelerators(
+        string windowId,
+        object wpfWindow,
+        List<Dictionary<string, object>> shortcuts,
+        System.Collections.Concurrent.ConcurrentQueue<string> eventQueue)
+    {
+        // Build the per-window accelerator list.
+        var list = new List<Tuple<int, int, string>>();
+        foreach (var s in shortcuts)
+        {
+            int vk       = int.Parse(s["vk"].ToString());
+            int mods     = int.Parse(s["modifiers"].ToString());
+            string cbId  = s["callbackId"].ToString();
+            list.Add(Tuple.Create(vk, mods, cbId));
+        }
+        _accelMaps[windowId] = list;
+
+        // Find the PreviewKeyDown event via reflection (it lives on UIElement / Window).
+        EventInfo evInfo = null;
+        Type t = wpfWindow.GetType();
+        while (t != null && evInfo == null)
+        {
+            evInfo = t.GetEvent("PreviewKeyDown");
+            t = t.BaseType;
+        }
+        if (evInfo == null) return;
+
+        // Remove the old handler if one was previously registered for this window.
+        System.Windows.Input.KeyEventHandler oldHandler;
+        if (_accelHandlers.TryGetValue(windowId, out oldHandler))
+        {
+            try { evInfo.RemoveEventHandler(wpfWindow, oldHandler); } catch { }
+        }
+
+        // Capture locals for the closure.
+        string capturedId    = windowId;
+        var capturedQueue    = eventQueue;
+
+        System.Windows.Input.KeyEventHandler newHandler = (sender, e) =>
+        {
+            List<Tuple<int, int, string>> currentList;
+            if (!_accelMaps.TryGetValue(capturedId, out currentList)) return;
+
+            var mods = System.Windows.Input.Keyboard.Modifiers;
+            foreach (var acc in currentList)
+            {
+                var expectedKey  = System.Windows.Input.KeyInterop.KeyFromVirtualKey(acc.Item1);
+                var expectedMods = (System.Windows.Input.ModifierKeys)acc.Item2;
+                if (e.Key == expectedKey && mods == expectedMods)
+                {
+                    capturedQueue.Enqueue(string.Format(
+                        "{{\"type\":\"event\",\"callbackId\":\"{0}\",\"args\":[]}}", acc.Item3));
+                    e.Handled = true;
+                    return;
+                }
+            }
+        };
+
+        _accelHandlers[windowId] = newHandler;
+        evInfo.AddEventHandler(wpfWindow, newHandler);
     }
 
     // ---------------------------------------------------------------------------

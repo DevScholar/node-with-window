@@ -50,8 +50,8 @@
 | `show` | ✅ | Pass `false` to prevent auto-show |
 | `webPreferences` | ✅ | See WebPreferences section |
 | `x`, `y` | ❌ | Not forwarded to GTK; placement is WM-controlled |
-| `minWidth`, `minHeight` | ❌ | Not forwarded to GTK |
-| `maxWidth`, `maxHeight` | ❌ | Not forwarded to GTK |
+| `minWidth`, `minHeight` | ✅ | `Window.set_size_request()` |
+| `maxWidth`, `maxHeight` | ❌ | GTK4 has no API for maximum window size |
 | `movable` | ✅ | `Window.set_decorated(false)` when `false` — removes title bar so window cannot be dragged |
 | `minimizable` | ⚠️ | Logged as warning; GTK4 provides no compositor-independent API to hide the minimize button |
 | `maximizable` | ✅ | `Window.set_resizable()` controls whether the window can be maximized |
@@ -59,7 +59,7 @@
 | `transparent` | ✅ | `set_decorated(false)` + `WebKit.WebView.set_background_color(alpha=0)` — compositor-dependent |
 | `frame` | ✅ | `Window.set_decorated(false)` — removes title bar and border |
 | `backgroundColor` | ✅ | `WebKit.WebView.set_background_color(Gdk.RGBA)`; accepts `#RGB`, `#RRGGBB`, `#AARRGGBB` |
-| `kiosk` | ⚠️ | Accepted, not applied |
+| `kiosk` | ✅ | `Window.fullscreen()` + `Window.set_resizable(false)` |
 | `skipTaskbar` | ⚠️ | Logged as warning; GTK4 removed `set_skip_taskbar_hint()`, most compositors ignore workarounds |
 | `fullscreen` | ✅ | `Window.fullscreen()` called at creation |
 | `parent`, `modal` | ⚠️ | `modal` disables the parent window via `set_sensitive(false)`; no GTK `set_transient_for` (cross-process limitation) |
@@ -127,6 +127,9 @@
 | `win.setBackgroundColor(color)` | ✅ | `WebKit.WebView.set_background_color(Gdk.RGBA)`; same format as `backgroundColor` constructor option |
 | `win.setMenu(menu)` | ✅ | GTK4 `PopoverMenuBar`; menu items flattened and mapped to `Gio.SimpleAction` |
 | `win.removeMenu()` | ✅ | Calls `setMenu([])` |
+| `win.popupMenu(items, x?, y?)` | ✅ | `Gtk.PopoverMenu` with separate `popup` action group; positioned at explicit screen coordinates or cursor |
+| `win.setMinimumSize(w, h)` | ✅ | `Window.set_size_request()` |
+| `win.setMaximumSize(w, h)` | ⚠️ | No-op + console warning; GTK4 has no max-size API |
 | `win.showOpenDialog(options)` | ✅ | `Gtk.FileChooserDialog`; synchronous via nested GLib main loop |
 | `win.showSaveDialog(options)` | ✅ | Same |
 | `win.showMessageBox(options)` | ✅ | `Gtk.AlertDialog`; synchronous via nested GLib main loop |
@@ -205,9 +208,10 @@
 | `Menu.buildFromTemplate(template)` | ✅ | |
 | `new Menu()` / `menu.append()` / `menu.insert()` | ✅ | |
 | `Menu.setApplicationMenu(menu)` | ✅ | Sets the default menu for all windows; `null` removes the menu bar |
-| `menu.popup()` | ❌ | Context menus not implemented |
-| `label`, `type`, `click`, `submenu`, `enabled`, `visible`, `checked`, `accelerator`, `role` | ✅ | `accelerator` is displayed; keyboard shortcuts are not enforced natively |
-| `id`, `icon`, `sublabel`, `toolTip` | ❌ | |
+| `menu.popup()` | ✅ | `Gtk.PopoverMenu`; call as `menu.popup({ window, x?, y? })` |
+| `label`, `type`, `click`, `submenu`, `enabled`, `visible`, `checked`, `role` | ✅ | |
+| `accelerator` | ✅ | Keyboard shortcuts enforced via `Gtk.ShortcutController` with `GLOBAL` scope |
+| `toolTip`, `icon`, `id`, `sublabel` | ❌ | |
 
 ---
 
@@ -233,7 +237,7 @@
 
 1. **`window.require` uses synchronous XHR** to a loopback HTTP server (same mechanism as the `netfx-wpf` backend). All Node.js builtins work. SSE delivers callbacks, so `fs.watch`, `EventEmitter.on`, etc. fire correctly. npm packages in the user's project are not accessible (only Node.js builtins via `node:` scheme).
 
-2. **`x`, `y`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` constructor options are ignored.** GTK window placement is managed by the window manager; GTK4 removed `window.move()`.
+2. **`x`, `y`, `maxWidth`, `maxHeight` constructor options are ignored.** GTK window placement is managed by the window manager; GTK4 removed `window.move()`. GTK4 has no API for maximum window size. `minWidth`/`minHeight` are applied via `set_size_request()`.
 
 3. **Preload scripts** are supported. Set `webPreferences.preload` to an absolute or relative path. The script is registered via `WebKit.UserContentManager.add_script()` so it fires on every page navigation before the page's own scripts.
 

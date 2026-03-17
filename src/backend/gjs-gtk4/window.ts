@@ -217,6 +217,9 @@ export class GjsGtk4Window implements IWindowProvider {
   /** Map from menu-action index (assigned at SetMenu time) to click handler. */
   private menuClickHandlers: Map<number, () => void> = new Map();
 
+  /** Map from popup-action index (assigned at popupMenu time) to click handler. */
+  private _popupClickHandlers: Map<number, () => void> = new Map();
+
   /** Pending loadURL/loadFile call before show() is called. */
   private pendingLoad:
     | { kind: 'url'; url: string }
@@ -396,6 +399,47 @@ export class GjsGtk4Window implements IWindowProvider {
     this._applyMenu(menu);
   }
 
+  public popupMenu(items: MenuItemOptions[], x?: number, y?: number): void {
+    if (!this.ipc) return;
+    this._popupClickHandlers.clear();
+    let pidx = 0;
+
+    const flattenPopup = (list: MenuItemOptions[]): unknown[] => {
+      return list.map(item => {
+        if (item.type === 'separator') return { type: 'separator' };
+        if (item.submenu) {
+          return {
+            label: item.label,
+            enabled: item.enabled,
+            submenu: flattenPopup(item.submenu),
+          };
+        }
+        const id = pidx++;
+        const clickFn = item.click ?? (item.role ? this._roleClick(item.role) : undefined);
+        if (clickFn) this._popupClickHandlers.set(id, clickFn);
+        return { label: item.label, enabled: item.enabled, id };
+      });
+    };
+
+    try {
+      this._send('PopupMenu', { items: flattenPopup(items), x, y });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  public setMinimumSize(width: number, height: number): void {
+    try {
+      this._send('SetMinSize', { minWidth: width, minHeight: height });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  public setMaximumSize(_width: number, _height: number): void {
+    console.warn('[node-with-window] win.setMaximumSize() is not supported on GTK4: GTK4 has no API for maximum window size.');
+  }
+
   /** Translate a menu item role to a click handler. Mirrors netfx-wpf/menu.ts. */
   private _roleClick(role: string): (() => void) | undefined {
     switch (role) {
@@ -436,7 +480,7 @@ export class GjsGtk4Window implements IWindowProvider {
         const id = idx++;
         const clickFn = item.click ?? (item.role ? this._roleClick(item.role) : undefined);
         if (clickFn) this.menuClickHandlers.set(id, clickFn);
-        return { label: item.label, enabled: item.enabled, id };
+        return { label: item.label, enabled: item.enabled, id, accelerator: item.accelerator };
       });
     };
 
@@ -869,6 +913,13 @@ export class GjsGtk4Window implements IWindowProvider {
     // Menu click — handled locally without involving ipcMain
     if (type === 'menuClick') {
       const handler = this.menuClickHandlers.get((data as unknown as { id: number }).id);
+      if (handler) handler();
+      return;
+    }
+
+    // Popup menu click
+    if (type === 'popupMenuClick') {
+      const handler = this._popupClickHandlers.get((data as unknown as { id: number }).id);
       if (handler) handler();
       return;
     }

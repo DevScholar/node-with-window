@@ -81,6 +81,10 @@ export interface MenuItemOptions {
   visible?: boolean;
   checked?: boolean;
   accelerator?: string;
+  /** Absolute or relative path to an image file for the item icon. WPF: best-effort; GTK: best-effort. */
+  icon?: string;
+  /** Tooltip text shown when hovering the item. WPF only; ignored on GTK. */
+  toolTip?: string;
   click?: () => void;
   submenu?: MenuItemOptions[];
   role?:
@@ -244,4 +248,12 @@ export interface IWindowProvider {
   getOpacity?(): number;
   /** Windows-only. */
   cleanupUserData?(): void;
+
+  // ── Optional methods (not all backends support these) ────────────────────
+  /** Show a context menu at the given screen position, or at cursor if omitted. */
+  popupMenu?(items: MenuItemOptions[], x?: number, y?: number): void;
+  /** Set the minimum window size. GTK4: only minWidth/minHeight; maxWidth/maxHeight are no-ops. */
+  setMinimumSize?(width: number, height: number): void;
+  /** Set the maximum window size. WPF only; no-op on GTK4. */
+  setMaximumSize?(width: number, height: number): void;
 }
