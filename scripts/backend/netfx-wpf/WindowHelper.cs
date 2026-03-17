@@ -6,6 +6,7 @@
 // C# 5.0 constraint: no auto-property initializers, no ?. operator, no $"" strings.
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
@@ -117,6 +118,24 @@ internal static class WindowNativeMethods
 
     [DllImport("dwmapi.dll")]
     internal static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS pMarInset);
+
+    // Console / taskbar icon.
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern IntPtr GetConsoleWindow();
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    // Separates the process from the powershell.exe taskbar group so the WPF
+    // window is shown with its own icon instead of the PowerShell shell icon.
+    [DllImport("shell32.dll", PreserveSig = false)]
+    internal static extern void SetCurrentProcessExplicitAppUserModelID(
+        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)]
+        string AppID);
+
+    internal const uint WM_SETICON = 0x0080;
+    internal const int  ICON_SMALL = 0;
+    internal const int  ICON_BIG   = 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +154,154 @@ public static class WindowHelper
     // Used to make transparent WPF windows (AllowsTransparency=true) pass mouse
     // events to the WebView2 child HWND instead of letting WPF return HTTRANSPARENT.
     private static HashSet<IntPtr> _hitTestFixHwnds = new HashSet<IntPtr>();
+
+    // Keeps the System.Drawing.Icon alive so its HICON handle remains valid for the
+    // console window after we pass it to SendMessage(WM_SETICON).
+    private static System.Drawing.Icon _consoleIconRef = null;
+
+    // ---------------------------------------------------------------------------
+    // Window icon (title bar, taskbar, Alt+Tab)
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Sets Window.Icon from a file path and also updates the console window icon
+    /// so the taskbar entry for the PowerShell host process shows the app icon.
+    ///
+    /// ICO files: BitmapFrame.Create(Uri) loads the full multi-size ICO via
+    /// WPF's IconBitmapDecoder so Windows can pick the correct frame for each
+    /// display context (title bar 16 px, taskbar 32 px, Alt-Tab 48/256 px).
+    ///
+    /// Other formats (PNG, BMP, …): BitmapImage fallback.
+    /// </summary>
+    public static void SetWindowIcon(object wpfWindow, string iconPath)
+    {
+        if (string.IsNullOrEmpty(iconPath) || !File.Exists(iconPath)) return;
+
+        string ext = Path.GetExtension(iconPath).ToLowerInvariant();
+
+        // Build file:// URI from the Windows absolute path.
+        string fileUri = "file:///" + iconPath.Replace('\\', '/');
+        Uri uri = new Uri(fileUri);
+
+        // 1. Set WPF Window.Icon
+        object bitmapSource = null;
+        if (ext == ".ico")
+            bitmapSource = _LoadBitmapFrame(uri);
+        if (bitmapSource == null)
+            bitmapSource = _LoadBitmapImage(uri);
+
+        if (bitmapSource != null)
+        {
+            Type t = wpfWindow.GetType();
+            PropertyInfo iconProp = null;
+            while (t != null && iconProp == null)
+            {
+                iconProp = t.GetProperty("Icon");
+                t = t.BaseType;
+            }
+            if (iconProp != null)
+            {
+                try { iconProp.SetValue(wpfWindow, bitmapSource, null); }
+                catch { }
+            }
+        }
+
+        // 2. Separate from the powershell.exe taskbar group so Windows shows this
+        //    window's HICON in the taskbar instead of the PowerShell shell icon.
+        //    Must be called before the first HWND is created (i.e. before Application.Run).
+        //    AppID is derived from the icon file name so different apps get distinct groups.
+        try
+        {
+            string appId = "NodeWithWindow." + Path.GetFileNameWithoutExtension(iconPath);
+            WindowNativeMethods.SetCurrentProcessExplicitAppUserModelID(appId);
+        }
+        catch { }
+
+        // 3. Also set the console window icon.  When the app is launched from a
+        //    terminal the console HWND is the terminal's window; when launched
+        //    without a terminal PowerShell creates its own console.  Either way,
+        //    setting WM_SETICON gives the correct icon to the taskbar button for
+        //    the host process.  Only ICO files are used here — other formats
+        //    cannot be loaded by System.Drawing.Icon.
+        if (ext == ".ico")
+            _SetConsoleIcon(iconPath);
+    }
+
+    // Loads an ICO (or any format) as a BitmapFrame via WPF's IconBitmapDecoder.
+    // BitmapFrame preserves all ICO frames so WPF / Windows can choose the right
+    // size; BitmapImage only exposes a single rasterised frame.
+    private static object _LoadBitmapFrame(Uri uri)
+    {
+        try
+        {
+            Type bitmapFrameType = null;
+            foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (asm.GetName().Name == "PresentationCore")
+                {
+                    bitmapFrameType = asm.GetType("System.Windows.Media.Imaging.BitmapFrame");
+                    break;
+                }
+            }
+            if (bitmapFrameType == null) return null;
+
+            // Find BitmapFrame.Create(Uri) — the single-argument overload.
+            foreach (MethodInfo m in bitmapFrameType.GetMethods(BindingFlags.Public | BindingFlags.Static))
+            {
+                if (m.Name != "Create") continue;
+                ParameterInfo[] prms = m.GetParameters();
+                if (prms.Length == 1 && prms[0].ParameterType == typeof(Uri))
+                    return m.Invoke(null, new object[] { uri });
+            }
+            return null;
+        }
+        catch { return null; }
+    }
+
+    // Fallback for non-ICO formats (PNG, BMP, …).
+    private static object _LoadBitmapImage(Uri uri)
+    {
+        try
+        {
+            Type bitmapImageType = null;
+            foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (asm.GetName().Name == "PresentationCore")
+                {
+                    bitmapImageType = asm.GetType("System.Windows.Media.Imaging.BitmapImage");
+                    break;
+                }
+            }
+            if (bitmapImageType == null) return null;
+            return Activator.CreateInstance(bitmapImageType, new object[] { uri });
+        }
+        catch { return null; }
+    }
+
+    // Sets the icon of the console window (if one exists) via WM_SETICON.
+    // _consoleIconRef keeps the System.Drawing.Icon alive so its HICON handle
+    // remains valid for the window after this method returns.
+    private static void _SetConsoleIcon(string iconPath)
+    {
+        try
+        {
+            IntPtr consoleHwnd = WindowNativeMethods.GetConsoleWindow();
+            if (consoleHwnd == IntPtr.Zero) return;
+
+            System.Drawing.Icon icon = new System.Drawing.Icon(iconPath);
+            _consoleIconRef = icon; // prevent GC / HICON disposal
+
+            WindowNativeMethods.SendMessage(consoleHwnd,
+                WindowNativeMethods.WM_SETICON,
+                new IntPtr(WindowNativeMethods.ICON_SMALL),
+                icon.Handle);
+            WindowNativeMethods.SendMessage(consoleHwnd,
+                WindowNativeMethods.WM_SETICON,
+                new IntPtr(WindowNativeMethods.ICON_BIG),
+                icon.Handle);
+        }
+        catch { }
+    }
 
     // ---------------------------------------------------------------------------
     // HWND resolution

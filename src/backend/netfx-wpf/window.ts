@@ -287,18 +287,11 @@ export class NetFxWpfWindow implements IWindowProvider {
       Windows.WindowStartupLocation.CenterScreen;
 
     if (this.options.icon) {
-      try {
-        const absIcon = path.isAbsolute(this.options.icon)
-          ? this.options.icon
-          : path.resolve(process.cwd(), this.options.icon);
-        if (fs.existsSync(absIcon)) {
-          const fileUri = 'file:///' + absIcon.replace(/\\/g, '/');
-          const Imaging = Windows.Media.Imaging;
-          const bitmap = new Imaging.BitmapImage(new System.Uri(fileUri));
-          (this.browserWindow as unknown as { Icon: unknown }).Icon = bitmap;
-        }
-      } catch (_e) {
-        // Icon loading is best-effort; ignore failures
+      const absIcon = path.isAbsolute(this.options.icon)
+        ? this.options.icon
+        : path.resolve(process.cwd(), this.options.icon);
+      if (fs.existsSync(absIcon)) {
+        (dotnet as any).setWindowIcon(this.browserWindow, absIcon);
       }
     }
 

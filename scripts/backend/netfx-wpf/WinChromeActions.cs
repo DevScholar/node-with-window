@@ -11,7 +11,8 @@ public static class WinChromeActions
         return action == "WinHelper" || action == "TrashItem"
             || action == "FixTransparentInput" || action == "FixTransparentInputChildren"
             || action == "DwmTransparent" || action == "ApplyWindowChrome" || action == "ApplyHiddenTitleBar"
-            || action == "GetHwnd" || action == "SetOwnerByHwnd" || action == "SetWindowEnabled";
+            || action == "GetHwnd" || action == "SetOwnerByHwnd" || action == "SetWindowEnabled"
+            || action == "SetWindowIcon";
     }
 
     public static Dictionary<string, object> Execute(Dictionary<string, object> cmd)
@@ -159,6 +160,14 @@ public static class WinChromeActions
             var wpfWindow = BridgeState.ObjectStore[cmd["windowId"].ToString()];
             bool enabled = bool.Parse(cmd["enabled"].ToString());
             WindowHelper.SetWindowEnabled(wpfWindow, enabled);
+            return new Dictionary<string, object> { { "type", "void" } };
+        }
+
+        if (action == "SetWindowIcon")
+        {
+            var wpfWindow = BridgeState.ObjectStore[cmd["windowId"].ToString()];
+            var iconPath  = cmd["iconPath"].ToString();
+            WindowHelper.SetWindowIcon(wpfWindow, iconPath);
             return new Dictionary<string, object> { { "type", "void" } };
         }
 

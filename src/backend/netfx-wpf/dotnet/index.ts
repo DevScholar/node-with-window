@@ -321,6 +321,17 @@ const dotnetProxy = new Proxy(function() {} as any, {
             };
         }
 
+        // Sets the window icon from an absolute file path.
+        // ICO files are loaded via BitmapFrame.Create (full multi-size ICO support).
+        // Also sets the console window icon via WM_SETICON so the taskbar entry for
+        // the PowerShell host process shows the app icon instead of the generic shell icon.
+        if (prop === 'setWindowIcon') {
+            return (window: any, iconPath: string): void => {
+                doInitialize();
+                getIpc()!.send({ action: 'SetWindowIcon', windowId: window.__ref, iconPath });
+            };
+        }
+
         // Enables DWM glass transparency for the entire client area.
         // Use this instead of AllowsTransparency=true when hosting WebView2.
         // AllowsTransparency=true (WS_EX_LAYERED + UpdateLayeredWindow) filters
