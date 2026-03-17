@@ -1,6 +1,6 @@
 # Node with Window
 
-⚠️ This project is still in pre-alpha stage, expect breaking changes.
+⚠️ This project is still in Alpha stage, expect breaking changes.
 
 A cross-platform windowing library for Node.js/Deno/Bun with an Electron-compatible API.
  
