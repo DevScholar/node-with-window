@@ -1,7 +1,7 @@
 {
   "name": "@devscholar/node-with-window",
   "version": "0.0.7",
-  "description": "Cross-platform window library with WebView support",
+  "description": "lightweight Electron substitute for Node.js/Deno/Bun",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
