@@ -422,6 +422,19 @@ export class NetFxWpfWindow implements IWindowProvider {
         : path.resolve(process.cwd(), preloadPath);
       try {
         bridgeScript += '\n' + fs.readFileSync(absPreload, 'utf-8');
+        // When contextIsolation is true, strip ipcRenderer/contextBridge from the
+        // page's window after the preload has run.  The preload may have captured
+        // references in closures (via contextBridge.exposeInMainWorld), so the
+        // exposed API continues to work; only the raw globals are removed.
+        if (this.webPreferences.contextIsolation === true) {
+          bridgeScript +=
+            '\n(function(){' +
+            'window.ipcRenderer=undefined;' +
+            'window.contextBridge=undefined;' +
+            'window.__ipcPending=undefined;' +
+            'window.__ipcListeners=undefined;' +
+            '})();';
+        }
       } catch (e) {
         console.error('[node-with-window] Failed to load preload script:', e);
       }

@@ -63,7 +63,8 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
   }
 
   let ipcBridge = '';
-  if (webPreferences.contextIsolation !== true) {
+  const needsIpcBridge = webPreferences.contextIsolation !== true || !!webPreferences.preload;
+  if (needsIpcBridge) {
     /**
      * WebKit IPC bridge.
      *
@@ -157,7 +158,24 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
         }
     };
     window.ipcRenderer.removeListener = window.ipcRenderer.off;
+
+    window.contextBridge = {
+        exposeInMainWorld: function(key, api) { window[key] = api; }
+    };
 })();`;
+
+    if (webPreferences.contextIsolation === true && !webPreferences.nodeIntegration) {
+      ipcBridge += `
+(function() {
+    if (!window.require) {
+        window.require = function(m) {
+            if (m === '@devscholar/node-with-window')
+                return { ipcRenderer: window.ipcRenderer, contextBridge: window.contextBridge };
+            return null;
+        };
+    }
+})();`;
+    }
   }
 
   return nodeBridge + ipcBridge;

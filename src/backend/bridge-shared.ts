@@ -54,7 +54,7 @@ export function generateNodeBridgeStub(
     window.__nodeBridge = true;
     window.require = function(m) {
         if (m === '@devscholar/node-with-window') {
-            return { ipcRenderer: window.ipcRenderer };
+            return { ipcRenderer: window.ipcRenderer, contextBridge: window.contextBridge };
         }
         console.warn('[node-with-window] window.require() stub: sync server not available.');
         return null;
@@ -178,7 +178,7 @@ ${evtSrcBlock}
 
     window.require = function(moduleName) {
         if (moduleName === '@devscholar/node-with-window') {
-            return { ipcRenderer: window.ipcRenderer };
+            return { ipcRenderer: window.ipcRenderer, contextBridge: window.contextBridge };
         }
         return new Proxy({}, {
             get: function(target, methodName) {

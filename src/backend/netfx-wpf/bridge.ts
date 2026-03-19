@@ -68,7 +68,10 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
   }
 
   let ipcBridge = '';
-  if (webPreferences.contextIsolation !== true) {
+  // Inject IPC bridge when contextIsolation is off, OR when a preload script is
+  // present (the preload needs ipcRenderer / contextBridge even in isolated mode).
+  const needsIpcBridge = webPreferences.contextIsolation !== true || !!webPreferences.preload;
+  if (needsIpcBridge) {
     // Fix #3: ipcDispatch is a closure-local function, not window.__ipcDispatch,
     // so renderer scripts cannot call it to spoof replies.
     // Fix #13: formatted for readability, matching the Linux bridge style.
@@ -174,7 +177,27 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
         }
     };
     window.ipcRenderer.removeListener = window.ipcRenderer.off;
+
+    window.contextBridge = {
+        exposeInMainWorld: function(key, api) { window[key] = api; }
+    };
 })();`;
+
+    // When contextIsolation is true and nodeIntegration is off, there is no
+    // window.require at all.  Inject a minimal stub so the preload can do:
+    //   const { ipcRenderer, contextBridge } = require('@devscholar/node-with-window');
+    if (webPreferences.contextIsolation === true && !webPreferences.nodeIntegration) {
+      ipcBridge += `
+(function() {
+    if (!window.require) {
+        window.require = function(m) {
+            if (m === '@devscholar/node-with-window')
+                return { ipcRenderer: window.ipcRenderer, contextBridge: window.contextBridge };
+            return null;
+        };
+    }
+})();`;
+    }
   }
 
   return nodeBridge + ipcBridge;

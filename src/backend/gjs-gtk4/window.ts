@@ -314,6 +314,16 @@ export class GjsGtk4Window implements IWindowProvider {
         : path.resolve(process.cwd(), preloadPath);
       try {
         userScript += '\n' + fs.readFileSync(absPreload, 'utf-8');
+        if (this.webPreferences.contextIsolation === true) {
+          userScript +=
+            '\n(function(){' +
+            'window.ipcRenderer=undefined;' +
+            'window.contextBridge=undefined;' +
+            'window.__ipcPending=undefined;' +
+            'window.__ipcListeners=undefined;' +
+            'window.__ipcDispatch=undefined;' +
+            '})();';
+        }
       } catch (e) {
         console.error('[node-with-window] Failed to load preload script:', e);
       }
