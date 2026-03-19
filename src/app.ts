@@ -32,10 +32,25 @@ class App extends EventEmitter {
       this.readyResolve = resolve;
       this.readyReject = reject;
     });
-    // Auto-start initialization on next tick so synchronous top-level code
-    // (e.g. app.on('ready', cb)) has a chance to register listeners first.
-    // Matches Electron's behaviour where ready fires automatically.
-    setImmediate(() => this.whenReady());
+  }
+
+  // Override on() so that registering a 'ready' listener immediately starts
+  // initialization (if not already started). This matches Electron's behaviour
+  // where app.on('ready', cb) fires without an explicit whenReady() call.
+  public on(event: string | symbol, listener: (...args: unknown[]) => void): this {
+    super.on(event, listener);
+    if (event === 'ready' && !this._isReady && !this.initializationStarted) {
+      this.whenReady().catch(e => this.emit('error', e));
+    }
+    return this;
+  }
+
+  public once(event: string | symbol, listener: (...args: unknown[]) => void): this {
+    super.once(event, listener);
+    if (event === 'ready' && !this._isReady && !this.initializationStarted) {
+      this.whenReady().catch(e => this.emit('error', e));
+    }
+    return this;
   }
 
   private async initializePlatform(): Promise<void> {

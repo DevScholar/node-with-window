@@ -252,6 +252,15 @@ async function install(version = DEFAULT_VERSION) {
     fs.unlinkSync(nupkgPath);
     log('Removed nupkg file', 'blue');
 
+    // Remove old versions
+    if (fs.existsSync(RUNTIMES_DIR)) {
+        for (const entry of fs.readdirSync(RUNTIMES_DIR)) {
+            if (entry === version || !fs.statSync(path.join(RUNTIMES_DIR, entry)).isDirectory()) continue;
+            fs.rmSync(path.join(RUNTIMES_DIR, entry), { recursive: true, force: true });
+            log(`Removed old version: ${entry}`, 'blue');
+        }
+    }
+
     fs.writeFileSync(currentVersionFile, version);
 
     log(`\nSuccessfully installed ${PACKAGE_NAME} ${version}`, 'green');

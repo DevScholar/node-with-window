@@ -79,22 +79,22 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
 (function() {
     if (window.ipcRenderer) return;
 
-    // Pending invoke callbacks keyed by request id
-    window.__ipcPending   = {};
-    // Registered on() listeners keyed by channel
-    window.__ipcListeners = {};
+    // Pending invoke callbacks keyed by request id (closure-local, survives contextIsolation cleanup)
+    var __ipcPending   = {};
+    // Registered on() listeners keyed by channel (closure-local)
+    var __ipcListeners = {};
 
     // Dispatch replies and push messages — closure-local so renderer code cannot call it.
     function ipcDispatch(msg) {
         if (msg.type === 'reply') {
-            var p = window.__ipcPending[msg.id];
+            var p = __ipcPending[msg.id];
             if (p) {
-                delete window.__ipcPending[msg.id];
+                delete __ipcPending[msg.id];
                 if (msg.error) p.reject(new Error(msg.error));
                 else           p.resolve(msg.result);
             }
         } else if (msg.type === 'message') {
-            var listeners = window.__ipcListeners[msg.channel] || [];
+            var listeners = __ipcListeners[msg.channel] || [];
             for (var i = 0; i < listeners.length; i++) listeners[i].cb({}, msg.args);
         }
     }
@@ -140,7 +140,7 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
             var args = Array.prototype.slice.call(arguments, 1);
             var id   = Math.random().toString(36).substring(2, 11);
             return new Promise(function(resolve, reject) {
-                window.__ipcPending[id] = { resolve: resolve, reject: reject };
+                __ipcPending[id] = { resolve: resolve, reject: reject };
                 window.chrome.webview.postMessage(
                     JSON.stringify({ type: 'invoke', channel: channel, id: id, args: args }));
             });
@@ -157,9 +157,9 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
         },
 
         on: function(channel, callback) {
-            if (!window.__ipcListeners[channel])
-                window.__ipcListeners[channel] = [];
-            window.__ipcListeners[channel].push({ cb: callback });
+            if (!__ipcListeners[channel])
+                __ipcListeners[channel] = [];
+            __ipcListeners[channel].push({ cb: callback });
         },
 
         once: function(channel, callback) {
@@ -169,7 +169,7 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
         },
 
         off: function(channel, callback) {
-            var listeners = window.__ipcListeners[channel];
+            var listeners = __ipcListeners[channel];
             if (!listeners) return;
             for (var i = 0; i < listeners.length; i++) {
                 if (listeners[i].cb === callback) { listeners.splice(i, 1); return; }

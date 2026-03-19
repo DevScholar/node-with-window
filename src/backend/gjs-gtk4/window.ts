@@ -319,9 +319,6 @@ export class GjsGtk4Window implements IWindowProvider {
             '\n(function(){' +
             'window.ipcRenderer=undefined;' +
             'window.contextBridge=undefined;' +
-            'window.__ipcPending=undefined;' +
-            'window.__ipcListeners=undefined;' +
-            'window.__ipcDispatch=undefined;' +
             '})();';
         }
       } catch (e) {
