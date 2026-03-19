@@ -9,9 +9,9 @@ import {
   OpenDialogOptions,
   SaveDialogOptions,
   MenuItemOptions,
-} from '../../interfaces';
+} from '../../interfaces.js';
 import { NativeImage } from '../../native-image.js';
-import { ipcMain } from '../../ipc-main';
+import { ipcMain } from '../../ipc-main.js';
 import { generateBridgeScript } from './bridge.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 import { buildWpfMenu } from './menu.js';

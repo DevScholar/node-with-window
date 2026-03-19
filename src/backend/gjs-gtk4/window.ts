@@ -10,8 +10,8 @@ import {
   OpenDialogOptions,
   SaveDialogOptions,
   MenuItemOptions,
-} from '../../interfaces';
-import { ipcMain } from '../../ipc-main';
+} from '../../interfaces.js';
+import { ipcMain } from '../../ipc-main.js';
 import { NativeImage } from '../../native-image.js';
 import { injectBridgeScript, generateBridgeScript } from './bridge.js';
 import { getSyncServerPort } from '../../node-integration.js';

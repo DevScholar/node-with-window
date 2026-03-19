@@ -1,4 +1,4 @@
-import { WebPreferences } from '../../interfaces';
+import { WebPreferences } from '../../interfaces.js';
 import { generateImportMapTag, NODE_BUILTINS } from '../../esm-importmap.js';
 import { generateNodeBridgeIife, generateNodeBridgeStub } from '../bridge-shared.js';
 

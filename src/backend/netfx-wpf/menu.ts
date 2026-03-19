@@ -1,5 +1,5 @@
 import * as path from 'node:path';
-import { MenuItemOptions } from '../../interfaces';
+import { MenuItemOptions } from '../../interfaces.js';
 import { callbackRegistry } from './dotnet/proxy.js';
 
 let dotnet: unknown;

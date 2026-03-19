@@ -1,4 +1,4 @@
-import { OpenDialogOptions, SaveDialogOptions } from '../../interfaces';
+import { OpenDialogOptions, SaveDialogOptions } from '../../interfaces.js';
 
 let dotnet: unknown;
 
