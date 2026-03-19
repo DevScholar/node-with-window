@@ -1,6 +1,6 @@
 {
   "name": "@devscholar/node-with-window",
-  "version": "0.0.7",
+  "version": "0.0.9",
   "description": "lightweight Electron substitute for Node.js/Deno/Bun",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -28,7 +28,12 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "keywords": [],
+  "keywords": [
+    "electron",
+    "node",
+    "deno",
+    "bun"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
