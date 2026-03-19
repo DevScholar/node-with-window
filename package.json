@@ -11,7 +11,11 @@
       "default": "./dist/index.js"
     }
   },
+  "bin": {
+    "node-with-window": "./bin/node-with-window.js"
+  },
   "files": [
+    "bin",
     "dist",
     "runtimes",
     "scripts"
