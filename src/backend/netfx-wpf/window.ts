@@ -16,6 +16,7 @@ import { generateBridgeScript } from './bridge.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 import { buildWpfMenu } from './menu.js';
 import { getSyncServerPort } from '../../node-integration.js';
+import { app } from '../../app.js';
 import { callbackRegistry, createProxy, createProxyWithInlineProps } from './dotnet/proxy.js';
 
 /**
@@ -190,6 +191,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   public pendingFilePath: string | null = null;
   private _pendingAbsFilePath: string | null = null;
   public userDataPath: string;
+  private _isTempSession = false;
   public pendingMenu: MenuItemOptions[] | null = null;
   /** Registered by BrowserWindow; called when the WPF window is closed externally. */
   public onClosed?: () => void;
@@ -221,32 +223,25 @@ export class NetFxWpfWindow implements IWindowProvider {
     this._skipTaskbar   = this.options.skipTaskbar  ?? false;
 
     const partition = this.webPreferences.partition;
+    const userDataBase = app.getPath('userData');
 
     if (partition) {
       if (partition.startsWith('persist:')) {
         const partitionName = partition.substring(8);
-        this.userDataPath = path.join(
-          os.tmpdir(),
-          'node-with-window-webview2',
-          'persist',
-          partitionName
-        );
+        this.userDataPath = path.join(userDataBase, 'Partitions', partitionName);
       } else if (partition.startsWith('temp:')) {
+        this._isTempSession = true;
         this.userDataPath = path.join(
           os.tmpdir(),
           'node-with-window-webview2',
           `temp-${Date.now()}-${Math.random()}`
         );
       } else {
-        this.userDataPath = path.join(
-          os.tmpdir(),
-          'node-with-window-webview2',
-          'persist',
-          partition
-        );
+        // Non-prefixed partition treated as persist (Electron-compatible)
+        this.userDataPath = path.join(userDataBase, 'Partitions', partition);
       }
     } else {
-      this.userDataPath = path.join(os.tmpdir(), 'node-with-window-webview2', 'default');
+      this.userDataPath = userDataBase;
     }
   }
 
@@ -804,6 +799,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   }
 
   public cleanupUserData(): void {
+    if (!this._isTempSession) return;
     if (this.userDataPath && fs.existsSync(this.userDataPath)) {
       try {
         fs.rmSync(this.userDataPath, { recursive: true, force: true });
