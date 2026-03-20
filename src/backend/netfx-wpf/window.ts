@@ -117,8 +117,10 @@ function findWebView2Runtime(): string {
   throw new Error(`WebView2 DLLs not found. Searched in: ${possibleBasePaths.join(', ')}`);
 }
 
-/** How often (ms) Node.js polls the .NET host for queued events. */
-const POLL_INTERVAL_MS = 16;
+/** Minimum poll interval (ms) — one frame at 60 Hz. */
+const POLL_MIN_MS = 16;
+/** Maximum poll interval (ms) when idle. */
+const POLL_MAX_MS = 200;
 
 /**
  * True once the first window's Application.Run() has been called.
@@ -192,7 +194,8 @@ export class NetFxWpfWindow implements IWindowProvider {
   /** Registered by BrowserWindow; called when the WPF window is closed externally. */
   public onClosed?: () => void;
   private isClosed = false;
-  private _pollTimer: ReturnType<typeof setInterval> | null = null;
+  private _pollTimer: ReturnType<typeof setTimeout> | null = null;
+  private _pollDelay = POLL_MIN_MS;
   private _isFullScreen = false;
   private _isKiosk = false;
   private _isResizable = true;
@@ -691,14 +694,15 @@ export class NetFxWpfWindow implements IWindowProvider {
 
     // Poll for queued .NET events (WebMessageReceived, CoreWebView2InitializationCompleted, …)
     // exactly like the Linux backend polls its GJS host.
-    this._pollTimer = setInterval(() => this._poll(), POLL_INTERVAL_MS);
+    this._pollDelay = POLL_MIN_MS;
+    this._pollTimer = setTimeout(() => this._pollLoop(), this._pollDelay);
   }
 
   public close(): void {
     if (this.isClosed) return;
     this.isClosed = true;
     if (this._pollTimer) {
-      clearInterval(this._pollTimer);
+      clearTimeout(this._pollTimer);
       this._pollTimer = null;
     }
     if (this.browserWindow) {
@@ -732,7 +736,7 @@ export class NetFxWpfWindow implements IWindowProvider {
     this._pendingExecs.clear();
 
     if (this._pollTimer) {
-      clearInterval(this._pollTimer);
+      clearTimeout(this._pollTimer);
       this._pollTimer = null;
     }
     this.cleanupUserData();
@@ -743,27 +747,34 @@ export class NetFxWpfWindow implements IWindowProvider {
     this.onClosed?.();
   }
 
-  /** Poll the .NET host for one queued event and dispatch it. */
-  private _poll(): void {
+  /** Adaptive poll loop: backs off when idle, resets to minimum on activity. */
+  private _pollLoop(): void {
     if (this.isClosed) return;
     let resp: { type: string; message?: string };
     try {
       resp = (dotnet as any).pollEvent() as typeof resp;
     } catch (e: unknown) {
-      // EINTR / EAGAIN are transient — skip this tick.
       const code = (e as NodeJS.ErrnoException).code;
-      if (code === 'EINTR' || code === 'EAGAIN') return;
-      // Pipe closed — .NET process exited unexpectedly.
+      if (code === 'EINTR' || code === 'EAGAIN') {
+        this._pollTimer = setTimeout(() => this._pollLoop(), this._pollDelay);
+        return;
+      }
       this._onWindowClosed();
       return;
     }
     if (resp.type === 'ipc' && resp.message) {
+      // Got an event — reset to minimum delay and drain queue immediately.
+      this._pollDelay = POLL_MIN_MS;
       try {
         this._dispatchRendererMessage(resp.message);
       } catch (e) {
         console.error('[node-with-window] event dispatch error:', e);
       }
+    } else {
+      // Idle — back off exponentially up to POLL_MAX_MS.
+      this._pollDelay = Math.min(this._pollDelay * 2, POLL_MAX_MS);
     }
+    this._pollTimer = setTimeout(() => this._pollLoop(), this._pollDelay);
   }
 
   /**

@@ -97,20 +97,29 @@ async function getServiceIndex() {
 }
 
 async function getLatestVersion() {
-    log('Fetching latest version from NuGet...', 'blue');
+    // Cache the latest version in RUNTIMES_DIR for 24 hours to avoid repeated NuGet queries.
+    const cacheFile = path.join(RUNTIMES_DIR, 'version-cache.json');
+    const TTL_MS = 24 * 60 * 60 * 1000;
+    if (fs.existsSync(cacheFile)) {
+        try {
+            const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf-8'));
+            if (cached.version && Date.now() - cached.timestamp < TTL_MS) {
+                return cached.version;
+            }
+        } catch { /* ignore corrupt cache */ }
+    }
 
+    log('Fetching latest version from NuGet...', 'blue');
     const index = await getServiceIndex();
     const searchResource = index.resources.find(r => r['@type'] === 'SearchQueryService');
     const searchUrl = searchResource['@id'];
-
     const data = await fetchJson(`${searchUrl}?take=1&q=${PACKAGE_NAME}&prerelease=false`);
-
     if (data.data && data.data.length > 0) {
-        const item = data.data[0];
-        const versionObj = item.versions[item.versions.length - 1];
-        return versionObj.version;
+        const version = data.data[0].versions[data.data[0].versions.length - 1].version;
+        fs.mkdirSync(RUNTIMES_DIR, { recursive: true });
+        fs.writeFileSync(cacheFile, JSON.stringify({ version, timestamp: Date.now() }));
+        return version;
     }
-
     throw new Error('Could not find latest version');
 }
 
