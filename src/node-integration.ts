@@ -1,5 +1,6 @@
 import * as http from 'node:http';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { ipcMain } from './ipc-main.js';
 
 /**
@@ -149,10 +150,10 @@ async function _findAvailablePort(): Promise<number> {
 export function startSyncServer(): Promise<number> {
   if (_ready) return _ready;
 
-  // Resolve modules relative to this file so Node.js builtins always work.
-  // npm packages installed in the user's project are NOT on this path;
-  // that is a known limitation (builtins cover the common Electron use cases).
-  const _require = createRequire(import.meta.url);
+  // Resolve modules relative to the user's project (process.cwd()) so that
+  // npm packages installed in their project are found, in addition to Node.js
+  // built-ins which are always resolvable from any path.
+  const _require = createRequire(pathToFileURL(process.cwd() + '/'));
 
   _ready = _findAvailablePort().then(
     preferredPort =>

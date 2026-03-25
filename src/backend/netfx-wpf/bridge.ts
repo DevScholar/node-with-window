@@ -1,5 +1,5 @@
 import { WebPreferences } from '../../interfaces.js';
-import { generateImportMapTag, NODE_BUILTINS } from '../../esm-importmap.js';
+import { generateImportMapTag, buildImports } from '../../esm-importmap.js';
 import { generateNodeBridgeIife, generateNodeBridgeStub } from '../bridge-shared.js';
 
 /**
@@ -32,13 +32,7 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
     const injectedPort    = syncServerPort;
 
     if (injectedPort > 0) {
-      const base = `http://127.0.0.1:${injectedPort}/__nww_esm__/`;
-      const imports: Record<string, string> = {};
-      imports['@devscholar/node-with-window'] = base + '@devscholar/node-with-window';
-      for (const name of NODE_BUILTINS) {
-        imports[name] = base + name;
-        imports[`node:${name}`] = base + name;
-      }
+      const imports = buildImports(injectedPort);
       // Build the importmap JSON for the dynamic injection guard.
       // The MutationObserver importmap-injection block makes 'import { x } from "fs"'
       // work even when the page HTML was not served by us (no pre-injected importmap).
