@@ -15,12 +15,28 @@ export function getNodePs1Dotnet() {
 
 const gcRegistry = new FinalizationRegistry((id: string) => {
     try { getNodePs1Dotnet()._release(id); } catch {}
+    cleanupObjectById(id);
 });
 
 export const callbackRegistry = new Map<string, Function>();
 export const typeMetadataCache = new Map<string, Map<string, string>>();
 export const globalTypeCache = new Map<string, Map<string, string>>();
 export const typeNameCache = new Map<string, string>();
+// Maps objectId → (cbId → callback) for all event subscriptions on that object.
+export const objectEventMap = new Map<string, Map<string, Function>>();
+
+/** Cleans all JS-side caches for a released .NET object ID. */
+export function cleanupObjectById(id: string): void {
+    typeMetadataCache.delete(id);
+    typeNameCache.delete(id);
+    const cbMap = objectEventMap.get(id);
+    if (cbMap) {
+        for (const cbId of cbMap.keys()) {
+            callbackRegistry.delete(cbId);
+        }
+        objectEventMap.delete(id);
+    }
+}
 
 // When true (after startApplication), Task results are fire-and-forget instead of
 // synchronously blocked via AwaitTask. This prevents deadlocks in polling mode where
@@ -166,7 +182,25 @@ function makeRefProxy(id: string, inlineProps?: Record<string, any>): any {
                 return (callback: Function) => {
                     const cbId = `cb_${Date.now()}_${Math.random()}`;
                     callbackRegistry.set(cbId, callback);
+                    if (!objectEventMap.has(id)) objectEventMap.set(id, new Map());
+                    objectEventMap.get(id)!.set(cbId, callback);
                     ipc!.send({ action: 'AddEvent', targetId: id, eventName, callbackId: cbId });
+                };
+            }
+
+            if (prop.startsWith('remove_')) {
+                const eventName = prop.substring(7);
+                return (callback: Function) => {
+                    const cbMap = objectEventMap.get(id);
+                    if (!cbMap) return;
+                    for (const [cbId, cb] of cbMap) {
+                        if (cb === callback) {
+                            cbMap.delete(cbId);
+                            callbackRegistry.delete(cbId);
+                            try { ipc!.send({ action: 'RemoveEvent', targetId: id, eventName, callbackId: cbId }); } catch {}
+                            break;
+                        }
+                    }
                 };
             }
 

@@ -253,9 +253,40 @@ public static class Reflection
                     handler = null;
                 }
 
-                eventInfo.AddEventHandler(target, handler);
+                if (handler != null)
+                {
+                    eventInfo.AddEventHandler(target, handler);
+                    var entry = new EventEntry();
+                    entry.TargetId = cmd["targetId"].ToString();
+                    entry.EventName = eventName;
+                    entry.Handler = handler;
+                    BridgeState.EventHandlerStore[cbId] = entry;
+                }
+                else
+                {
+                    eventInfo.AddEventHandler(target, handler);
+                }
             }
-            
+
+            return new Dictionary<string, object> { { "type", "void" } };
+        }
+
+        if (action == "RemoveEvent")
+        {
+            var cbId = cmd["callbackId"].ToString();
+            EventEntry entry;
+            if (BridgeState.EventHandlerStore.TryRemove(cbId, out entry))
+            {
+                object target;
+                if (BridgeState.ObjectStore.TryGetValue(entry.TargetId, out target))
+                {
+                    var eventInfo = target.GetType().GetEvent(entry.EventName);
+                    if (eventInfo != null)
+                    {
+                        try { eventInfo.RemoveEventHandler(target, entry.Handler); } catch { }
+                    }
+                }
+            }
             return new Dictionary<string, object> { { "type", "void" } };
         }
 
@@ -697,7 +728,29 @@ public static class Reflection
 
         if (action == "Release")
         {
-            Protocol.RemoveBridgeObject(cmd["targetId"].ToString());
+            var targetId = cmd["targetId"].ToString();
+            // Bulk-remove all event handlers registered for this object before releasing it.
+            var keysToRemove = new System.Collections.Generic.List<string>();
+            foreach (var kvp in BridgeState.EventHandlerStore)
+            {
+                if (kvp.Value.TargetId == targetId)
+                    keysToRemove.Add(kvp.Key);
+            }
+            object releaseTarget;
+            BridgeState.ObjectStore.TryGetValue(targetId, out releaseTarget);
+            foreach (var key in keysToRemove)
+            {
+                EventEntry removed;
+                if (BridgeState.EventHandlerStore.TryRemove(key, out removed) && releaseTarget != null)
+                {
+                    var eventInfo = releaseTarget.GetType().GetEvent(removed.EventName);
+                    if (eventInfo != null)
+                    {
+                        try { eventInfo.RemoveEventHandler(releaseTarget, removed.Handler); } catch { }
+                    }
+                }
+            }
+            Protocol.RemoveBridgeObject(targetId);
             return new Dictionary<string, object> { { "type", "void" } };
         }
 

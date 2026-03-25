@@ -4,9 +4,19 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.IO.Pipes;
 
+public class EventEntry
+{
+    public string TargetId;
+    public string EventName;
+    public Delegate Handler;
+}
+
 public static class BridgeState
 {
     public static ConcurrentDictionary<string, object> ObjectStore { get; private set; }
+
+    // Stores event handler delegates keyed by callbackId for later removal.
+    public static ConcurrentDictionary<string, EventEntry> EventHandlerStore { get; private set; }
 
     public static StreamReader Reader { get; set; }
     public static StreamWriter Writer { get; set; }
@@ -22,6 +32,7 @@ public static class BridgeState
     static BridgeState()
     {
         ObjectStore = new ConcurrentDictionary<string, object>();
+        EventHandlerStore = new ConcurrentDictionary<string, EventEntry>();
         EventQueue = new ConcurrentQueue<string>();
         UseQueueMode = false;
     }

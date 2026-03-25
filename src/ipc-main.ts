@@ -33,6 +33,15 @@ class AsyncIpcMain extends EventEmitter {
     this.handlers.delete(channel);
   }
 
+  public removeAllListeners(channel?: string): this {
+    if (channel === undefined) {
+      this.handlers.clear();
+    } else {
+      this.handlers.delete(channel);
+    }
+    return super.removeAllListeners(channel);
+  }
+
   public on(channel: string, listener: IpcHandler): this {
     return super.on(channel, listener);
   }
