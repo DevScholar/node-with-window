@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import { MenuItemOptions } from '../../interfaces.js';
-import { callbackRegistry } from './dotnet/proxy.js';
+import { callbackRegistry } from '@devscholar/node-ps1-dotnet';
 
 let dotnet: unknown;
 
@@ -19,6 +19,7 @@ interface WindowRef {
   browserWindow: unknown;
   webView: unknown;
   pendingMenu?: unknown[] | null;
+  onClosed?: () => void;
   close(): void;
   minimize(): void;
   reload(): void;
@@ -93,6 +94,8 @@ export function buildWpfMenu(window: WindowRef): void {
   if (!window.pendingMenu) return;
 
   const menuBar = new MenuType();
+  const _callbackRefs: (() => void)[] = []; // Keep callbacks alive
+  const _accelCallbackIds: string[] = []; // Track accelerator callback IDs for cleanup
 
   const roleClick = (role: string): (() => void) | undefined => {
     switch (role) {
@@ -163,7 +166,9 @@ export function buildWpfMenu(window: WindowRef): void {
 
         const clickFn = item.click ?? (item.role ? roleClick(item.role) : undefined);
         if (clickFn) {
-          (mi as any).add_Click(() => { clickFn(); });
+          const callback = () => { clickFn(); };
+          _callbackRefs.push(callback); // Keep alive
+          (mi as any).add_Click(callback);
 
           // Register accelerator for keyboard shortcut enforcement
           if (item.accelerator) {
@@ -172,6 +177,7 @@ export function buildWpfMenu(window: WindowRef): void {
               const callbackId = Math.random().toString(36).slice(2) + Date.now().toString(36);
               callbackRegistry.set(callbackId, () => clickFn());
               accelEntries.push({ ...parsed, callbackId });
+              _accelCallbackIds.push(callbackId);
             }
           }
         }
@@ -199,4 +205,11 @@ export function buildWpfMenu(window: WindowRef): void {
   (panel as any).Children.Add(menuBar);
   (panel as any).Children.Add(window.webView);
   (window.browserWindow as any).Content = panel;
+
+  // Cleanup menu callbacks when window closes
+  const originalOnClosed = window.onClosed;
+  window.onClosed = () => {
+    _accelCallbackIds.forEach(id => callbackRegistry.delete(id));
+    originalOnClosed?.();
+  };
 }

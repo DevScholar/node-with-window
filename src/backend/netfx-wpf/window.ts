@@ -17,7 +17,6 @@ import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 import { buildWpfMenu } from './menu.js';
 import { getSyncServerPort } from '../../node-integration.js';
 import { app } from '../../app.js';
-import { callbackRegistry, createProxy, createProxyWithInlineProps } from './dotnet/proxy.js';
 
 /**
  * This library bridges Node.js with platform-specific GUI frameworks.
@@ -118,11 +117,6 @@ function findWebView2Runtime(): string {
   throw new Error(`WebView2 DLLs not found. Searched in: ${possibleBasePaths.join(', ')}`);
 }
 
-/** Minimum poll interval (ms) — one frame at 60 Hz. */
-const POLL_MIN_MS = 16;
-/** Maximum poll interval (ms) when idle. */
-const POLL_MAX_MS = 200;
-
 /**
  * True once the first window's Application.Run() has been called.
  * Subsequent windows skip Application creation and just call Show().
@@ -196,8 +190,6 @@ export class NetFxWpfWindow implements IWindowProvider {
   /** Registered by BrowserWindow; called when the WPF window is closed externally. */
   public onClosed?: () => void;
   private isClosed = false;
-  private _pollTimer: ReturnType<typeof setTimeout> | null = null;
-  private _pollDelay = POLL_MIN_MS;
   private _isFullScreen = false;
   private _isKiosk = false;
   private _isResizable = true;
@@ -391,8 +383,21 @@ export class NetFxWpfWindow implements IWindowProvider {
         const msg = evt.InitializationException?.Message ?? 'unknown error';
         console.error('[node-with-window] WebView2 initialization failed:', msg);
         this.navigationQueue = [];
+        this.isWebViewReady = true;
       }
     });
+
+    // Timeout fallback: if WebView2 doesn't initialize within 10s, mark as ready anyway
+    setTimeout(() => {
+      if (!this.isWebViewReady) {
+        console.warn('[node-with-window] WebView2 initialization timeout, proceeding anyway');
+        this.isWebViewReady = true;
+        while (this.navigationQueue.length > 0) {
+          const action = this.navigationQueue.shift();
+          if (action) action();
+        }
+      }
+    }, 10000);
   }
 
   /**
@@ -686,20 +691,11 @@ export class NetFxWpfWindow implements IWindowProvider {
     // Apply P/Invoke chrome options. HWND is valid once Application.Run() has been
     // called and the window handle has been created (synchronous after startApplication).
     this._applyWindowChrome();
-
-    // Poll for queued .NET events (WebMessageReceived, CoreWebView2InitializationCompleted, …)
-    // exactly like the Linux backend polls its GJS host.
-    this._pollDelay = POLL_MIN_MS;
-    this._pollTimer = setTimeout(() => this._pollLoop(), this._pollDelay);
   }
 
   public close(): void {
     if (this.isClosed) return;
     this.isClosed = true;
-    if (this._pollTimer) {
-      clearTimeout(this._pollTimer);
-      this._pollTimer = null;
-    }
     if (this.browserWindow) {
       try {
         (this.browserWindow as unknown as { Close: () => void }).Close();
@@ -730,72 +726,12 @@ export class NetFxWpfWindow implements IWindowProvider {
     }
     this._pendingExecs.clear();
 
-    if (this._pollTimer) {
-      clearTimeout(this._pollTimer);
-      this._pollTimer = null;
-    }
     this.cleanupUserData();
     // Notify BrowserWindow, which will emit 'closed', 'window-all-closed', and
     // call process.exit(0) if no listener handles window-all-closed.
     // Secondary windows: BrowserWindow._handleClosed() does NOT exit when other
     // windows remain open, so this is safe for both primary and secondary windows.
     this.onClosed?.();
-  }
-
-  /** Adaptive poll loop: backs off when idle, resets to minimum on activity. */
-  private _pollLoop(): void {
-    if (this.isClosed) return;
-    let resp: { type: string; message?: string };
-    try {
-      resp = (dotnet as any).pollEvent() as typeof resp;
-    } catch (e: unknown) {
-      const code = (e as NodeJS.ErrnoException).code;
-      if (code === 'EINTR' || code === 'EAGAIN') {
-        this._pollTimer = setTimeout(() => this._pollLoop(), this._pollDelay);
-        return;
-      }
-      this._onWindowClosed();
-      return;
-    }
-    if (resp.type === 'ipc' && resp.message) {
-      // Got an event — reset to minimum delay and drain queue immediately.
-      this._pollDelay = POLL_MIN_MS;
-      try {
-        this._dispatchRendererMessage(resp.message);
-      } catch (e) {
-        console.error('[node-with-window] event dispatch error:', e);
-      }
-    } else {
-      // Idle — back off exponentially up to POLL_MAX_MS.
-      this._pollDelay = Math.min(this._pollDelay * 2, POLL_MAX_MS);
-    }
-    this._pollTimer = setTimeout(() => this._pollLoop(), this._pollDelay);
-  }
-
-  /**
-   * Dispatches a JSON message from the WebView2 renderer to the appropriate handler.
-   *
-   * Message shapes:
-   *   { type: 'event', callbackId, args }  — .NET event callbacks (menu, WebView2 events, etc.)
-   *
-   * IPC messages (send/invoke/execResult) are handled directly in the
-   * add_WebMessageReceived callback registered during createWindow(), not here.
-   */
-  private _dispatchRendererMessage(raw: string): void {
-    let msg: any;
-    try { msg = JSON.parse(raw); } catch { return; }
-
-    if (msg.type === 'event') {
-      // .NET event callback (e.g. menu item click, WebView2 CoreWebView2InitializationCompleted)
-      const cb = callbackRegistry.get(msg.callbackId);
-      if (cb) {
-        const wrappedArgs = (msg.args ?? []).map((arg: any) => {
-          if (arg && arg.type === 'ref' && arg.props) return createProxyWithInlineProps(arg);
-          return createProxy(arg);
-        });
-        try { cb(...wrappedArgs); } catch (e) { console.error('[node-with-window] .NET event callback error:', e); }
-      }
-    }
   }
 
   public cleanupUserData(): void {
