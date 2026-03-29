@@ -331,9 +331,8 @@ export class GjsGtk4Window implements IWindowProvider {
 
     public close(): void {
         if (this.isClosed) return;
-        this.isClosed = true;
         try { this.gtkWindow?.close(); } catch { /* ignore */ }
-        this._cleanup();
+        this._onWindowClosed();
     }
 
     // -------------------------------------------------------------------------
