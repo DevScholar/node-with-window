@@ -90,32 +90,6 @@ Both `app.on('ready', cb)` and `await app.whenReady()` are supported, just like 
 
 See [node-with-window-examples](https://github.com/devscholar/node-with-window-examples).
 
-## How it works
-
-### Windows (WPF + WebView2)
-
-- `node-with-window` spawns `scripts/backend/netfx-wpf/WinHost.ps1` as a child process. The script compiles the WPF/WebView2 C# bridge (`scripts/backend/netfx-wpf/*.cs`) at startup via PowerShell's `Add-Type` and communicates over a Windows Named Pipe using a synchronous JSON request/response protocol.
-- `show()` sends a `StartApplication` command to the .NET host, which immediately acknowledges and then calls `Application.Run(window)` — blocking the .NET thread in the WPF message loop without blocking the Node.js event loop.
-- Node.js polls for events every 16 ms with a `Poll` command that drains a thread-safe queue. WPF event handlers (like `WebMessageReceived`) enqueue their payload instead of blocking on synchronous IPC, so `async ipcMain.handle()` callbacks work normally.
-- When `loadFile` is called before `show()`, the file path is queued. After `Application.Run()` starts and CoreWebView2 finishes initializing, the bridge script is registered via `AddScriptToExecuteOnDocumentCreatedAsync` and WebView2 navigates to the `file:///` URI directly.
-- Node integration uses a loopback HTTP server started in the main process; the renderer calls `window.require(module)` via synchronous XHR. Callbacks are delivered via a persistent `EventSource`.
-
-### Linux (GJS + GTK 4 + WebKitGTK)
-
-- `GjsGtk4Window` spawns `scripts/backend/gjs-gtk4/host.js` as a child process via GJS.
-  The host script runs the GTK 4 main loop (`GLib.MainLoop`) and owns the `Gtk.Window` + `WebKit.WebView`.
-- Node.js and the GJS host communicate over two Unix FIFOs (passed as fd 3 and fd 4) using
-  a synchronous newline-delimited JSON request/response protocol.
-- **WebKit → Node.js IPC:** the HTML renderer posts messages via
-  `window.webkit.messageHandlers.ipc.postMessage(json)`. The GJS host queues them.
-  Node.js drains the queue every 16 ms with a `Poll` command.
-- **Window closed:** the GJS host sends `type: 'exit'`; Node.js calls `onClosed()`, which bubbles
-  up to `BrowserWindow` and triggers `process.exit(0)` when no other windows remain open.
-- **Node.js → WebKit IPC:** replies and push messages are delivered by sending a
-  `SendToRenderer` command, which calls `webView.evaluate_javascript()` in GJS.
-- Async `ipcMain.handle()` handlers are fully supported (the Node.js event loop stays alive
-  between polls).
-
 ## Developing
 
 After making changes to `node-with-window` itself, rebuild:
