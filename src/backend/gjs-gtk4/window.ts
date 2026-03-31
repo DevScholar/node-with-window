@@ -1,663 +1,689 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
-import { init, imports, startEventDrain } from '@devscholar/node-with-gjs';
+import { imports as gjsImports, startEventDrain, drainCallbacks } from '@devscholar/node-with-gjs';
 import {
   IWindowProvider,
   BrowserWindowOptions,
   WebPreferences,
+  MenuItemOptions,
   OpenDialogOptions,
   SaveDialogOptions,
-  MenuItemOptions,
 } from '../../interfaces.js';
-import { ipcMain } from '../../ipc-main.js';
 import { NativeImage } from '../../native-image.js';
-import { injectBridgeScript, generateBridgeScript } from './bridge.js';
+import { ipcMain } from '../../ipc-main.js';
+import { generateBridgeScript } from './bridge.js';
 import { getSyncServerPort } from '../../node-integration.js';
-import { GjsMenuManager } from './menu.js';
-import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
+import { buildGioMenu } from './menu.js';
 
-/**
- * GjsGtk4Window — IWindowProvider implementation for Linux using GTK4 + WebKitGTK.
- *
- * Architecture
- * ────────────
- * Uses @devscholar/node-with-gjs as the bridge to GJS.  All GTK/WebKit objects
- * are proxy objects; method calls become synchronous JSON-line IPC to a single
- * shared GJS host process.  This mirrors how the Windows backend uses
- * @devscholar/node-ps1-dotnet to drive WPF.
- *
- * There is NO separate GJS process per window.  All BrowserWindow instances
- * share one GJS host (managed by node-with-gjs), each creating its own
- * Gtk.Window + WebKit.WebView inside that process.
- *
- * Event loop
- * ──────────
- * node-with-gjs's host.js runs a GLib.MainLoop, so GTK events are always
- * being processed.  startEventDrain() is called once (on first show()) so that
- * GJS signal callbacks (WebKit IPC, window-close, load-changed, …) are
- * delivered to Node.js every ~16 ms via the IpcWorker.
- */
+// ── Module-level shared state ────────────────────────────────────────────────
+// There can only be one Gtk.Application per process.  All BrowserWindows share
+// the same application instance and the same GJS IPC connection.
 
-// ---------------------------------------------------------------------------
-// Module-level shared state
-// ---------------------------------------------------------------------------
+let _gi: any = null;
+let _Gtk: any = null;
+let _WebKit: any = null;  // either WebKit 6.0 or WebKit2 4.1
+let _Gio: any = null;
+let _gtkApp: any = null;
+let _appRunning = false;  // true once activate has fired
+/** Callbacks queued before activate fires; drained in the activate handler. */
+const _pendingWindowCreations: Array<() => void> = [];
 
-let _gjsReady = false;
-// GI namespace proxies — initialised once, reused by all windows and sub-modules.
-let Gtk: any, WebKit: any, Gio: any, Gdk: any, GLib: any;
-// Cached enum / constant values to avoid repeated IPC calls.
-let _GTK_VERTICAL: any;
-let _WEBKIT_LOAD_FINISHED: any;
-let _INJECT_FRAMES_ALL: any;
-let _INJECT_TIME_START: any;
+function ensureGiLoaded(): void {
+  if (_gi) return;
+  _gi = gjsImports.gi;
+  _gi.versions.Gtk = '4.0';
+  _Gtk = _gi.Gtk;
+  _Gio = _gi.Gio;
 
-function ensureGjs(): void {
-    if (_gjsReady) return;
-    _gjsReady = true;
-
-    init();
-    imports.gi.versions.Gtk     = '4.0';
-    imports.gi.versions.WebKit  = '6.0';
-    imports.gi.versions.Gdk     = '4.0';
-    Gtk    = imports.gi.Gtk;
-    WebKit = imports.gi.WebKit;
-    Gio    = imports.gi.Gio;
-    Gdk    = imports.gi.Gdk;
-    GLib   = imports.gi.GLib;
-
-    Gtk.init();
-
-    // Cache enum values (each access is an IPC round-trip; read once).
-    _GTK_VERTICAL         = Gtk.Orientation.VERTICAL;
-    _WEBKIT_LOAD_FINISHED = WebKit.LoadEvent.FINISHED;
-    _INJECT_FRAMES_ALL    = WebKit.UserContentInjectedFrames.ALL_FRAMES;
-    _INJECT_TIME_START    = WebKit.UserScriptInjectionTime.START;
-}
-
-/** startEventDrain() called at most once across all window instances. */
-let _drainStarted = false;
-function ensureDrain(): void {
-    if (_drainStarted) return;
-    _drainStarted = true;
-    startEventDrain();
-}
-
-// Returns true when running inside a VMware virtual machine.
-function isVMware(): boolean {
+  // Prefer WebKit 6.0 (newer), fall back to WebKit2 4.1 (GTK4 API)
+  try {
+    _gi.versions.WebKit = '6.0';
+    _WebKit = _gi.WebKit;
+  } catch {
     try {
-        return fs.readFileSync('/sys/class/dmi/id/sys_vendor', 'utf-8')
-                  .trim().toLowerCase().includes('vmware');
-    } catch { return false; }
+      _gi.versions.WebKit2 = '4.1';
+      _WebKit = _gi.WebKit2;
+    } catch (e) {
+      console.error('[gjs-gtk4] Could not load WebKit namespace:', e);
+      _WebKit = null;
+    }
+  }
 }
 
-// ---------------------------------------------------------------------------
-// parseHexColor — #RGB / #RRGGBB / #AARRGGBB → { r, g, b, a }
-// ---------------------------------------------------------------------------
-
-function parseHexColor(str: string): { r: number; g: number; b: number; a: number } | null {
-    if (!str || str[0] !== '#') return null;
-    const s = str.slice(1);
-    if (s.length === 3)
-        return { a: 255, r: parseInt(s[0]+s[0],16), g: parseInt(s[1]+s[1],16), b: parseInt(s[2]+s[2],16) };
-    if (s.length === 6)
-        return { a: 255, r: parseInt(s.slice(0,2),16), g: parseInt(s.slice(2,4),16), b: parseInt(s.slice(4,6),16) };
-    if (s.length === 8)
-        return { a: parseInt(s.slice(0,2),16), r: parseInt(s.slice(2,4),16), g: parseInt(s.slice(4,6),16), b: parseInt(s.slice(6,8),16) };
-    return null;
+function ensureGtkApp(): void {
+  if (_gtkApp) return;
+  ensureGiLoaded();
+  _gtkApp = new _Gtk.Application({ application_id: 'org.nodejs.nww' });
+  // MUST be a sync (non-async) callback: GJS blocks in processNestedCommands()
+  // while Node.js creates windows inline.  If async, app.run() sees zero
+  // windows after activate returns and quits immediately, killing the host.
+  _gtkApp.connect('activate', () => {
+    _appRunning = true;
+    const callbacks = _pendingWindowCreations.splice(0);
+    for (const fn of callbacks) fn();
+  });
 }
 
-// ---------------------------------------------------------------------------
-// GjsGtk4Window
-// ---------------------------------------------------------------------------
+// ── GjsGtk4Window ────────────────────────────────────────────────────────────
 
 export class GjsGtk4Window implements IWindowProvider {
-    public options: BrowserWindowOptions;
-    public webPreferences: WebPreferences;
-    public onClosed?: () => void;
+  public options: BrowserWindowOptions;
+  public webPreferences: WebPreferences;
 
-    // GTK proxy objects
-    private gtkWindow: any  = null;
-    private webView: any    = null;
-    private cm: any         = null;  // WebKit.UserContentManager
-    private windowBox: any  = null;  // current Gtk.Box child of gtkWindow
+  private win: any = null;
+  private webView: any = null;
+  private ucm: any = null;
+  private _contentBox: any = null;
+  private _menuBar: any = null;
+  private _menuActionNames: string[] = [];
+  /** Strong refs to Gio.SimpleAction proxies — prevents V8 GC from releasing
+   *  the GJS-side objects and their signal callbacks. */
+  private _menuActions: any[] = [];
 
-    private menu: GjsMenuManager | null = null;
-    private pendingMenu: MenuItemOptions[] | null = null;
-    private pendingLoad:
-        | { kind: 'url'; url: string }
-        | { kind: 'html'; html: string; baseUri: string }
-        | null = null;
+  private _pendingMenu: MenuItemOptions[] | null = null;
+  private _pendingFilePath: string | null = null;
+  private navigationQueue: Array<() => void> = [];
+  private isWebViewReady = false;
+  private isClosed = false;
+  private _isFullScreen = false;
+  private _isKiosk = false;
+  private _isResizable = true;
+  private _navCompletedCallback: (() => void) | null = null;
+  private _pendingExecs = new Map<
+    string,
+    { resolve: (v: unknown) => void; reject: (e: Error) => void }
+  >();
 
-    private isClosed         = false;
-    private _isFullScreen    = false;
-    private _isKiosk         = false;
-    private _isResizable     = true;
-    private _isMinimizable   = true;
-    private _isMaximizable   = true;
-    private _isClosable      = true;
-    private _isMovable       = true;
-    private _alwaysOnTopPending = false;
-    private _iconPath: string | null = null;
+  public onClosed?: () => void;
 
-    private _navCompletedCallback: (() => void) | null = null;
-    private _pendingExecs = new Map<string, {
-        resolve: (v: unknown) => void;
-        reject:  (e: Error)   => void;
-    }>();
+  constructor(options?: BrowserWindowOptions) {
+    this.options = options || {};
+    this.webPreferences = this.options.webPreferences || {};
+    this._isResizable = this.options.resizable ?? true;
+  }
 
-    constructor(options?: BrowserWindowOptions) {
-        this.options        = options || {};
-        this.webPreferences = this.options.webPreferences || {};
-        this._isResizable   = this.options.resizable   ?? true;
-        this._isMinimizable = this.options.minimizable ?? true;
-        this._isMaximizable = this.options.maximizable ?? true;
-        this._isClosable    = this.options.closable    ?? true;
-        this._isMovable     = this.options.movable     ?? true;
-    }
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
-    // -------------------------------------------------------------------------
-    // Lifecycle
-    // -------------------------------------------------------------------------
+  public async createWindow(): Promise<void> {
+    ensureGtkApp();
 
-    public async createWindow(): Promise<void> {
-        ensureGjs();
-        if (isVMware()) process.env.WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS = '1';
-
-        const opts = this.options;
-
-        // WebKit content manager + IPC message handler
-        this.cm = new WebKit.UserContentManager();
-        this.cm.register_script_message_handler('ipc', null);
-        this.cm.connect('script-message-received', (_mgr: any, value: any) => {
-            const msg: string = value.to_string();
-            if (msg) this._handleIpcMessage(msg);
-        });
-
-        // WebView
-        this.webView = new WebKit.WebView({
-            vexpand: true,
-            hexpand: true,
-            user_content_manager: this.cm,
-        });
-        const settings = this.webView.get_settings();
-        settings.enable_developer_extras = true;
-        if (opts.webPreferences?.webSecurity === false) {
-            settings.allow_file_access_from_file_urls             = true;
-            settings.allow_universal_access_from_file_urls        = true;
-        }
-
-        // GTK window
-        this.gtkWindow = new Gtk.Window({
-            title:          opts.title          || 'node-with-window',
-            default_width:  opts.width          || 800,
-            default_height: opts.height         || 600,
-        });
-
-        // Signals
-        this.gtkWindow.connect('close-request', () => {
-            this._onWindowClosed();
-            return false;
-        });
-        this.webView.connect('notify::title', () => {
-            const t: string = this.webView.title;
-            if (t && this.gtkWindow) this.gtkWindow.set_title(t);
-        });
-        this.webView.connect('load-changed', (_wv: any, loadEvent: any) => {
-            if (loadEvent === _WEBKIT_LOAD_FINISHED)
-                this._handleIpcMessage(JSON.stringify({ type: 'navigationCompleted' }));
-        });
-
-        // Apply window options
-        if (opts.resizable === false)   this.gtkWindow.set_resizable(false);
-        if (opts.kiosk) {
-            this.gtkWindow.fullscreen();
-            this.gtkWindow.set_resizable(false);
-            this._isFullScreen = true;
-        } else if (opts.fullscreen) {
-            this.gtkWindow.fullscreen();
-            this._isFullScreen = true;
-        }
-        if (opts.alwaysOnTop) {
-            try { this.gtkWindow.set_keep_above(true); }
-            catch { this._alwaysOnTopPending = true; }
-        }
-        if (opts.icon) {
-            this._iconPath = path.isAbsolute(opts.icon)
-                ? opts.icon
-                : path.resolve(process.cwd(), opts.icon);
-        }
-        if ((opts.minWidth ?? 0) > 0 || (opts.minHeight ?? 0) > 0) {
-            this.gtkWindow.set_size_request(
-                (opts.minWidth  ?? 0) > 0 ? opts.minWidth!  : -1,
-                (opts.minHeight ?? 0) > 0 ? opts.minHeight! : -1
-            );
-        }
-        if (opts.frame === false || opts.transparent === true)
-            this.gtkWindow.set_decorated(false);
-        if (opts.frame !== false && !opts.transparent &&
-                (opts.titleBarStyle === 'hidden' || opts.titleBarStyle === 'hiddenInset')) {
-            const emptyBar = new Gtk.Box({ height_request: 0 });
-            this.gtkWindow.set_titlebar(emptyBar);
-        }
-        if (opts.transparent === true) {
-            const css = new Gtk.CssProvider();
-            css.load_from_string('.nww-transparent { background-color: transparent; box-shadow: none; }');
-            Gtk.StyleContext.add_provider_for_display(
-                Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_USER);
-            this.gtkWindow.add_css_class('nww-transparent');
-            try {
-                const c = new Gdk.RGBA();
-                c.red = c.green = c.blue = c.alpha = 0;
-                this.webView.set_background_color(c);
-            } catch { /* not all WebKitGTK versions support this */ }
-        } else if (opts.backgroundColor) {
-            this._applyBackgroundColor(opts.backgroundColor);
-        }
-
-        // Window layout: single box containing the webView (menu added later)
-        this.windowBox = new Gtk.Box({ orientation: _GTK_VERTICAL, spacing: 0 });
-        this.windowBox.append(this.webView);
-        this.gtkWindow.set_child(this.windowBox);
-
-        // Menu manager
-        this.menu = new GjsMenuManager(
-            this,
-            this.gtkWindow,
-            this.webView,
-            () => this.windowBox,
-            (b: any) => { this.windowBox = b; },
-        );
-
-        // Bridge + optional preload script
-        let userScript = generateBridgeScript(this.webPreferences, getSyncServerPort());
-        const preloadPath = this.webPreferences.preload;
-        if (preloadPath) {
-            const abs = path.isAbsolute(preloadPath)
-                ? preloadPath
-                : path.resolve(process.cwd(), preloadPath);
-            try {
-                userScript += '\n' + fs.readFileSync(abs, 'utf-8');
-                if (this.webPreferences.contextIsolation === true)
-                    userScript += '\n(function(){window.ipcRenderer=undefined;window.contextBridge=undefined;})();';
-            } catch (e) {
-                console.error('[node-with-window] Failed to load preload script:', e);
-            }
-        }
-        const gjsUserScript = new WebKit.UserScript(
-            userScript,
-            _INJECT_FRAMES_ALL,
-            _INJECT_TIME_START,
-            null, null
-        );
-        this.cm.add_script(gjsUserScript);
-    }
-
-    public show(): void {
-        if (!this.gtkWindow) return;
-
-        if (this.pendingMenu) {
-            this.menu!.applyMenu(this.pendingMenu);
-            this.pendingMenu = null;
-        }
-        if (this.pendingLoad) {
-            if (this.pendingLoad.kind === 'url')
-                this.webView.load_uri(this.pendingLoad.url);
-            else
-                this.webView.load_html(this.pendingLoad.html, this.pendingLoad.baseUri);
-            this.pendingLoad = null;
-        }
-
-        this.gtkWindow.present();
-        ensureDrain(); // start GJS callback delivery (once for all windows)
-
-        // GTK4 alwaysOnTop: retry after surface is mapped
-        if (this._alwaysOnTopPending) {
-            try {
-                const surface = this.gtkWindow.get_surface();
-                if (surface?.set_keep_above) surface.set_keep_above(true);
-            } catch { /* compositor may not support it */ }
-            this._alwaysOnTopPending = false;
-        }
-        // Window icon
-        if (this._iconPath) {
-            try {
-                const texture = Gdk.Texture.new_from_filename(this._iconPath);
-                const surface = this.gtkWindow.get_surface();
-                if (surface) surface.set_icon_list([texture]);
-            } catch { /* icon loading is best-effort */ }
-        }
-    }
-
-    public close(): void {
-        if (this.isClosed) return;
-        try { this.gtkWindow?.close(); } catch { /* ignore */ }
-        this._onWindowClosed();
-    }
-
-    // -------------------------------------------------------------------------
-    // Navigation
-    // -------------------------------------------------------------------------
-
-    public async loadURL(url: string): Promise<void> {
-        if (!this.gtkWindow) { this.pendingLoad = { kind: 'url', url }; return; }
-        this.webView.load_uri(url);
-    }
-
-    public async loadFile(filePath: string): Promise<void> {
-        const abs  = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
-        const html = injectBridgeScript(fs.readFileSync(abs, 'utf-8'), this.webPreferences, getSyncServerPort());
-        const uri  = `file://${abs}`;
-        if (!this.gtkWindow) { this.pendingLoad = { kind: 'html', html, baseUri: uri }; return; }
-        this.webView.load_html(html, uri);
-    }
-
-    // -------------------------------------------------------------------------
-    // Menu
-    // -------------------------------------------------------------------------
-
-    public setMenu(menu: MenuItemOptions[]): void {
-        if (!this.gtkWindow) { this.pendingMenu = menu; return; }
-        this.menu!.applyMenu(menu);
-    }
-
-    public popupMenu(items: MenuItemOptions[], x?: number, y?: number): void {
-        if (!this.gtkWindow) return;
-        try { this.menu!.popupMenu(items, x, y); } catch { /* ignore */ }
-    }
-
-    // -------------------------------------------------------------------------
-    // IPC: Node.js → Renderer
-    // -------------------------------------------------------------------------
-
-    public sendToRenderer(channel: string, ...args: unknown[]): void { this.send(channel, ...args); }
-
-    public send(channel: string, ...args: unknown[]): void {
-        const payload = JSON.stringify({ type: 'message', channel, args });
-        this._evalJs(`window.__ipcDispatch(${JSON.stringify(payload)})`);
-    }
-
-    // -------------------------------------------------------------------------
-    // Dialogs
-    // -------------------------------------------------------------------------
-
-    public showOpenDialog(options: OpenDialogOptions): string[] | undefined {
-        return showOpenDialog(this.gtkWindow, options);
-    }
-    public showSaveDialog(options: SaveDialogOptions): string | undefined {
-        return showSaveDialog(this.gtkWindow, options);
-    }
-    public showMessageBox(options: { type?: string; title?: string; message: string; buttons?: string[] }): number {
-        return showMessageBox(this.gtkWindow, options);
-    }
-
-    // -------------------------------------------------------------------------
-    // Utilities
-    // -------------------------------------------------------------------------
-
-    public reload():       void { try { this.webView?.reload();    } catch { /* ignore */ } }
-    public openDevTools(): void { try { this.webView?.get_inspector()?.show(); } catch { /* ignore */ } }
-    public focus():        void { try { this.gtkWindow?.present(); } catch { /* ignore */ } }
-    public minimize():     void { try { this.gtkWindow?.minimize(); } catch { /* ignore */ } }
-    public maximize():     void { try { this.gtkWindow?.maximize(); } catch { /* ignore */ } }
-    public unmaximize():   void { try { this.gtkWindow?.unmaximize(); } catch { /* ignore */ } }
-
-    public setFullScreen(flag: boolean): void {
-        this._isFullScreen = flag;
-        try { flag ? this.gtkWindow?.fullscreen() : this.gtkWindow?.unfullscreen(); } catch { /* ignore */ }
-    }
-    public isFullScreen(): boolean { return this._isFullScreen; }
-
-    public setKiosk(flag: boolean): void {
-        this._isKiosk = flag;
-        this.setFullScreen(flag);
-        this.setSkipTaskbar(flag || (this.options.skipTaskbar ?? false));
-    }
-    public isKiosk(): boolean { return this._isKiosk; }
-
-    public setTitle(title: string): void { try { this.gtkWindow?.set_title(title); } catch { /* ignore */ } }
-    public getTitle(): string {
-        try { return this.gtkWindow?.get_title() ?? ''; } catch { return ''; }
-    }
-
-    public setSize(w: number, h: number): void {
-        try { this.gtkWindow?.set_default_size(w, h); } catch { /* ignore */ }
-    }
-    public getSize(): [number, number] {
+    return new Promise<void>((resolve, reject) => {
+      const doCreate = () => {
         try {
-            return [this.gtkWindow?.get_width() ?? 0, this.gtkWindow?.get_height() ?? 0];
-        } catch { return [0, 0]; }
-    }
-
-    public setMinimumSize(w: number, h: number): void {
-        try { this.gtkWindow?.set_size_request(w > 0 ? w : -1, h > 0 ? h : -1); } catch { /* ignore */ }
-    }
-    public setMaximumSize(_w: number, _h: number): void {
-        console.warn('[node-with-window] win.setMaximumSize() is not supported on GTK4.');
-    }
-
-    public setResizable(flag: boolean): void {
-        this._isResizable = flag;
-        try { this.gtkWindow?.set_resizable(flag); } catch { /* ignore */ }
-    }
-    public isResizable(): boolean { return this._isResizable; }
-
-    public setAlwaysOnTop(flag: boolean): void {
-        try { this.gtkWindow?.set_keep_above(flag); } catch { /* compositor may not support it */ }
-    }
-
-    public blur():                    void { console.warn('[node-with-window] win.blur() is not supported on GTK4/GNOME.'); }
-    public setPosition(_x: number, _y: number): void { console.warn('[node-with-window] win.setPosition() is not supported on GTK4/GNOME.'); }
-    public getPosition():             [number, number] { console.warn('[node-with-window] win.getPosition() is not supported on GTK4/GNOME.'); return [0, 0]; }
-    public setOpacity(_o: number):    void { console.warn('[node-with-window] win.setOpacity() is not supported on GTK4/GNOME.'); }
-    public getOpacity():              number { console.warn('[node-with-window] win.getOpacity() is not supported on GTK4/GNOME.'); return 1.0; }
-    public center():                  void { console.warn('[node-with-window] win.center() is not supported on GTK4/GNOME.'); }
-
-    public flashFrame(flag: boolean): void {
-        if (!flag) return;
-        try {
-            const surface = this.gtkWindow?.get_surface();
-            if (surface?.set_urgency_hint) surface.set_urgency_hint(true);
-        } catch { /* compositor may not support urgency hints */ }
-    }
-
-    public setMinimizable(flag: boolean): void {
-        this._isMinimizable = flag;
-        if (!flag) console.warn('[node-with-window] win.setMinimizable(false): not reliably supported on all GTK4 compositors.');
-    }
-    public isMinimizable(): boolean { return this._isMinimizable; }
-
-    public setMaximizable(flag: boolean): void {
-        this._isMaximizable = flag;
-        try { this.gtkWindow?.set_resizable(flag); } catch { /* ignore */ }
-    }
-    public isMaximizable(): boolean { return this._isMaximizable; }
-
-    public setClosable(flag: boolean): void {
-        this._isClosable = flag;
-        try { this.gtkWindow?.set_deletable(flag); } catch { /* ignore */ }
-    }
-    public isClosable(): boolean { return this._isClosable; }
-
-    public setMovable(flag: boolean): void {
-        this._isMovable = flag;
-        try { this.gtkWindow?.set_decorated(flag); } catch { /* ignore */ }
-    }
-    public isMovable(): boolean { return this._isMovable; }
-
-    public setSkipTaskbar(_flag: boolean): void {
-        console.warn('[node-with-window] win.setSkipTaskbar(): not reliably supported in GTK4/GNOME.');
-    }
-    public setFrame(flag: boolean): void {
-        try { this.gtkWindow?.set_decorated(flag); } catch { /* ignore */ }
-    }
-    public setBackgroundColor(color: string): void { this._applyBackgroundColor(color); }
-
-    public getHwnd(): string { return '0'; }
-
-    public setEnabled(flag: boolean): void {
-        try { this.gtkWindow?.set_sensitive(flag); } catch { /* ignore */ }
-    }
-
-    public async capturePage(): Promise<NativeImage> {
-        if (!this.webView) return new NativeImage(Buffer.alloc(0));
-        return new Promise<NativeImage>((resolve) => {
-            const tmpPath = path.join(os.tmpdir(), `nww-snap-${Date.now()}.png`);
-            this.webView.get_snapshot(
-                WebKit.SnapshotRegion.VISIBLE,
-                WebKit.SnapshotOptions.NONE,
-                null,
-                (_wv: any, asyncResult: any) => {
-                    try {
-                        const surface = this.webView.get_snapshot_finish(asyncResult);
-                        if (surface) {
-                            surface.writeToPNG(tmpPath);
-                            const buf = fs.readFileSync(tmpPath);
-                            try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
-                            resolve(new NativeImage(buf));
-                            return;
-                        }
-                    } catch (e) {
-                        console.error('[node-with-window] capturePage error:', e);
-                    }
-                    resolve(new NativeImage(Buffer.alloc(0)));
-                }
-            );
-        });
-    }
-
-    public onNavigationCompleted(callback: () => void): void {
-        this._navCompletedCallback = callback;
-    }
-
-    public executeJavaScript(code: string): Promise<unknown> {
-        return new Promise((resolve, reject) => {
-            if (!this.webView) { reject(new Error('WebView not ready')); return; }
-            const id    = Math.random().toString(36).substring(2, 11);
-            const timer = setTimeout(() => {
-                if (this._pendingExecs.delete(id))
-                    reject(new Error('executeJavaScript timed out after 10000ms'));
-            }, 10_000);
-            this._pendingExecs.set(id, {
-                resolve: (v) => { clearTimeout(timer); resolve(v); },
-                reject:  (e) => { clearTimeout(timer); reject(e); },
-            });
-            const eid = JSON.stringify(id);
-            const src = JSON.stringify(code);
-            const script =
-                `(function(){var eid=${eid};` +
-                `try{var r=eval(${src});` +
-                `if(r&&typeof r.then==='function'){` +
-                `r.then(function(v){window.webkit.messageHandlers.ipc.postMessage(` +
-                `JSON.stringify({type:'execResult',id:eid,result:v==null?null:v}));})` +
-                `.catch(function(ex){window.webkit.messageHandlers.ipc.postMessage(` +
-                `JSON.stringify({type:'execResult',id:eid,error:String(ex)}));});` +
-                `}else{window.webkit.messageHandlers.ipc.postMessage(` +
-                `JSON.stringify({type:'execResult',id:eid,result:r==null?null:r}));}` +
-                `}catch(ex){window.webkit.messageHandlers.ipc.postMessage(` +
-                `JSON.stringify({type:'execResult',id:eid,error:String(ex)}));}` +
-                `})()`;
-            this._evalJs(script);
-        });
-    }
-
-    // -------------------------------------------------------------------------
-    // Internal helpers
-    // -------------------------------------------------------------------------
-
-    /** Fire-and-forget JavaScript evaluation in the WebView. */
-    private _evalJs(script: string): void {
-        if (!this.webView) return;
-        try {
-            this.webView.evaluate_javascript(script, -1, null, null, null, null);
-        } catch { /* ignore — window may be closing */ }
-    }
-
-    private _applyBackgroundColor(color: string): void {
-        const parsed = parseHexColor(color);
-        if (!parsed || !this.webView) return;
-        try {
-            const c = new Gdk.RGBA();
-            c.red   = parsed.r / 255;
-            c.green = parsed.g / 255;
-            c.blue  = parsed.b / 255;
-            c.alpha = parsed.a / 255;
-            this.webView.set_background_color(c);
-        } catch { /* ignore */ }
-    }
-
-    private _handleIpcMessage(rawJson: string): void {
-        let data: { type: string; channel: string; id?: string; args?: unknown[] };
-        try { data = JSON.parse(rawJson); }
-        catch { console.error('[GjsGtk4Window] Invalid IPC JSON:', rawJson); return; }
-
-        const { type, channel, id, args = [] } = data;
-
-        if (type === 'execResult') {
-            const pending = this._pendingExecs.get(id!);
-            if (pending) {
-                this._pendingExecs.delete(id!);
-                (data as any).error
-                    ? pending.reject(new Error((data as any).error))
-                    : pending.resolve((data as any).result);
-            }
-            return;
+          this._createWindowInGtk();
+          resolve();
+        } catch (e) {
+          reject(e);
         }
+      };
 
-        if (type === 'navigationCompleted') {
-            this._navCompletedCallback?.();
-            return;
+      if (_appRunning) {
+        doCreate();
+      } else {
+        _pendingWindowCreations.push(doCreate);
+        if (_pendingWindowCreations.length === 1) {
+          // First window: start the GTK application (non-blocking via node-with-gjs)
+          startEventDrain();
+          _gtkApp.run([]);
         }
+      }
+    });
+  }
 
-        const event = {
-            sender:  this,
-            frameId: 0,
-            reply:   (ch: string, ...a: unknown[]) => this.send(ch, ...a),
-        };
+  private _createWindowInGtk(): void {
+    if (!_WebKit) throw new Error('[gjs-gtk4] WebKit namespace not available');
 
-        if (type === 'send') {
-            ipcMain.emit(channel, event, ...args);
-        } else if (type === 'invoke') {
-            const handlers = (ipcMain as any).handlers as Map<string, (e: unknown, ...a: unknown[]) => unknown>;
-            const handler  = handlers.get(channel);
-            if (!handler) {
-                this._sendIpcReply(id!, null, `No handler for channel: ${channel}`);
-                return;
-            }
-            try {
-                const result = handler(event, ...args);
-                if (result && typeof (result as any).then === 'function') {
-                    (result as Promise<unknown>)
-                        .then(r  => this._sendIpcReply(id!, r, null))
-                        .catch(e => this._sendIpcReply(id!, null, (e as Error).message || String(e)));
-                } else {
-                    this._sendIpcReply(id!, result, null);
-                }
-            } catch (e) {
-                this._sendIpcReply(id!, null, (e as Error).message || String(e));
-            }
+    // ── UserContentManager for IPC ─────────────────────────────────────────
+    this.ucm = new _WebKit.UserContentManager();
+    try {
+      // WebKit 6.0: 2 args; WebKit2 4.1: 1 arg
+      this.ucm.register_script_message_handler('ipc', null);
+    } catch {
+      this.ucm.register_script_message_handler('ipc');
+    }
+
+    // Async callback: messages arrive via poll every 16 ms
+    this.ucm.connect('script-message-received::ipc', async (_ucm: any, jsResult: any) => {
+      try {
+        let json: string;
+        try {
+          json = jsResult.get_js_value().to_string();  // WebKit2 4.1
+        } catch {
+          json = jsResult.to_string();                  // WebKit 6.0
         }
+        this._handleIpcMessage(json);
+      } catch (e) {
+        console.error('[gjs-gtk4] IPC message error:', e);
+      }
+    });
+
+    // ── WebView ────────────────────────────────────────────────────────────
+    this.webView = new _WebKit.WebView({ user_content_manager: this.ucm });
+
+    try {
+      const settings = this.webView.get_settings();
+      settings.enable_developer_extras = true;
+    } catch { /* best-effort */ }
+
+    // ── Bridge script (injected at DOCUMENT_START on every page load) ──────
+    let bridgeScript = generateBridgeScript(this.webPreferences, getSyncServerPort());
+    if (this.webPreferences.preload) {
+      const absPreload = path.isAbsolute(this.webPreferences.preload)
+        ? this.webPreferences.preload
+        : path.resolve(process.cwd(), this.webPreferences.preload);
+      try {
+        bridgeScript += '\n' + fs.readFileSync(absPreload, 'utf-8');
+        if (this.webPreferences.contextIsolation === true) {
+          bridgeScript +=
+            '\n(function(){' +
+            'window.ipcRenderer=undefined;' +
+            'window.contextBridge=undefined;' +
+            '})();';
+        }
+      } catch (e) {
+        console.error('[gjs-gtk4] Failed to load preload script:', e);
+      }
     }
 
-    private _sendIpcReply(id: string, result: unknown, error: string | null): void {
-        const payload = JSON.stringify({ type: 'reply', id, result, error });
-        this._evalJs(`window.__ipcDispatch(${JSON.stringify(payload)})`);
+    const InjectedFrames = _WebKit.UserContentInjectedFrames;
+    const InjectionTime  = _WebKit.UserScriptInjectionTime;
+    const userScript = new _WebKit.UserScript(
+      bridgeScript,
+      InjectedFrames.ALL_FRAMES,
+      InjectionTime.DOCUMENT_START,
+      null,
+      null
+    );
+    this.ucm.add_script(userScript);
+
+    // ── Window ─────────────────────────────────────────────────────────────
+    this.win = new _Gtk.ApplicationWindow({ application: _gtkApp });
+    this.win.set_title(this.options.title || 'node-with-window');
+    this.win.set_default_size(this.options.width || 800, this.options.height || 600);
+
+    if (!this._isResizable) this.win.set_resizable(false);
+    if (this.options.minWidth || this.options.minHeight) {
+      this.win.set_size_request(this.options.minWidth || -1, this.options.minHeight || -1);
     }
 
-    private _onWindowClosed(): void {
-        if (this.isClosed) return;
-        this.isClosed = true;
-        for (const p of this._pendingExecs.values()) p.reject(new Error('Window closed'));
-        this._pendingExecs.clear();
-        this._cleanup();
-        this.onClosed?.();
+    // ── Layout: vertical box (menu bar on top, webview below) ──────────────
+    this._contentBox = new _Gtk.Box({ orientation: _Gtk.Orientation.VERTICAL, spacing: 0 });
+    this.win.set_child(this._contentBox);
+
+    this.webView.set_hexpand(true);
+    this.webView.set_vexpand(true);
+    this._contentBox.append(this.webView);
+
+    // ── Apply pending menu ─────────────────────────────────────────────────
+    if (this._pendingMenu !== null) {
+      this._applyMenu(this._pendingMenu);
+      this._pendingMenu = null;
     }
 
-    private _cleanup(): void {
-        // Release GTK proxy objects so node-with-gjs can free the GJS-side refs.
-        this.cm         = null;
-        this.webView    = null;
-        this.windowBox  = null;
-        this.gtkWindow  = null;
+    // ── Signal: window closed by user ──────────────────────────────────────
+    this.win.connect('close-request', async () => {
+      this._onWindowClosed();
+    });
+
+    // ── Signal: page load progress ────────────────────────────────────────
+    // LoadEvent enum: STARTED=0, REDIRECTED=1, COMMITTED=2, FINISHED=3
+    this.webView.connect('load-changed', async (_wv: any, loadEvent: any) => {
+      if (loadEvent === 3) {  // FINISHED
+        this.isWebViewReady = true;
+        this._navCompletedCallback?.();
+        while (this.navigationQueue.length > 0) {
+          const action = this.navigationQueue.shift();
+          if (action) action();
+        }
+      }
+    });
+
+    // ── Initial navigation ─────────────────────────────────────────────────
+    if (this._pendingFilePath) {
+      this.webView.load_uri('file://' + this._pendingFilePath);
+      this._pendingFilePath = null;
+    } else {
+      this.webView.load_uri('about:blank');
     }
+  }
+
+  public show(): void {
+    if (this.win) this.win.present();
+  }
+
+  public close(): void {
+    if (this.isClosed) return;
+    this.isClosed = true;
+    if (this.win) {
+      try { this.win.close(); } catch { /* ignore */ }
+    }
+  }
+
+  private _onWindowClosed(): void {
+    if (this.isClosed) return;
+    this.isClosed = true;
+    for (const pending of this._pendingExecs.values()) {
+      pending.reject(new Error('Window closed'));
+    }
+    this._pendingExecs.clear();
+    this.onClosed?.();
+  }
+
+  // ── Navigation ─────────────────────────────────────────────────────────────
+
+  public async loadURL(url: string): Promise<void> {
+    if (!this.webView) {
+      this.navigationQueue.push(() => this.loadURL(url));
+      return;
+    }
+    this.webView.load_uri(url);
+  }
+
+  public async loadFile(filePath: string): Promise<void> {
+    const absolutePath = path.isAbsolute(filePath)
+      ? filePath
+      : path.resolve(process.cwd(), filePath);
+    const fileUri = 'file://' + absolutePath;
+    if (!this.webView) {
+      this._pendingFilePath = absolutePath;
+      return;
+    }
+    this.webView.load_uri(fileUri);
+  }
+
+  public reload(): void {
+    if (this.webView) this.webView.reload();
+  }
+
+  public onNavigationCompleted(callback: () => void): void {
+    this._navCompletedCallback = callback;
+  }
+
+  // ── IPC ────────────────────────────────────────────────────────────────────
+
+  private _evaluateJs(code: string): void {
+    if (!this.webView) return;
+    // 6 args: script, length, world_name, source_uri, cancellable, callback
+    this.webView.evaluate_javascript(code, -1, null, null, null, null);
+  }
+
+  public sendToRenderer(channel: string, ...args: unknown[]): void {
+    const payload = JSON.stringify({ type: 'message', channel, args });
+    this._evaluateJs(
+      `window.__ipcDispatch && window.__ipcDispatch(${JSON.stringify(payload)})`
+    );
+  }
+
+  public sendIpcReply(id: string, result: unknown, error: string | null): void {
+    const payload = JSON.stringify({ type: 'reply', id, result, error });
+    this._evaluateJs(
+      `window.__ipcDispatch && window.__ipcDispatch(${JSON.stringify(payload)})`
+    );
+  }
+
+  public executeJavaScript(code: string): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      if (!this.webView) {
+        reject(new Error('WebView not ready'));
+        return;
+      }
+      const id = Math.random().toString(36).substring(2, 11);
+      const timer = setTimeout(() => {
+        if (this._pendingExecs.delete(id)) {
+          reject(new Error('executeJavaScript timed out after 10000ms'));
+        }
+      }, 10_000);
+      this._pendingExecs.set(id, {
+        resolve: (v) => { clearTimeout(timer); resolve(v); },
+        reject:  (e) => { clearTimeout(timer); reject(e); },
+      });
+
+      // Wrap code in an IIFE that sends the result back via the IPC channel.
+      // The handler in _handleIpcMessage resolves / rejects the promise above.
+      const eid = JSON.stringify(id);
+      const wrapped =
+        `(function(){` +
+        `var eid=${eid};` +
+        `try{` +
+        `  var r=(function(){${code}})();` +
+        `  if(r&&typeof r.then==='function'){` +
+        `    r.then(function(v){window.webkit.messageHandlers.ipc.postMessage(JSON.stringify({type:'execResult',id:eid,result:v==null?null:v}));})` +
+        `    .catch(function(e){window.webkit.messageHandlers.ipc.postMessage(JSON.stringify({type:'execResult',id:eid,error:String(e)}));});` +
+        `  }else{window.webkit.messageHandlers.ipc.postMessage(JSON.stringify({type:'execResult',id:eid,result:r==null?null:r}));}` +
+        `}catch(e){window.webkit.messageHandlers.ipc.postMessage(JSON.stringify({type:'execResult',id:eid,error:String(e)}));}` +
+        `})()`;
+      this._evaluateJs(wrapped);
+    });
+  }
+
+  private _handleIpcMessage(json: string): void {
+    let message: any;
+    try { message = JSON.parse(json); } catch { return; }
+
+    const { channel, type, id, args = [] } = message;
+    const event = {
+      sender: this,
+      reply: (ch: string, ...a: unknown[]) => this.sendToRenderer(ch, ...a),
+    };
+
+    if (type === 'execResult') {
+      const pending = this._pendingExecs.get(id);
+      if (pending) {
+        this._pendingExecs.delete(id);
+        if (message.error) pending.reject(new Error(message.error));
+        else pending.resolve(message.result);
+      }
+    } else if (type === 'send') {
+      ipcMain.emit(channel, event, ...args);
+    } else if (type === 'invoke') {
+      const handler = (ipcMain as any).handlers.get(channel) as
+        | ((event: unknown, ...args: unknown[]) => unknown)
+        | undefined;
+      if (handler) {
+        try {
+          const result = handler(event, ...args);
+          if (result && typeof (result as any).then === 'function') {
+            (result as Promise<unknown>)
+              .then(r => this.sendIpcReply(id, r, null))
+              .catch(err => this.sendIpcReply(id, null, (err as Error).message || String(err)));
+          } else {
+            this.sendIpcReply(id, result, null);
+          }
+        } catch (err: unknown) {
+          const e = err as { message?: string };
+          this.sendIpcReply(id, null, e.message || String(err));
+        }
+      } else {
+        this.sendIpcReply(id, null, `No handler for channel: ${channel}`);
+      }
+    }
+  }
+
+  // ── DevTools ───────────────────────────────────────────────────────────────
+
+  public openDevTools(): void {
+    if (!this.webView) return;
+    try {
+      const inspector = this.webView.get_inspector();
+      if (inspector) inspector.show();
+    } catch { /* best-effort */ }
+  }
+
+  // ── Menu ───────────────────────────────────────────────────────────────────
+
+  public setMenu(menu: MenuItemOptions[]): void {
+    if (!this.win) {
+      this._pendingMenu = menu;
+      return;
+    }
+    this._applyMenu(menu);
+  }
+
+  private _applyMenu(items: MenuItemOptions[]): void {
+    if (!this.win || !this._contentBox) return;
+
+    // Remove existing menu bar
+    if (this._menuBar) {
+      try { this._contentBox.remove(this._menuBar); } catch { /* ignore */ }
+      this._menuBar = null;
+    }
+
+    // Remove old window actions and release references
+    for (const name of this._menuActionNames) {
+      try { this.win.remove_action(name); } catch { /* ignore */ }
+    }
+    this._menuActionNames = [];
+    this._menuActions = [];
+
+    if (!items || items.length === 0) return;
+
+    const actions: Array<{ name: string; action: any }> = [];
+    const gioMenu = buildGioMenu(items, _Gio, actions);
+
+    for (const { name, action } of actions) {
+      this.win.add_action(action);
+      this._menuActionNames.push(name);
+      this._menuActions.push(action);  // prevent V8 GC → keeps callbacks alive
+    }
+
+    try {
+      this._menuBar = new _Gtk.PopoverMenuBar({ menu_model: gioMenu });
+      this._contentBox.prepend(this._menuBar);
+    } catch (e) {
+      console.error('[gjs-gtk4] Failed to create PopoverMenuBar:', e);
+    }
+  }
+
+  public popupMenu(_items: MenuItemOptions[], _x?: number, _y?: number): void {
+    // TODO: implement context menu via Gtk.PopoverMenu
+  }
+
+  // ── Window management ──────────────────────────────────────────────────────
+
+  public focus(): void {
+    if (this.win) this.win.present();
+  }
+
+  public blur(): void { /* GTK4 has no direct blur API */ }
+
+  public minimize(): void {
+    if (this.win) try { this.win.minimize(); } catch { /* ignore */ }
+  }
+
+  public maximize(): void {
+    if (this.win) this.win.maximize();
+  }
+
+  public unmaximize(): void {
+    if (this.win) this.win.unmaximize();
+  }
+
+  public setFullScreen(flag: boolean): void {
+    if (!this.win) return;
+    this._isFullScreen = flag;
+    if (flag) this.win.fullscreen();
+    else      this.win.unfullscreen();
+  }
+
+  public isFullScreen(): boolean {
+    return this._isFullScreen;
+  }
+
+  public setKiosk(flag: boolean): void {
+    this._isKiosk = flag;
+    this.setFullScreen(flag);
+  }
+
+  public isKiosk(): boolean {
+    return this._isKiosk;
+  }
+
+  public setTitle(title: string): void {
+    if (this.win) this.win.set_title(title);
+  }
+
+  public getTitle(): string {
+    if (this.win) {
+      try { return this.win.get_title() as string; } catch { /* ignore */ }
+    }
+    return this.options.title ?? '';
+  }
+
+  public setSize(width: number, height: number): void {
+    if (this.win) this.win.set_default_size(width, height);
+  }
+
+  public getSize(): [number, number] {
+    if (!this.win) return [this.options.width ?? 0, this.options.height ?? 0];
+    try {
+      const w = this.win.get_width() as number;
+      const h = this.win.get_height() as number;
+      return [Math.round(w), Math.round(h)];
+    } catch {
+      return [this.options.width ?? 0, this.options.height ?? 0];
+    }
+  }
+
+  public setResizable(resizable: boolean): void {
+    this._isResizable = resizable;
+    if (this.win) this.win.set_resizable(resizable);
+  }
+
+  public isResizable(): boolean {
+    return this._isResizable;
+  }
+
+  public setAlwaysOnTop(_flag: boolean): void {
+    // GTK4: compositor-controlled; no portable always-on-top API via GI
+  }
+
+  public center(): void {
+    // GTK4: window placement is managed by the compositor
+    console.warn('[gjs-gtk4] setPosition/center: not supported on GTK4 (compositor-managed)');
+  }
+
+  public setPosition(_x: number, _y: number): void {
+    console.warn('[gjs-gtk4] setPosition: not supported on GTK4 (compositor-managed)');
+  }
+
+  public getPosition(): [number, number] {
+    return [0, 0];
+  }
+
+  public setOpacity(_opacity: number): void {
+    console.warn('[gjs-gtk4] setOpacity: not supported on GTK4');
+  }
+
+  public getOpacity(): number {
+    return 1;
+  }
+
+  public setMinimumSize(width: number, height: number): void {
+    if (this.win) this.win.set_size_request(width, height);
+  }
+
+  public setMaximumSize(_width: number, _height: number): void {
+    // GTK4 removed maximum window size constraint
+  }
+
+  public setBackgroundColor(_color: string): void {
+    // WebKitGTK: background colour control requires CSS on the page
+  }
+
+  public flashFrame(_flag: boolean): void { /* no-op on GTK */ }
+
+  public getHwnd(): string {
+    return '0';  // Windows-only
+  }
+
+  public setEnabled(flag: boolean): void {
+    if (this.win) this.win.set_sensitive(flag);
+  }
+
+  public async capturePage(): Promise<NativeImage> {
+    return new NativeImage(Buffer.alloc(0));
+  }
+
+  // ── Dialogs ────────────────────────────────────────────────────────────────
+
+  public showOpenDialog(options: OpenDialogOptions): string[] | undefined {
+    if (!this.win) return undefined;
+
+    let result: string[] | undefined;
+    let done = false;
+
+    try {
+      const dialog = new _Gtk.FileDialog();
+      if (options.title) dialog.title = options.title;
+      if (options.defaultPath) {
+        try { dialog.initial_folder = _Gio.File.new_for_path(options.defaultPath); } catch { /* ignore */ }
+      }
+
+      const isMulti = options.properties?.includes('multiSelections');
+      const isDir   = options.properties?.includes('openDirectory');
+
+      const callback = (source: any, asyncResult: any) => {
+        try {
+          if (isDir) {
+            const folder = source.select_folder_finish(asyncResult);
+            result = folder ? [folder.get_path()] : undefined;
+          } else if (isMulti) {
+            const list = source.open_multiple_finish(asyncResult);
+            const count = list.get_n_items();
+            result = [];
+            for (let i = 0; i < count; i++) result.push(list.get_item(i).get_path());
+          } else {
+            const file = source.open_finish(asyncResult);
+            result = file ? [file.get_path()] : undefined;
+          }
+        } catch { /* user cancelled */ }
+        done = true;
+      };
+
+      if (isDir) dialog.select_folder(this.win, null, callback);
+      else if (isMulti) dialog.open_multiple(this.win, null, callback);
+      else dialog.open(this.win, null, callback);
+
+      while (!done) drainCallbacks();
+    } catch (e) {
+      console.warn('[gjs-gtk4] showOpenDialog failed:', e);
+    }
+
+    return result;
+  }
+
+  public showSaveDialog(options: SaveDialogOptions): string | undefined {
+    if (!this.win) return undefined;
+
+    let result: string | undefined;
+    let done = false;
+
+    try {
+      const dialog = new _Gtk.FileDialog();
+      if (options.title) dialog.title = options.title;
+      if (options.defaultPath) {
+        const dp = options.defaultPath;
+        try {
+          const stat = fs.statSync(dp);
+          if (stat.isDirectory()) {
+            dialog.initial_folder = _Gio.File.new_for_path(dp);
+          } else {
+            dialog.initial_folder = _Gio.File.new_for_path(path.dirname(dp));
+            dialog.initial_name = path.basename(dp);
+          }
+        } catch {
+          dialog.initial_name = path.basename(dp);
+        }
+      }
+
+      dialog.save(this.win, null, (source: any, asyncResult: any) => {
+        try {
+          const file = source.save_finish(asyncResult);
+          result = file ? file.get_path() : undefined;
+        } catch { /* user cancelled */ }
+        done = true;
+      });
+
+      while (!done) drainCallbacks();
+    } catch (e) {
+      console.warn('[gjs-gtk4] showSaveDialog failed:', e);
+    }
+
+    return result;
+  }
+
+  public showMessageBox(options: {
+    type?: string;
+    title?: string;
+    message: string;
+    buttons?: string[];
+  }): number {
+    // GTK4 has no synchronous dialog API. Use JavaScript alert() in the WebView
+    // as a simple fallback — it blocks the renderer until dismissed.
+    if (this.webView) {
+      const msg = (options.message || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
+      this._evaluateJs(`alert('${msg}')`);
+    }
+    return 0;
+  }
 }

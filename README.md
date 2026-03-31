@@ -84,7 +84,6 @@ echo 'kernel.unprivileged_userns_clone=1' | sudo tee /etc/sysctl.d/99-userns.con
 The API mirrors [Electron](https://www.electronjs.org/docs/latest/) — replace
 `import ... from 'electron'` with `import ... from '@devscholar/node-with-window'`.
 
-Both `app.on('ready', cb)` and `await app.whenReady()` are supported, just like Electron.
 
 ## Examples
 

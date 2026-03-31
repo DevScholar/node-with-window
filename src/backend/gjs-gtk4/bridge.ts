@@ -1,22 +1,24 @@
 import { WebPreferences } from '../../interfaces.js';
-import { generateImportMapTag, buildImports } from '../../esm-importmap.js';
+import { buildImports } from '../../esm-importmap.js';
 import { generateNodeBridgeIife, generateNodeBridgeStub } from '../bridge-shared.js';
 
 /**
- * Linux Bridge — WebKit JavaScript Injection
+ * Linux Bridge - WebKitGTK JavaScript Injection
  *
- * Mirrors the Windows bridge (bridge.ts) but uses the WebKit messaging API:
- *   - Renderer -> Main:  window.webkit.messageHandlers.ipc.postMessage(json)
- *   - Main -> Renderer (IPC):  window.__ipcDispatch(json)   (called via evaluate_javascript)
- *   - Main -> Renderer (eval): self-contained IIFE injected via SendToRenderer
+ * Generates the JavaScript injected into the renderer via WebKit.UserScript.
  *
- * executeJavaScript() sends eval code as a standalone IIFE rather than routing
- * it through __ipcDispatch, so renderer scripts cannot forge exec requests.
+ * 1. Node.js compatibility layer (when nodeIntegration is enabled)
+ *    - window.require() via sync-XHR to local HTTP server
+ *    - window.process with platform, arch, version, cwd, exit
  *
- * ipcRenderer API exposed in the renderer is intentionally identical to the
- * Windows version so that application code is fully cross-platform.
+ * 2. IPC bridge (when contextIsolation is NOT enabled)
+ *    - window.ipcRenderer.send()   - fire-and-forget to main
+ *    - window.ipcRenderer.invoke() - request/response (Promise)
+ *    - window.ipcRenderer.on()     - receive messages from main
+ *
+ * Renderer → Main: window.webkit.messageHandlers.ipc.postMessage(json)
+ * Main → Renderer: evaluate_javascript calls window.__ipcDispatch(json)
  */
-
 export function generateBridgeScript(webPreferences: WebPreferences, syncServerPort = 0): string {
   const nodeIntegration = webPreferences.nodeIntegration;
 
@@ -24,8 +26,6 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
   if (nodeIntegration) {
     const injectedCwd     = JSON.stringify(process.cwd());
     const injectedVersion = JSON.stringify(process.version);
-    // Double-encode env so </script> sequences inside env values cannot break the
-    // enclosing <script> tag (the outer JSON.stringify produces a safe string literal).
     const injectedEnv     = JSON.stringify(JSON.stringify(process.env));
     const injectedArch    = JSON.stringify(process.arch);
     const injectedPort    = syncServerPort;
@@ -33,7 +33,6 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
     if (injectedPort > 0) {
       const imports = buildImports(injectedPort);
       const importMapJson = JSON.stringify(JSON.stringify({ imports }));
-
       nodeBridge = generateNodeBridgeIife({
         port: injectedPort,
         platform: 'linux',
@@ -44,8 +43,6 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
         importMapJson,
       });
     } else {
-      // Fallback stubs when no sync server is running (nodeIntegration without
-      // a running server should not happen in normal use, but degrade gracefully).
       nodeBridge = generateNodeBridgeStub({
         platform: 'linux',
         injectedArch,
@@ -59,37 +56,17 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
   let ipcBridge = '';
   const needsIpcBridge = webPreferences.contextIsolation !== true || !!webPreferences.preload;
   if (needsIpcBridge) {
-    /**
-     * WebKit IPC bridge.
-     *
-     * Outgoing (renderer -> main):
-     *   window.webkit.messageHandlers.ipc.postMessage(jsonString)
-     *
-     * Incoming (main -> renderer, IPC replies/push):
-     *   window.__ipcDispatch(jsonString)  — called by evaluate_javascript() in the host
-     *
-     * Message format (same as Windows):
-     *   { type: 'send',    channel, args }
-     *   { type: 'invoke',  channel, id, args }
-     *   { type: 'reply',   id, result, error }
-     *   { type: 'message', channel, args }
-     */
     ipcBridge = `
 (function() {
     if (window.ipcRenderer) return;
 
-    // Pending invoke callbacks keyed by request id (closure-local, survives contextIsolation cleanup)
     var __ipcPending   = {};
-    // Registered on() listeners keyed by channel (closure-local)
     var __ipcListeners = {};
 
-    // Called by the main process (via evaluate_javascript) to deliver replies
-    // and push messages to on() listeners.
-    // NOTE: executeJavaScript() eval is NOT routed through here — it is sent
-    // as a self-contained IIFE so renderer scripts cannot forge exec requests.
-    window.__ipcDispatch = function(json) {
+    // Called by main process via evaluate_javascript to dispatch replies and push messages.
+    window.__ipcDispatch = function(jsonStr) {
         var msg;
-        try { msg = JSON.parse(json); } catch(e) { return; }
+        try { msg = JSON.parse(jsonStr); } catch (e) { return; }
         if (msg.type === 'reply') {
             var p = __ipcPending[msg.id];
             if (p) {
@@ -99,8 +76,7 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
             }
         } else if (msg.type === 'message') {
             var listeners = __ipcListeners[msg.channel] || [];
-            for (var i = 0; i < listeners.length; i++)
-                listeners[i].cb({}, msg.args);
+            for (var i = 0; i < listeners.length; i++) listeners[i].cb({}, msg.args);
         }
     };
 
@@ -113,7 +89,7 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
 
         invoke: function(channel) {
             var args = Array.prototype.slice.call(arguments, 1);
-            var id   = Math.random().toString(36).substr(2, 9);
+            var id   = Math.random().toString(36).substring(2, 11);
             return new Promise(function(resolve, reject) {
                 __ipcPending[id] = { resolve: resolve, reject: reject };
                 window.webkit.messageHandlers.ipc.postMessage(
@@ -128,7 +104,7 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
             xhr.setRequestHeader('Content-Type', 'application/json');
             xhr.send(JSON.stringify({ channel: channel, args: args }));
             if (xhr.status !== 200) return undefined;
-            try { return JSON.parse(xhr.responseText).result; } catch(e) { return undefined; }
+            try { return JSON.parse(xhr.responseText).result; } catch (e) { return undefined; }
         },
 
         on: function(channel, callback) {
@@ -173,27 +149,4 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
   }
 
   return nodeBridge + ipcBridge;
-}
-
-/**
- * Injects the bridge script (and importmap when nodeIntegration is active)
- * into HTML, mirroring the Windows implementation.
- *
- * The importmap must precede the bridge script so that `import 'fs'` in any
- * subsequent `<script type="module">` resolves via the shim server.
- */
-export function injectBridgeScript(html: string, webPreferences: WebPreferences, syncServerPort = 0): string {
-  const bridgeTag = `<script>${generateBridgeScript(webPreferences, syncServerPort)}</script>`;
-  const importMapTag = (webPreferences.nodeIntegration && syncServerPort > 0)
-    ? generateImportMapTag(syncServerPort)
-    : '';
-  // importmap must come BEFORE the bridge script so it is registered before
-  // any module scripts the bridge might trigger.
-  const injection = importMapTag + bridgeTag;
-
-  if (/<head[^>]*>/i.test(html)) return html.replace(/(<head[^>]*>)/i, `$1${injection}`);
-
-  if (/<body[^>]*>/i.test(html)) return html.replace(/(<body[^>]*>)/i, `$1${injection}`);
-
-  return injection + html;
 }
