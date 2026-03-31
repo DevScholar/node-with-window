@@ -88,6 +88,7 @@ export class GjsGtk4Window implements IWindowProvider {
   private _isFullScreen = false;
   private _isKiosk = false;
   private _isResizable = true;
+  private _zoomLevel = 1.0;
   private _navCompletedCallback: (() => void) | null = null;
   private _pendingExecs = new Map<
     string,
@@ -254,9 +255,14 @@ export class GjsGtk4Window implements IWindowProvider {
   public close(): void {
     if (this.isClosed) return;
     this.isClosed = true;
+    for (const p of this._pendingExecs.values()) p.reject(new Error('Window closed'));
+    this._pendingExecs.clear();
     if (this.win) {
       try { this.win.close(); } catch { /* ignore */ }
     }
+    // Notify BrowserWindow regardless of how close() was called (menu role,
+    // BrowserWindow.close(), etc.). BrowserWindow._handleClosed() is idempotent.
+    this.onClosed?.();
   }
 
   private _onWindowClosed(): void {
@@ -438,7 +444,7 @@ export class GjsGtk4Window implements IWindowProvider {
     if (!items || items.length === 0) return;
 
     const actions: Array<{ name: string; action: any }> = [];
-    const gioMenu = buildGioMenu(items, _Gio, actions);
+    const gioMenu = buildGioMenu(items, _Gio, actions, (role) => this._roleAction(role));
 
     for (const { name, action } of actions) {
       this.win.add_action(action);
@@ -456,6 +462,27 @@ export class GjsGtk4Window implements IWindowProvider {
 
   public popupMenu(_items: MenuItemOptions[], _x?: number, _y?: number): void {
     // TODO: implement context menu via Gtk.PopoverMenu
+  }
+
+  private _roleAction(role: string): (() => void) | undefined {
+    switch (role) {
+      case 'close':            return () => this.close();
+      case 'minimize':         return () => this.minimize();
+      case 'reload':
+      case 'forceReload':      return () => this.reload();
+      case 'toggleDevTools':   return () => this.openDevTools();
+      case 'togglefullscreen': return () => this.setFullScreen(!this.isFullScreen());
+      case 'resetZoom':        return () => { this._zoomLevel = 1.0;   if (this.webView) this.webView.set_zoom_level(1.0); };
+      case 'zoomIn':           return () => { this._zoomLevel = Math.min(this._zoomLevel + 0.1, 5.0);  if (this.webView) this.webView.set_zoom_level(this._zoomLevel); };
+      case 'zoomOut':          return () => { this._zoomLevel = Math.max(this._zoomLevel - 0.1, 0.25); if (this.webView) this.webView.set_zoom_level(this._zoomLevel); };
+      case 'undo':      return () => this._evaluateJs("document.execCommand('undo')");
+      case 'redo':      return () => this._evaluateJs("document.execCommand('redo')");
+      case 'cut':       return () => this._evaluateJs("document.execCommand('cut')");
+      case 'copy':      return () => this._evaluateJs("document.execCommand('copy')");
+      case 'paste':     return () => this._evaluateJs("document.execCommand('paste')");
+      case 'selectAll': return () => this._evaluateJs("document.execCommand('selectAll')");
+      default:          return undefined;
+    }
   }
 
   // ── Window management ──────────────────────────────────────────────────────
