@@ -1,0 +1,6 @@
+{
+  "versions": {
+    "@devscholar/node-ps1-dotnet": "0.0.16",
+    "@devscholar/node-with-gjs": "0.0.11"
+  }
+}

@@ -17,19 +17,23 @@ import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkgPath = join(__dirname, '..', 'package.json');
+const versionsPath = join(__dirname, '..', 'last-known-good-versions.json');
 
 const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+const { versions } = JSON.parse(readFileSync(versionsPath, 'utf-8'));
 
 const LOCAL_DEPS = {
     '@devscholar/node-ps1-dotnet': 'file:../node-ps1-dotnet',
+    '@devscholar/node-with-gjs': 'file:../node-with-gjs',
 };
 
 let changed = false;
 for (const [name, localRef] of Object.entries(LOCAL_DEPS)) {
-    if (pkg.dependencies?.[name] === 'latest') {
+    const pinned = versions[name];
+    if (pinned && pkg.dependencies?.[name] === pinned) {
         pkg.dependencies[name] = localRef;
         changed = true;
-        console.log(`[post-publish] ${name}: "latest" → "${localRef}"`);
+        console.log(`[post-publish] ${name}: "${pinned}" → "${localRef}"`);
     }
 }
 
