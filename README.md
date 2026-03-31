@@ -55,30 +55,6 @@ These are typically pre-installed on Ubuntu 24.04 LTS / GNOME desktops. If missi
 sudo apt install gjs gir1.2-gtk-4.0 gir1.2-webkit-6.0
 ```
 
-#### WebKit sandbox in virtual machines
-
-When running inside a VMware (or similar) virtual machine, WebKitGTK's bubblewrap
-sandbox may fail with `Permission denied` because the VM kernel restricts
-unprivileged user namespaces:
-
-```
-bwrap: setting up uid map: Permission denied
-Failed to fully launch dbus-proxy
-```
-
-`node-with-window` detects VMware at startup by reading `/sys/class/dmi/id/sys_vendor`.
-When running inside VMware, `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` is set
-automatically when spawning the GJS host, suppressing this error.
-On bare-metal or other hypervisors the WebKit sandbox runs normally.
-If you hit this error in another environment (e.g. a container or a different VM),
-enable user namespaces instead:
-
-```bash
-sudo sysctl -w kernel.unprivileged_userns_clone=1
-# To persist across reboots:
-echo 'kernel.unprivileged_userns_clone=1' | sudo tee /etc/sysctl.d/99-userns.conf
-```
-
 ## API
 
 The API mirrors [Electron](https://www.electronjs.org/docs/latest/) — replace
