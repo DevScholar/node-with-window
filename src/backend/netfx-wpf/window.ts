@@ -205,6 +205,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   >();
   private _pendingMinSize: [number, number] | null = null;
   private _pendingMaxSize: [number, number] | null = null;
+  private _webViewInitTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options?: BrowserWindowOptions) {
     this.options = options || {};
@@ -370,6 +371,10 @@ export class NetFxWpfWindow implements IWindowProvider {
       };
       if (evt.IsSuccess) {
         this.coreWebView2 = (this.webView as unknown as { CoreWebView2: unknown }).CoreWebView2;
+        if (this._webViewInitTimer !== null) {
+          clearTimeout(this._webViewInitTimer);
+          this._webViewInitTimer = null;
+        }
         try {
           this.setupIpcBridge();
         } catch (e) {
@@ -384,13 +389,19 @@ export class NetFxWpfWindow implements IWindowProvider {
       } else {
         const msg = evt.InitializationException?.Message ?? 'unknown error';
         console.error('[node-with-window] WebView2 initialization failed:', msg);
+        if (this._webViewInitTimer !== null) {
+          clearTimeout(this._webViewInitTimer);
+          this._webViewInitTimer = null;
+        }
         this.navigationQueue = [];
         this.isWebViewReady = true;
       }
     });
 
-    // Timeout fallback: if WebView2 doesn't initialize within 10s, mark as ready anyway
-    setTimeout(() => {
+    // Timeout fallback: if WebView2 doesn't initialize within 10s, mark as ready anyway.
+    // The timer ID is stored so it can be cleared early on success, failure, or window close.
+    this._webViewInitTimer = setTimeout(() => {
+      this._webViewInitTimer = null;
       if (!this.isWebViewReady) {
         console.warn('[node-with-window] WebView2 initialization timeout, proceeding anyway');
         this.isWebViewReady = true;
@@ -717,6 +728,11 @@ export class NetFxWpfWindow implements IWindowProvider {
   private _onWindowClosed(): void {
     if (this.isClosed) return;
     this.isClosed = true;
+
+    if (this._webViewInitTimer !== null) {
+      clearTimeout(this._webViewInitTimer);
+      this._webViewInitTimer = null;
+    }
 
     // Re-enable the parent if this was a modal window.
     if (this.options.modal && this.options.parent) {
