@@ -2,7 +2,7 @@
 
 **Platform:** Windows
 **Stack:** WPF (Windows Presentation Foundation) + WebView2 (Chromium-based)
-**Bridge:** Self-contained — `scripts/backend/netfx-wpf/WinHost.ps1` compiles the C# bridge via PowerShell `Add-Type` and communicates over a Named Pipe; Node.js polls for events at 16 ms intervals.
+**Bridge:** `@devscholar/node-ps1-dotnet` — PowerShell/C# bridge compiled via `Add-Type`; Node.js polls for queued .NET events at 16 ms intervals.
 
 ---
 
@@ -15,20 +15,27 @@
 | `app.getName()` | ✅ | Reads `name` from `package.json` |
 | `app.getVersion()` | ✅ | Reads `version` from `package.json` |
 | `app.getPath(name)` | ✅ | `home`, `temp`, `desktop`, `downloads`, `documents`, `music`, `pictures`, `videos`, `appData`, `userData`, `logs`, `exe`, `module` |
-| `app.quit()` | ✅ | Emits `before-quit`, then `process.exit(0)` |
-| Event: `ready` | ✅ | |
-| Event: `before-quit` | ✅ | |
-| Event: `window-all-closed` | ✅ | |
-| `app.exit()` | ✅ | `process.exit(exitCode)`; relaunches first if `relaunch()` was called |
-| `app.relaunch([options])` | ✅ | Spawns a new process on next `quit()`/`exit()`; accepts `execPath` and `args` |
-| `app.focus()` | ✅ | Focuses the first open BrowserWindow |
-| `app.setName(name)` | ✅ | Overrides the value returned by `getName()` |
 | `app.setPath(name, path)` | ✅ | Overrides a named path returned by `getPath()` |
+| `app.quit()` | ✅ | Emits `before-quit`, then `process.exit(0)` |
+| `app.exit(exitCode?)` | ✅ | `process.exit(exitCode)`; relaunches first if `relaunch()` was called |
+| `app.relaunch([options])` | ✅ | Spawns new process on next `quit()`/`exit()`; accepts `execPath` and `args` |
+| `app.focus()` | ✅ | Calls `focus()` on the first open BrowserWindow |
+| `app.setName(name)` | ✅ | Overrides the value returned by `getName()` |
 | `app.getLocale()` | ✅ | Returns `Intl.DateTimeFormat().resolvedOptions().locale` |
 | `app.requestSingleInstanceLock()` | ✅ | PID-file based; returns `true` for first instance, `false` if another is alive |
-| Event: `second-instance` | ⚠️ | Lock detection works, but cross-process notification requires manual IPC |
-| `app.dock` | ❌ | macOS only |
+| `app.isReady()` | ✅ | |
+| Event: `ready` | ✅ | Also fires immediately (via `setImmediate`) when `on('ready')` is called after the app is already ready |
+| Event: `before-quit` | ✅ | |
+| Event: `window-all-closed` | ✅ | Process exits with code 0 if no listener is registered |
+| Event: `second-instance` | ❌ | `requestSingleInstanceLock()` detects existing instances but does not notify them |
+| Event: `will-quit` | ❌ | Not emitted |
 | Event: `activate` | ❌ | macOS only |
+| Event: `browser-window-focus/blur/created` | ❌ | Not emitted |
+| Event: `web-contents-created` | ❌ | Not emitted |
+| `app.dock` | ❌ | macOS only |
+| `app.setAppUserModelId()` | ❌ | Not implemented |
+| `app.isPackaged` | ❌ | Not implemented |
+| `app.commandLine.*` | ❌ | Not implemented |
 
 ---
 
@@ -36,116 +43,161 @@
 
 ### Constructor
 
-`new BrowserWindow(options)` is synchronous, matching Electron. Window creation (WPF + WebView2 init) runs asynchronously in the background; `show()` fires via `setImmediate` once the window is ready (unless `show: false`).
+`new BrowserWindow(options)` is synchronous, matching Electron. Backend initialization (WPF + WebView2) runs asynchronously; `show()` fires via `setImmediate` once ready (unless `show: false`).
 
 ### Constructor Options
 
 | Option | Status | Notes |
 |---|---|---|
 | `width`, `height` | ✅ | Default: 800×600 |
+| `x`, `y` | ✅ | Sets `WindowStartupLocation.Manual` + `Left`/`Top` |
 | `minWidth`, `minHeight` | ✅ | WPF `MinWidth`/`MinHeight` |
 | `maxWidth`, `maxHeight` | ✅ | WPF `MaxWidth`/`MaxHeight` |
 | `title` | ✅ | Also auto-synced from `document.title` |
-| `icon` | ✅ | Absolute or relative path; ICO (full multi-size via `BitmapFrame`), PNG, JPG; best-effort |
+| `icon` | ✅ | Absolute or relative path; ICO/PNG/JPG; best-effort |
 | `resizable` | ✅ | WPF `ResizeMode.NoResize` when `false` |
+| `movable` | ✅ | `WM_NCHITTEST` hook blocks title-bar drag when `false` |
+| `minimizable` | ✅ | `GetWindowLong`/`SetWindowLong` `WS_MINIMIZEBOX` |
+| `maximizable` | ✅ | `GetWindowLong`/`SetWindowLong` `WS_MAXIMIZEBOX` |
+| `closable` | ✅ | `EnableMenuItem` `SC_CLOSE` on system menu |
 | `show` | ✅ | Pass `false` to prevent auto-show |
-| `x`, `y` | ✅ | Sets `WindowStartupLocation.Manual` + `Left`/`Top` |
 | `alwaysOnTop` | ✅ | WPF `Topmost` |
-| `webPreferences` | ✅ | See WebPreferences section |
-| `movable` | ✅ | `HwndSource` `WM_NCHITTEST` hook blocks title-bar drag when `false` |
-| `minimizable`, `maximizable` | ✅ | `GetWindowLong`/`SetWindowLong` WS_MINIMIZEBOX / WS_MAXIMIZEBOX |
-| `closable` | ✅ | `EnableMenuItem` on the system menu's `SC_CLOSE` item |
-| `transparent` | ✅ | `WindowStyle.None` + `AllowsTransparency = false` + `Background = Transparent` + `WindowChrome(GlassFrameThickness = -1)` + `ResizeMode = NoResize`; WebView2 background alpha set to 0. Uses the hardware DX renderer path (not WS_EX_LAYERED) so WebView2 receives mouse clicks correctly. |
 | `frame` | ✅ | `WindowStyle.None` — removes title bar and border |
-| `backgroundColor` | ✅ | WebView2 `DefaultBackgroundColor` via `System.Drawing.Color.FromArgb`; accepts `#RGB`, `#RRGGBB`, `#AARRGGBB` |
-| `kiosk` | ✅ | `setFullScreen(true)` + `setSkipTaskbar(true)`; exit restores previous state |
-| `skipTaskbar` | ✅ | `SetWindowLong` WS_EX_TOOLWINDOW / WS_EX_APPWINDOW on extended style |
-| `fullscreen` | ✅ | Applied at window creation via `setFullScreen(true)` |
-| `parent`, `modal` | ✅ | `parent` sets WPF `WindowInteropHelper.Owner`; `modal` disables the parent window until the child closes |
-| `titleBarStyle` | ✅ | `'hidden'`/`'hiddenInset'`: `WindowStyle.None` + `WindowChrome(GlassFrameThickness = 0, ResizeBorderThickness = 4, CaptionHeight = 0)`; title bar removed, 4 px resize border kept. `'default'`: standard title bar (no-op). |
+| `titleBarStyle` | ✅ | `'hidden'`/`'hiddenInset'`: `WindowStyle.None` + `WindowChrome(ResizeBorderThickness=4, CaptionHeight=0)`; 4 px resize border kept. `'default'`: standard title bar (no-op). |
+| `transparent` | ✅ | `WindowStyle.None` + `AllowsTransparency=false` + `Background=Transparent` + `WindowChrome(GlassFrameThickness=-1)` + WebView2 alpha=0. Hardware DX renderer path — mouse clicks reach WebView2 on fully transparent pixels. |
+| `backgroundColor` | ✅ | WebView2 `DefaultBackgroundColor`; accepts `#RGB`, `#RRGGBB`, `#AARRGGBB` |
+| `fullscreen` | ✅ | Applied at creation via `setFullScreen(true)` |
+| `kiosk` | ✅ | `setFullScreen(true)` + `setSkipTaskbar(true)` |
+| `skipTaskbar` | ✅ | `SetWindowLong` `WS_EX_TOOLWINDOW`/`WS_EX_APPWINDOW` |
+| `parent`, `modal` | ✅ | `parent` sets WPF `WindowInteropHelper.Owner`; `modal` disables the parent until the child closes |
+| `webPreferences` | ✅ | See WebPreferences section |
+| `autoHideMenuBar` | ❌ | Not implemented |
+| `hasShadow` | ❌ | Not implemented |
+| `center` (as option) | ❌ | Use `win.center()` after creation |
 
 ### `webPreferences`
 
 | Option | Status | Notes |
 |---|---|---|
 | `nodeIntegration` | ✅ | Enables `window.require` (sync XHR) and `window.process` |
-| `contextIsolation` | ✅ | `false` (default) injects `window.ipcRenderer` |
-| `partition` | ✅ | `persist:<name>` for persistent profile, `temp:` for ephemeral |
-| `preload` | ✅ | Supported via `webPreferences.preload` |
+| `contextIsolation` | ⚠️ | When `true` + `preload`: globals `ipcRenderer` and `contextBridge` are deleted from `window` after the preload runs. Not true V8 context isolation — there is no separate JavaScript context. |
+| `preload` | ✅ | Script appended to bridge code and registered via `AddScriptToExecuteOnDocumentCreatedAsync` |
+| `partition` | ✅ | `persist:<name>` for persistent profile, `temp:` for ephemeral (deleted on window close) |
+| `webSecurity` | ✅ | `false` passes `--disable-web-security` to WebView2 |
 | `sandbox` | ⚠️ | Accepted, no effect |
-| `webSecurity` | ✅ | `false` passes `--disable-web-security` to WebView2 (disables CORS/same-origin) |
 
 ### Static Methods
 
 | API | Status | Notes |
 |---|---|---|
-| `new BrowserWindow(options)` | ✅ | Electron-compatible synchronous constructor |
 | `BrowserWindow.getAllWindows()` | ✅ | |
-| `BrowserWindow.getFocusedWindow()` | ✅ | Returns first open window |
-| `BrowserWindow.fromId(id)` | ✅ | Looks up by internal window ID |
-| `BrowserWindow.fromWebContents(wc)` | ✅ | Finds the owning BrowserWindow |
+| `BrowserWindow.getFocusedWindow()` | ⚠️ | Returns the window that last received focus via the `focus()` API call. Does **not** track focus gained through user mouse clicks. Falls back to the first open window. |
+| `BrowserWindow.fromId(id)` | ✅ | |
+| `BrowserWindow.fromWebContents(wc)` | ✅ | |
 
 ### Instance Methods
 
 | API | Status | Notes |
 |---|---|---|
 | `win.loadURL(url)` | ✅ | Queued until WebView2 is ready |
-| `win.loadFile(path)` | ✅ | Navigates to `file:///` URI; bridge script injected via `AddScriptToExecuteOnDocumentCreatedAsync`; importmap injected by MutationObserver in bridge script |
-| `win.show()` | ✅ | Starts WPF `Application.Run()`; subsequent calls call `Window.Show()` |
-| `win.close()` | ✅ | Calls `Window.Close()`, stops poll timer, cleans up user-data dir; process exit is managed by the BrowserWindow close-event chain |
+| `win.loadFile(path)` | ✅ | Navigates to `file:///` URI; bridge script registered via `AddScriptToExecuteOnDocumentCreatedAsync` |
+| `win.show()` | ✅ | Starts WPF `Application.Run()` (first window); subsequent windows call `Window.Show()` |
+| `win.hide()` | ❌ | Not implemented |
+| `win.close()` | ✅ | Calls `Window.Close()`; temp user-data is cleaned up; process exit managed by close-event chain |
 | `win.destroy()` | ✅ | Alias for `close()` |
 | `win.focus()` | ✅ | `Window.Activate()` |
-| `win.blur()` | ✅ | No-op — WPF has no programmatic blur API |
+| `win.blur()` | ⚠️ | No-op — WPF has no programmatic blur API |
+| `win.isFocused()` | ❌ | Not implemented |
+| `win.isVisible()` | ❌ | Not implemented |
+| `win.isDestroyed()` | ❌ | Not implemented |
 | `win.minimize()` | ✅ | `WindowState.Minimized` |
 | `win.maximize()` | ✅ | `WindowState.Maximized` |
 | `win.unmaximize()` / `win.restore()` | ✅ | `WindowState.Normal` |
-| `win.setFullScreen(flag)` | ✅ | `WindowStyle.None` + `Maximized` + `Topmost` |
+| `win.isMinimized()` | ❌ | Not implemented |
+| `win.isMaximized()` | ❌ | Not implemented |
+| `win.isNormal()` | ❌ | Not implemented |
+| `win.setFullScreen(flag)` | ✅ | `WindowStyle.None` + `Maximized` + `Topmost`; not exclusive fullscreen |
 | `win.isFullScreen()` | ✅ | Tracked in JS (`_isFullScreen` flag) |
+| `win.setKiosk(flag)` | ✅ | `setFullScreen` + `setSkipTaskbar` |
+| `win.isKiosk()` | ✅ | Tracked in JS |
 | `win.setTitle(title)` | ✅ | `Window.Title` |
 | `win.getTitle()` | ✅ | Reads `Window.Title` |
-| `win.setSize(w, h)` | ✅ | `Window.Width` / `Window.Height` |
-| `win.getSize()` | ✅ | Reads `Window.ActualWidth` / `ActualHeight`, rounded |
-| `win.setPosition(x, y)` | ✅ | `Window.Left` / `Window.Top` |
-| `win.getPosition()` | ✅ | Reads `Window.Left` / `Window.Top`, rounded |
+| `win.setSize(w, h)` | ✅ | `Window.Width`/`Height` |
+| `win.getSize()` | ✅ | Reads `Window.ActualWidth`/`ActualHeight`, rounded |
+| `win.setPosition(x, y)` | ✅ | `Window.Left`/`Top` |
+| `win.getPosition()` | ✅ | Reads `Window.Left`/`Top`, rounded |
+| `win.setMinimumSize(w, h)` | ✅ | `Window.MinWidth`/`MinHeight`; queued if called before window creation |
+| `win.setMaximumSize(w, h)` | ✅ | `Window.MaxWidth`/`MaxHeight`; queued if called before window creation |
+| `win.getMinimumSize()` | ❌ | Not implemented |
+| `win.getMaximumSize()` | ❌ | Not implemented |
+| `win.setResizable(flag)` | ✅ | `ResizeMode.CanResize`/`NoResize` |
+| `win.isResizable()` | ✅ | Tracked in JS |
+| `win.setMovable(flag)` | ✅ | `WM_SYSCOMMAND SC_MOVE` intercept |
+| `win.isMovable()` | ✅ | Tracked in JS |
+| `win.setMinimizable(flag)` | ✅ | `SetWindowLong WS_MINIMIZEBOX` |
+| `win.isMinimizable()` | ✅ | Tracked in JS |
+| `win.setMaximizable(flag)` | ✅ | `SetWindowLong WS_MAXIMIZEBOX` |
+| `win.isMaximizable()` | ✅ | Tracked in JS |
+| `win.setClosable(flag)` | ✅ | `EnableMenuItem SC_CLOSE` |
+| `win.isClosable()` | ✅ | Tracked in JS |
+| `win.setAlwaysOnTop(flag)` | ✅ | `Window.Topmost` |
 | `win.setOpacity(opacity)` | ✅ | `Window.Opacity` (0.0–1.0) |
 | `win.getOpacity()` | ✅ | Reads `Window.Opacity` |
-| `win.setResizable(flag)` | ✅ | `ResizeMode.CanResize` / `NoResize` |
-| `win.isResizable()` | ✅ | Tracked in JS (`_isResizable` flag) |
-| `win.setMinimizable(flag)` | ✅ | `SetWindowLong` WS_MINIMIZEBOX |
-| `win.isMinimizable()` | ✅ | Tracked in JS |
-| `win.setMaximizable(flag)` | ✅ | `SetWindowLong` WS_MAXIMIZEBOX |
-| `win.isMaximizable()` | ✅ | Tracked in JS |
-| `win.setClosable(flag)` | ✅ | `EnableMenuItem` SC_CLOSE on system menu |
-| `win.isClosable()` | ✅ | Tracked in JS |
-| `win.setMovable(flag)` | ✅ | `HwndSource` hook intercepts `WM_SYSCOMMAND SC_MOVE` |
-| `win.isMovable()` | ✅ | Tracked in JS |
-| `win.setSkipTaskbar(flag)` | ✅ | `SetWindowLong` WS_EX_TOOLWINDOW / WS_EX_APPWINDOW |
-| `win.setAlwaysOnTop(flag)` | ✅ | `Window.Topmost` |
-| `win.center()` | ✅ | Computes from `SystemParameters.PrimaryScreenWidth/Height` |
+| `win.center()` | ✅ | Computed from `SystemParameters.PrimaryScreenWidth/Height` |
 | `win.flashFrame(flag)` | ✅ | `FlashWindowEx` (user32) — flashes taskbar button until window is focused |
-| `win.setBackgroundColor(color)` | ✅ | WebView2 `DefaultBackgroundColor`; same format as `backgroundColor` constructor option |
+| `win.setSkipTaskbar(flag)` | ✅ | `SetWindowLong WS_EX_TOOLWINDOW`/`WS_EX_APPWINDOW` |
+| `win.setBackgroundColor(color)` | ✅ | WebView2 `DefaultBackgroundColor`; same format as constructor option |
 | `win.setMenu(menu)` | ✅ | Accepts `Menu` instance or `MenuItemOptions[]` |
 | `win.removeMenu()` | ✅ | Clears the menu bar |
-| `win.popupMenu(items, x?, y?)` | ✅ | WPF `ContextMenu`; opened at cursor position or explicit screen coordinates |
-| `win.setMinimumSize(w, h)` | ✅ | `Window.MinWidth` / `MinHeight` |
-| `win.setMaximumSize(w, h)` | ✅ | `Window.MaxWidth` / `MaxHeight` |
-| `win.showOpenDialog(options)` | ✅ | Synchronous; returns `string[] \| undefined` |
-| `win.showSaveDialog(options)` | ✅ | Synchronous; returns `string \| undefined` |
-| `win.showMessageBox(options)` | ✅ | Synchronous; returns button index |
-| `win.capturePage()` | ✅ | Returns `Promise<NativeImage>`; uses `CoreWebView2.CapturePreviewAsync(Png)` |
+| `win.popupMenu(items, x?, y?)` | ✅ | WPF `ContextMenu`; positioned at cursor or explicit screen coordinates |
+| `win.showOpenDialog(options)` | ✅ | Synchronous native dialog; returns `string[] \| undefined` |
+| `win.showSaveDialog(options)` | ✅ | Synchronous native dialog; returns `string \| undefined` |
+| `win.showMessageBox(options)` | ✅ | Synchronous native dialog; returns button index |
+| `win.capturePage()` | ✅ | `CoreWebView2.CapturePreviewAsync(Png)`; returns `Promise<NativeImage>` |
+
+### Window Events
+
+| Event | Status | Notes |
+|---|---|---|
+| `'closed'` | ✅ | Emitted after the window has been destroyed |
+| `'close'` | ❌ | Pre-close cancelable event not implemented; there is no way to call `event.preventDefault()` to cancel a close |
+| `'focus'` | ❌ | Not emitted |
+| `'blur'` | ❌ | Not emitted |
+| `'show'` | ❌ | Not emitted |
+| `'hide'` | ❌ | Not emitted |
+| `'resize'` | ❌ | Not emitted |
+| `'move'` | ❌ | Not emitted |
+| `'maximize'` | ❌ | Not emitted |
+| `'unmaximize'` | ❌ | Not emitted |
+| `'minimize'` | ❌ | Not emitted |
+| `'restore'` | ❌ | Not emitted |
+| `'enter-full-screen'` | ❌ | Not emitted |
+| `'leave-full-screen'` | ❌ | Not emitted |
+| `'page-title-updated'` | ❌ | Not emitted (title bar is synced silently) |
+| `'ready-to-show'` | ❌ | Not emitted |
 
 ### `win.webContents`
 
 | API | Status | Notes |
 |---|---|---|
-| `win.webContents.send(channel, ...args)` | ✅ | `CoreWebView2.PostWebMessageAsString` |
-| `win.webContents.openDevTools()` | ✅ | `CoreWebView2.OpenDevToolsWindow()` |
-| `win.webContents.reload()` | ✅ | `CoreWebView2.Reload()` |
-| `win.webContents.loadURL(url)` | ✅ | |
-| `win.webContents.loadFile(path)` | ✅ | |
-| `win.webContents.executeJavaScript(code)` | ✅ | Evaluates in renderer; returns `Promise`; supports async expressions |
-| `win.webContents.session` | ✅ | `clearCache()` clears Cache API entries; `clearStorageData()` clears localStorage/sessionStorage/indexedDB |
-| `win.webContents.on('did-finish-load')` | ✅ | Emitted on `CoreWebView2.NavigationCompleted` |
+| `webContents.send(channel, ...args)` | ✅ | `CoreWebView2.PostWebMessageAsString` |
+| `webContents.openDevTools()` | ✅ | `CoreWebView2.OpenDevToolsWindow()` |
+| `webContents.reload()` | ✅ | `CoreWebView2.Reload()` |
+| `webContents.loadURL(url)` | ✅ | |
+| `webContents.loadFile(path)` | ✅ | |
+| `webContents.executeJavaScript(code)` | ✅ | Returns `Promise`; supports async expressions; 10 s timeout |
+| `webContents.session.clearCache()` | ✅ | Clears Cache API entries via `caches.keys()` |
+| `webContents.session.clearStorageData()` | ✅ | Clears `localStorage`, `sessionStorage`, `indexedDB`; cookies not supported |
+| Event: `'did-finish-load'` | ✅ | Emitted on `CoreWebView2.NavigationCompleted` |
+| Event: `'did-navigate'` | ❌ | Not emitted |
+| Event: `'dom-ready'` | ❌ | Not emitted |
+| Event: `'did-fail-load'` | ❌ | Not emitted |
+| Event: `'will-navigate'` | ❌ | Not emitted |
+| `webContents.getURL()` | ❌ | Not implemented |
+| `webContents.getTitle()` | ❌ | Not implemented |
+| `webContents.isLoading()` | ❌ | Not implemented |
+| `webContents.goBack/goForward()` | ❌ | Not implemented |
+| `webContents.print()` / `printToPDF()` | ❌ | Not implemented |
 
 ---
 
@@ -158,8 +210,11 @@
 | `ipcMain.removeHandler(channel)` | ✅ | |
 | `ipcMain.on(channel, listener)` | ✅ | |
 | `ipcMain.once(channel, listener)` | ✅ | |
-| `event.returnValue` (sync IPC) | ✅ | Set in `ipcMain.on()` handler; returned to `sendSync()` caller |
+| `ipcMain.off(channel, listener)` | ✅ | |
+| `ipcMain.removeAllListeners()` | ✅ | Clears both `handle` handlers and `on` listeners |
+| `event.returnValue` (sendSync) | ✅ | Set in `ipcMain.on()` handler; returned to `sendSync()` caller |
 | `event.reply(channel, ...args)` | ✅ | |
+| `event.frameId` | ⚠️ | Always `0`; multi-frame detection not supported |
 
 ---
 
@@ -169,22 +224,37 @@
 |---|---|---|
 | `ipcRenderer.send(channel, ...args)` | ✅ | `chrome.webview.postMessage` |
 | `ipcRenderer.invoke(channel, ...args)` | ✅ | Returns `Promise` |
+| `ipcRenderer.sendSync(channel, ...args)` | ✅ | Sync XHR to loopback server |
 | `ipcRenderer.on(channel, listener)` | ✅ | |
 | `ipcRenderer.once(channel, listener)` | ✅ | |
 | `ipcRenderer.off(channel, listener)` | ✅ | |
 | `ipcRenderer.removeListener(channel, listener)` | ✅ | Alias for `off()` |
-| `ipcRenderer.sendSync()` | ✅ | Sync XHR to loopback; handler must be synchronous |
+| `ipcRenderer.removeAllListeners(channel?)` | ❌ | Not implemented |
+| `ipcRenderer.postMessage()` | ❌ | Not implemented |
+| `ipcRenderer.sendToHost()` | ❌ | Not implemented |
+
+---
+
+## `contextBridge`
+
+| API | Status | Notes |
+|---|---|---|
+| `contextBridge.exposeInMainWorld(key, api)` | ⚠️ | Implemented as `window[key] = api`. When `contextIsolation: true`, the globals `ipcRenderer` and `contextBridge` are deleted from `window` after the preload runs — there is no actual V8 context separation. The exposed API remains accessible via any references captured in preload closures. |
 
 ---
 
 ## `dialog`
 
+All methods are exposed as Promises but execute synchronously underneath (blocking the Node.js event loop until the dialog is dismissed). This matches Electron's `show*Sync` variants in behaviour, unlike Electron's default async dialogs.
+
 | API | Status | Notes |
 |---|---|---|
-| `dialog.showOpenDialog([win,] options)` | ✅ | Returns `{ canceled, filePaths }` |
-| `dialog.showSaveDialog([win,] options)` | ✅ | Returns `{ canceled, filePath }` |
-| `dialog.showMessageBox([win,] options)` | ✅ | Returns `{ response }` |
+| `dialog.showOpenDialog([win,] options)` | ✅ | Returns `Promise<{ canceled, filePaths }>` |
+| `dialog.showSaveDialog([win,] options)` | ✅ | Returns `Promise<{ canceled, filePath }>` |
+| `dialog.showMessageBox([win,] options)` | ✅ | Returns `Promise<{ response }>`; `buttons` array supported |
 | `dialog.showErrorBox(title, content)` | ✅ | |
+| `dialog.showOpenDialogSync()` | ❌ | Not implemented (use `dialog.showOpenDialog` — behaviour is already synchronous) |
+| `dialog.showCertificateTrustDialog()` | ❌ | Not implemented |
 
 ---
 
@@ -192,11 +262,13 @@
 
 | API | Status | Notes |
 |---|---|---|
-| `shell.openExternal(url)` | ✅ | |
-| `shell.openPath(filePath)` | ✅ | |
-| `shell.showItemInFolder(filePath)` | ✅ | |
+| `shell.openExternal(url)` | ✅ | `cmd /c start` |
+| `shell.openPath(filePath)` | ✅ | `explorer` |
+| `shell.showItemInFolder(filePath)` | ✅ | `explorer /select,` |
 | `shell.beep()` | ✅ | Writes `\x07` to stdout |
 | `shell.trashItem(path)` | ✅ | `SHFileOperation` (shell32) with `FOF_ALLOWUNDO` — sends to Recycle Bin |
+| `shell.readShortcutLink()` | ❌ | Not implemented |
+| `shell.writeShortcutLink()` | ❌ | Not implemented |
 
 ---
 
@@ -206,8 +278,9 @@
 |---|---|---|
 | `Menu.buildFromTemplate(template)` | ✅ | |
 | `new Menu()` / `menu.append()` / `menu.insert()` | ✅ | |
-| `Menu.setApplicationMenu(menu)` | ✅ | Sets the default menu for all windows; `null` removes the menu bar |
-| `menu.popup()` | ✅ | WPF `ContextMenu`; call as `menu.popup({ window, x?, y? })` |
+| `Menu.setApplicationMenu(menu \| null)` | ✅ | `null` removes the menu bar from all windows |
+| `Menu.getApplicationMenu()` | ✅ | |
+| `menu.popup({ window, x?, y? })` | ✅ | WPF `ContextMenu` |
 | `label`, `type`, `click`, `submenu`, `enabled`, `visible`, `checked`, `role` | ✅ | |
 | `accelerator` | ✅ | Displayed as `InputGestureText`; keyboard shortcuts enforced via C# `PreviewKeyDown` hook |
 | `toolTip` | ✅ | WPF `MenuItem.ToolTip` |
@@ -216,79 +289,86 @@
 
 ---
 
+## `nativeImage`
+
+| API | Status | Notes |
+|---|---|---|
+| `nativeImage.createEmpty()` | ✅ | |
+| `nativeImage.createFromBuffer(buffer)` | ✅ | Expects PNG bytes |
+| `nativeImage.createFromPath(path)` | ❌ | Not implemented |
+| `nativeImage.createFromDataURL(url)` | ❌ | Not implemented |
+| `image.toPNG()` | ✅ | Returns `Buffer` |
+| `image.toDataURL()` | ✅ | Returns `data:image/png;base64,...` |
+| `image.toJPEG(quality)` | ❌ | Not implemented (no native JPEG encoder) |
+| `image.isEmpty()` | ✅ | |
+| `image.getSize()` | ✅ | Reads PNG IHDR chunk |
+| `image.resize()` / `image.crop()` | ❌ | Not implemented |
+
+---
+
 ## Node.js Integration in Renderer (`nodeIntegration: true`)
 
-`window.require` is fully synchronous, matching Electron's `nodeIntegration: true` behaviour.
+`window.require` is synchronous, matching Electron's `nodeIntegration: true` behaviour.
 
 | Feature | Status | Notes |
 |---|---|---|
-| `window.require('fs')` | ✅ | Sync XHR to local HTTP server (`127.0.0.1:<port>`) |
-| `window.require('path')` | ✅ | Same |
-| `window.require('os')` | ✅ | Same |
-| `window.require('child_process')` | ✅ | Same |
-| Any built-in or `npm` module | ✅ | `createRequire(import.meta.url)` on the Node.js side |
+| `window.require('fs')` and all Node.js built-ins | ✅ | Sync XHR to local HTTP server (`127.0.0.1:<port>`) |
+| npm packages declared in user's `package.json` | ✅ | Resolved via `createRequire(process.cwd())` |
 | Callback arguments (e.g. `fs.readFile(path, cb)`) | ✅ | Serialized as `{__nww_cb: id}`; fired via SSE |
 | Multi-fire callbacks (e.g. `fs.watch`, `EventEmitter.on`) | ✅ | Same SSE mechanism |
-| Non-serializable return values (Buffer, FSWatcher, Stream, …) | ✅ | Stored in ref registry; renderer gets a Proxy |
+| Non-serializable values (Buffer, FSWatcher, Stream, …) | ✅ | Stored in ref registry; renderer gets a Proxy |
 | `window.process.platform` | ✅ | `'win32'` |
-| `window.process.arch` | ✅ | Reflects actual `process.arch` from the main process |
+| `window.process.arch` | ✅ | Reflects actual `process.arch` |
 | `window.process.version` | ✅ | Injected from main process |
-| `window.process.env` | ✅ | Snapshot of `process.env` from the main process at window creation time |
+| `window.process.env` | ✅ | Snapshot of `process.env` at window creation time |
 | `window.process.cwd()` | ✅ | Injected from main process |
 | `window.process.exit(code)` | ✅ | Sends IPC to main process |
-| `import { x } from 'fs'` | ✅ | Standard static ESM import; works with both `loadFile()` and `loadURL()` |
+| `import { x } from 'fs'` (static ESM) | ✅ | importmap injected; works with both `loadFile()` and `loadURL()` |
 
-### How `window.require` works
+---
 
-```js
-// Identical to Electron nodeIntegration: true
-const fs = window.require('fs');
-const data = fs.readFileSync('/path/to/file', 'utf-8');   // synchronous
-fs.readFile('/path/to/file', 'utf-8', (err, data) => {}); // callbacks via SSE
-const buf = fs.readFileSync('/path/to/file');               // Buffer → Proxy via ref registry
-```
+## Not Implemented
 
-`window.require(module).method(...args)` issues a synchronous `XMLHttpRequest` to a loopback HTTP server started in the main process. Chromium's network stack runs on a background thread, so the renderer JS thread can block without deadlocking Node.js. Callbacks are delivered via a persistent `EventSource` (`/__nww_events__`); Chromium queues SSE events while XHR is in flight and dispatches them once the JS thread unblocks.
+The following Electron modules have no equivalent in this library:
 
-### Static `import` support (ESM)
-
-With `nodeIntegration: true`, standard static ES module import syntax works for all Node.js built-in modules:
-
-```js
-// <script type="module"> — no special API, fully standard syntax
-import { readFileSync, existsSync } from 'fs';
-import path from 'path';
-import { platform } from 'node:os';     // node: prefix also works
-import { readFile } from 'fs/promises'; // sub-path variants too
-
-const data = readFileSync('/path/to/file', 'utf-8');
-```
-
-**How it works:**
-
-The bridge registers two complementary mechanisms so imports work regardless of how the page is loaded:
-
-| Loaded via | Mechanism |
+| Module | Notes |
 |---|---|
-| `loadFile()` | `<script type="importmap">` injected into the HTML source before WebView2 receives it |
-| `loadURL()` | `MutationObserver` in the bridge script detects when `<head>` is created and injects the importmap before any module script is parsed |
-
-Both mechanisms map every Node.js built-in name (and its `node:` alias) to `http://127.0.0.1:<port>/__nww_esm__/<module>`. That endpoint returns an ES module whose named exports delegate to `window.require()`. The underlying sync-XHR mechanism is unchanged — `import` is purely a syntax layer on top.
+| `Tray` | System tray icon |
+| `Notification` | Desktop notifications |
+| `clipboard` | Clipboard read/write |
+| `screen` | Display geometry, cursor position |
+| `globalShortcut` | Global keyboard shortcuts (unrelated to menu `accelerator`) |
+| `nativeTheme` | Dark/light mode detection and `prefers-color-scheme` |
+| `powerMonitor` | Sleep/wake/lock/unlock events, battery status |
+| `powerSaveBlocker` | Prevent display sleep |
+| `protocol` | Custom URL scheme registration |
+| `net` | Chromium-routed HTTP requests |
+| `autoUpdater` | App auto-update |
+| `desktopCapturer` | Screen/window recording |
+| `BrowserView` | Embedded webview inside a window |
+| `safeStorage` | OS-level encrypted storage |
+| `session.fromPartition()` | Static session factory |
+| `webContents.setWindowOpenHandler()` | Intercept `window.open()` |
+| `webContents.findInPage()` | In-page text search |
 
 ---
 
 ## Key Differences from Electron
 
-1. **Preload scripts** are supported. Set `webPreferences.preload` to an absolute or relative path. The script is appended to the bridge code registered with `CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync`, so it runs on every navigation before the page's own scripts.
+1. **Single-process model.** There is no separate renderer process. Node.js and the WebView run in the same OS process. `nodeIntegration` works via a local HTTP server and sync XHR — not by directly running Node in the renderer.
 
-2. **`ipcMain.on()`** registers fire-and-forget listeners for `ipcRenderer.send()` and `ipcRenderer.sendSync()` calls.
+2. **`contextIsolation` is simulated, not enforced.** When `contextIsolation: true` and a preload is present, `ipcRenderer` and `contextBridge` are deleted from `window` after the preload executes. This is not V8 context isolation — malicious page scripts can still access any closures created by the preload.
 
-3. **`win.blur()` is a no-op.** WPF has no direct API to remove focus from a window programmatically.
+3. **No cancelable `'close'` event.** Electron fires `'close'` before destroying the window, allowing `event.preventDefault()` to cancel it. Only `'closed'` (post-destruction) is emitted here.
 
-4. **`win.flashFrame()` flashes the taskbar button** using `FlashWindowEx` (user32). Calling with `true` flashes until the window receives focus; `false` stops flashing immediately.
+4. **Window events are not emitted.** `'focus'`, `'blur'`, `'resize'`, `'move'`, `'maximize'`, etc. are not wired to WPF events. Code that depends on these events needs to poll state manually.
 
-5. **`setFullScreen()` does not use an exclusive fullscreen mode.** It sets `WindowStyle.None` + `WindowState.Maximized` + `Topmost = true`. The WPF window frame is hidden but the taskbar may remain visible depending on system settings.
+5. **`dialog` methods block the event loop.** All dialog methods execute synchronously on the Node.js thread. Unlike Electron's async native dialogs, they block until dismissed.
 
-6. **`webSecurity: false`** passes `--disable-web-security` to the WebView2 browser process via `CoreWebView2CreationProperties.AdditionalBrowserArguments`. Requires WebView2 SDK ≥ 1.0.1661.
+6. **`win.blur()` is a no-op.** WPF has no programmatic focus-removal API.
 
-7. **`transparent: true` requires no host-page CSS.** The WPF window uses `AllowsTransparency = false` (hardware DX renderer) combined with `WindowChrome(GlassFrameThickness = -1)` to extend DWM glass over the entire client area, and WPF `Background` is set to `Transparent`. WebView2's background alpha is also set to 0. This approach avoids the WS_EX_LAYERED path so mouse clicks reach WebView2 on fully transparent pixels. `frame: false` is implied (`WindowStyle.None` is required for WindowChrome transparency).
+7. **`setFullScreen()` is not exclusive fullscreen.** It sets `WindowStyle.None` + `WindowState.Maximized` + `Topmost`. The taskbar may remain visible depending on system settings.
+
+8. **`transparent: true` requires no host-page CSS.** Uses `AllowsTransparency=false` (hardware DX renderer) + `WindowChrome(GlassFrameThickness=-1)` + WPF `Background=Transparent` + WebView2 alpha=0. Mouse clicks reach WebView2 on fully transparent pixels.
+
+9. **Preload scripts** run via `AddScriptToExecuteOnDocumentCreatedAsync` — they execute on every navigation before the page's own scripts, matching Electron's behaviour.
