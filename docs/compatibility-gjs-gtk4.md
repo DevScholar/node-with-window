@@ -2,7 +2,7 @@
 
 **Platform:** Linux
 **Stack:** GTK 4 + WebKitGTK 6.0 (falls back to WebKit2 4.1)
-**Bridge:** `@devscholar/node-with-gjs` — in-process GJS bindings; GTK event loop drained by Node.js at 16 ms intervals via `startEventDrain()`. No separate child process.
+**Bridge:** `@devscholar/node-with-gjs` — in-process GJS bindings; GTK event loop drained by Node.js at 16 ms intervals via `startEventDrain()`.
 
 ---
 
