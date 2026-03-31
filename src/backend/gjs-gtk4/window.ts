@@ -501,7 +501,7 @@ export class GjsGtk4Window implements IWindowProvider {
   }
 
   public popupMenu(_items: MenuItemOptions[], _x?: number, _y?: number): void {
-    // TODO: implement context menu via Gtk.PopoverMenu
+    console.warn('[gjs-gtk4] popupMenu: not yet implemented on GTK4');
   }
 
   private _roleAction(role: string): (() => void) | undefined {
@@ -753,8 +753,7 @@ export class GjsGtk4Window implements IWindowProvider {
     // GTK4 has no synchronous dialog API. Use JavaScript alert() in the WebView
     // as a simple fallback — it blocks the renderer until dismissed.
     if (this.webView) {
-      const msg = (options.message || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
-      this._evaluateJs(`alert('${msg}')`);
+      this._evaluateJs(`alert(${JSON.stringify(options.message || '')})`);
     }
     return 0;
   }

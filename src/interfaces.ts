@@ -12,7 +12,7 @@ export interface WebPreferences {
   defaultFontFamily?: string;
   defaultFontSize?: number;
   defaultMonospaceFontSize?: number;
-  mininumFontSize?: number;
+  minimumFontSize?: number;
   backgroundThrottling?: boolean;
   /**
    * Sets the session partition to use for the window.

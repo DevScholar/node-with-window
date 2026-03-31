@@ -110,12 +110,18 @@ export function generateNodeBridgeIife(opts: NodeBridgeOptions): string {
     window.__nodeBridge = true;
 
     window.__nwwCallbacks = {};
+    // WeakMap from function → id: prevents the same function object from being
+    // registered multiple times (e.g. a named handler passed on every call).
+    var __nwwFnToId = new WeakMap();
 
 ${evtSrcBlock}
 
     function __nwwSerializeArg(a) {
         if (typeof a === 'function') {
+            var existing = __nwwFnToId.get(a);
+            if (existing !== undefined) return { __nww_cb: existing };
             var id = Math.random().toString(36).substring(2, 11);
+            __nwwFnToId.set(a, id);
             window.__nwwCallbacks[id] = a;
             return { __nww_cb: id };
         }

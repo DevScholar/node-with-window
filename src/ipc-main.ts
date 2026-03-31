@@ -15,6 +15,7 @@ type IpcHandler = (event: IpcMainEvent, ...args: unknown[]) => unknown;
  *    ipcRenderer.sendSync). For sendSync, set event.returnValue.
  */
 class AsyncIpcMain extends EventEmitter {
+  /** @internal Accessed by window providers to dispatch invoke messages. */
   public handlers = new Map<string, IpcHandler>();
 
   public handle(channel: string, listener: IpcHandler): void {

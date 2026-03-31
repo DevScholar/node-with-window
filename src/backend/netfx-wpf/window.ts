@@ -203,6 +203,8 @@ export class NetFxWpfWindow implements IWindowProvider {
     string,
     { resolve: (v: unknown) => void; reject: (e: Error) => void }
   >();
+  private _pendingMinSize: [number, number] | null = null;
+  private _pendingMaxSize: [number, number] | null = null;
 
   constructor(options?: BrowserWindowOptions) {
     this.options = options || {};
@@ -583,7 +585,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   }
 
   public async loadURL(urlStr: string): Promise<void> {
-    if (!this.app) {
+    if (!this.webView) {
       this.navigationQueue.push(() => this.loadURL(urlStr));
       return;
     }
@@ -841,8 +843,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   /** Set the minimum window size (applied immediately if window exists). */
   public setMinimumSize(width: number, height: number): void {
     if (!this.browserWindow) {
-      // Store for later — window.ts constructor options are already read; we'll apply in show()
-      (this as any)._pendingMinSize = [width, height];
+      this._pendingMinSize = [width, height];
       return;
     }
     (this.browserWindow as any).MinWidth  = width;
@@ -852,7 +853,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   /** Set the maximum window size (applied immediately if window exists). */
   public setMaximumSize(width: number, height: number): void {
     if (!this.browserWindow) {
-      (this as any)._pendingMaxSize = [width, height];
+      this._pendingMaxSize = [width, height];
       return;
     }
     (this.browserWindow as any).MaxWidth  = width > 0 ? width  : Infinity;
@@ -1103,6 +1104,16 @@ export class NetFxWpfWindow implements IWindowProvider {
     if (!this._isClosable)   (dotnet as any).winHelper(this.browserWindow, 'SetClosable',    false);
     if (!this._isMovable)    (dotnet as any).winHelper(this.browserWindow, 'SetMovable',     false);
     if (this._skipTaskbar)   (dotnet as any).winHelper(this.browserWindow, 'SetSkipTaskbar', true);
+    if (this._pendingMinSize) {
+      (this.browserWindow as any).MinWidth  = this._pendingMinSize[0];
+      (this.browserWindow as any).MinHeight = this._pendingMinSize[1];
+      this._pendingMinSize = null;
+    }
+    if (this._pendingMaxSize) {
+      (this.browserWindow as any).MaxWidth  = this._pendingMaxSize[0] > 0 ? this._pendingMaxSize[0] : Infinity;
+      (this.browserWindow as any).MaxHeight = this._pendingMaxSize[1] > 0 ? this._pendingMaxSize[1] : Infinity;
+      this._pendingMaxSize = null;
+    }
   }
 
   public showOpenDialog(options: OpenDialogOptions): string[] | undefined {

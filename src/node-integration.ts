@@ -53,6 +53,9 @@ const sseClients = new Set<http.ServerResponse>();
  */
 const refRegistry = new Map<string, unknown>();
 
+/** Maximum POST body size accepted (10 MB). */
+const MAX_BODY_BYTES = 10 * 1024 * 1024;
+
 /** Returns the port once startSyncServer() has resolved, 0 otherwise. */
 export function getSyncServerPort(): number {
   return _port;
@@ -159,8 +162,15 @@ export function startSyncServer(): Promise<number> {
     preferredPort =>
       new Promise<number>((resolve, reject) => {
         const server = http.createServer((req, res) => {
-          // Add CORS headers so file:// pages in WebView2 can reach us.
-          res.setHeader('Access-Control-Allow-Origin', '*');
+          // Restrict CORS to file:// pages (whose Origin header is 'null') and
+          // same-origin requests (no Origin header). Reject any other origin.
+          const origin = req.headers['origin'];
+          if (origin !== undefined && origin !== 'null') {
+            res.writeHead(403);
+            res.end();
+            return;
+          }
+          res.setHeader('Access-Control-Allow-Origin', 'null');
           res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
           res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -275,8 +285,13 @@ export function startSyncServer(): Promise<number> {
       // Proxy wrappers are GC'd (FinalizationRegistry) or on page unload.
       if (req.method === 'POST' && req.url === '/__nww_release__') {
         let body = '';
-        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        let bodyBytes = 0;
+        req.on('data', (chunk: Buffer) => {
+          bodyBytes += chunk.length;
+          if (bodyBytes <= MAX_BODY_BYTES) body += chunk.toString();
+        });
         req.on('end', () => {
+          if (bodyBytes > MAX_BODY_BYTES) { res.writeHead(413); res.end(); return; }
           try {
             const { refs } = JSON.parse(body) as { refs: string[] };
             if (Array.isArray(refs)) {
@@ -298,8 +313,13 @@ export function startSyncServer(): Promise<number> {
       // ── Sync IPC endpoint (ipcRenderer.sendSync) ─────────────────────
       if (req.url === '/__nww_ipc_sync__') {
         let body = '';
-        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        let bodyBytes = 0;
+        req.on('data', (chunk: Buffer) => {
+          bodyBytes += chunk.length;
+          if (bodyBytes <= MAX_BODY_BYTES) body += chunk.toString();
+        });
         req.on('end', () => {
+          if (bodyBytes > MAX_BODY_BYTES) { res.writeHead(413); res.end(); return; }
           try {
             const { channel, args = [] } = JSON.parse(body) as { channel: string; args: unknown[] };
             const event = {
@@ -324,8 +344,13 @@ export function startSyncServer(): Promise<number> {
       }
 
       let body = '';
-      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      let bodyBytes = 0;
+      req.on('data', (chunk: Buffer) => {
+        bodyBytes += chunk.length;
+        if (bodyBytes <= MAX_BODY_BYTES) body += chunk.toString();
+      });
       req.on('end', () => {
+        if (bodyBytes > MAX_BODY_BYTES) { res.writeHead(413); res.end(); return; }
         const respond = (result: unknown) => {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ result: serializeValue(result) }));

@@ -25,6 +25,7 @@ class App extends EventEmitter {
   private _shouldRelaunch = false;
   private _relaunchOptions: { execPath?: string; args?: string[] } | null = null;
   private _lockFile: string | null = null;
+  private _exitHandlerRegistered = false;
 
   constructor() {
     super();
@@ -39,16 +40,26 @@ class App extends EventEmitter {
   // where app.on('ready', cb) fires without an explicit whenReady() call.
   public on(event: string | symbol, listener: (...args: unknown[]) => void): this {
     super.on(event, listener);
-    if (event === 'ready' && !this._isReady && !this.initializationStarted) {
-      this.whenReady().catch(e => this.emit('error', e));
+    if (event === 'ready') {
+      if (this._isReady) {
+        // App already ready — fire the callback on the next tick to keep behaviour
+        // consistent with the not-yet-ready case (always async).
+        setImmediate(() => listener());
+      } else if (!this.initializationStarted) {
+        this.whenReady().catch(e => this.emit('error', e));
+      }
     }
     return this;
   }
 
   public once(event: string | symbol, listener: (...args: unknown[]) => void): this {
     super.once(event, listener);
-    if (event === 'ready' && !this._isReady && !this.initializationStarted) {
-      this.whenReady().catch(e => this.emit('error', e));
+    if (event === 'ready') {
+      if (this._isReady) {
+        setImmediate(() => listener());
+      } else if (!this.initializationStarted) {
+        this.whenReady().catch(e => this.emit('error', e));
+      }
     }
     return this;
   }
@@ -222,11 +233,14 @@ class App extends EventEmitter {
 
     fs.writeFileSync(lockPath, String(process.pid));
     this._lockFile = lockPath;
-    process.on('exit', () => {
-      try {
-        if (this._lockFile) fs.unlinkSync(this._lockFile);
-      } catch {}
-    });
+    if (!this._exitHandlerRegistered) {
+      this._exitHandlerRegistered = true;
+      process.on('exit', () => {
+        try {
+          if (this._lockFile) fs.unlinkSync(this._lockFile);
+        } catch {}
+      });
+    }
     return true;
   }
 
