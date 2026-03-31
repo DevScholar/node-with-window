@@ -21,7 +21,7 @@ const pkgPath = join(__dirname, '..', 'package.json');
 const versionsPath = join(__dirname, '..', 'last-known-good-versions.json');
 
 const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-const { versions } = JSON.parse(readFileSync(versionsPath, 'utf-8'));
+const { packages } = JSON.parse(readFileSync(versionsPath, 'utf-8'));
 
 const LOCAL_DEPS = {
     '@devscholar/node-ps1-dotnet': 'file:../node-ps1-dotnet',
@@ -31,7 +31,7 @@ const LOCAL_DEPS = {
 let changed = false;
 for (const [name, localRef] of Object.entries(LOCAL_DEPS)) {
     if (pkg.dependencies?.[name] === localRef) {
-        const pinned = versions[name];
+        const pinned = packages[name];
         if (!pinned) {
             console.error(`[pre-publish] ERROR: no version found for "${name}" in last-known-good-versions.json`);
             process.exit(1);
