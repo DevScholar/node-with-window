@@ -21,6 +21,7 @@ import { buildGioMenu } from './menu.js';
 
 let _gi: any = null;
 let _Gtk: any = null;
+let _Gdk: any = null;
 let _WebKit: any = null;  // either WebKit 6.0 or WebKit2 4.1
 let _Gio: any = null;
 let _gtkApp: any = null;
@@ -32,7 +33,9 @@ function ensureGiLoaded(): void {
   if (_gi) return;
   _gi = gjsImports.gi;
   _gi.versions.Gtk = '4.0';
+  _gi.versions.Gdk = '4.0';
   _Gtk = _gi.Gtk;
+  _Gdk = _gi.Gdk;
   _Gio = _gi.Gio;
 
   // Prefer WebKit 6.0 (newer), fall back to WebKit2 4.1 (GTK4 API)
@@ -205,6 +208,43 @@ export class GjsGtk4Window implements IWindowProvider {
     if (!this._isResizable) this.win.set_resizable(false);
     if (this.options.minWidth || this.options.minHeight) {
       this.win.set_size_request(this.options.minWidth || -1, this.options.minHeight || -1);
+    }
+
+    // ── Frame / decorations ────────────────────────────────────────────────
+    const needFrameless = this.options.frame === false
+      || this.options.transparent
+      || this.options.titleBarStyle === 'hidden'
+      || this.options.titleBarStyle === 'hiddenInset';
+    if (needFrameless) {
+      this.win.set_decorated(false);
+    }
+
+    // ── Transparent window ─────────────────────────────────────────────────
+    if (this.options.transparent) {
+      // 1. Transparent WebKit background so compositor sees through the page
+      try {
+        const rgba = new _Gdk.RGBA();
+        rgba.red = 0; rgba.green = 0; rgba.blue = 0; rgba.alpha = 0;
+        this.webView.set_background_color(rgba);
+      } catch (e) { console.warn('[gjs-gtk4] set_background_color failed:', e); }
+
+      // 2. Transparent GTK window background via CSS (so the window chrome
+      //    itself doesn't paint an opaque rectangle behind the webview)
+      try {
+        const provider = new _Gtk.CssProvider();
+        const css = '.nww-transparent { background-color: transparent; background: transparent; }';
+        try { provider.load_from_string(css); }
+        catch { provider.load_from_data(css, -1); }
+        this.win.add_css_class('nww-transparent');
+        _Gtk.StyleContext.add_provider_for_display(
+          _Gdk.Display.get_default(), provider, 600);
+      } catch (e) { console.warn('[gjs-gtk4] Transparent CSS failed:', e); }
+    } else if (this.options.backgroundColor) {
+      try {
+        const rgba = new _Gdk.RGBA();
+        rgba.parse(this.options.backgroundColor);
+        this.webView.set_background_color(rgba);
+      } catch { /* best-effort */ }
     }
 
     // ── Layout: vertical box (menu bar on top, webview below) ──────────────
@@ -593,8 +633,13 @@ export class GjsGtk4Window implements IWindowProvider {
     // GTK4 removed maximum window size constraint
   }
 
-  public setBackgroundColor(_color: string): void {
-    // WebKitGTK: background colour control requires CSS on the page
+  public setBackgroundColor(color: string): void {
+    if (!this.webView) return;
+    try {
+      const rgba = new _Gdk.RGBA();
+      rgba.parse(color);
+      this.webView.set_background_color(rgba);
+    } catch { /* best-effort */ }
   }
 
   public flashFrame(_flag: boolean): void { /* no-op on GTK */ }
