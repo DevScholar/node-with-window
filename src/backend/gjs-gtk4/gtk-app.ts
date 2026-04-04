@@ -6,6 +6,7 @@ import { imports as gjsImports } from '@devscholar/node-with-gjs';
 export let _gi: any = null;
 export let _Gtk: any = null;
 export let _Gdk: any = null;
+export let _GLib: any = null;
 export let _WebKit: any = null;  // either WebKit 6.0 or WebKit2 4.1
 export let _Gio: any = null;
 export let _gtkApp: any = null;
@@ -21,6 +22,7 @@ export function ensureGiLoaded(): void {
   _Gtk = _gi.Gtk;
   _Gdk = _gi.Gdk;
   _Gio = _gi.Gio;
+  _GLib = _gi.GLib;
 
   // Prefer WebKit 6.0 (newer), fall back to WebKit2 4.1 (GTK4 API)
   try {

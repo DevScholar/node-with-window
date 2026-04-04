@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { startEventDrain } from '@devscholar/node-with-gjs';
 import {
-  _Gtk, _Gdk, _WebKit, _Gio, _gtkApp, _appRunning, _pendingWindowCreations, ensureGtkApp,
+  _Gtk, _Gdk, _WebKit, _Gio, _GLib, _gtkApp, _appRunning, _pendingWindowCreations, ensureGtkApp,
 } from './gtk-app.js';
 import {
   IWindowProvider,
@@ -18,6 +18,7 @@ import { generateBridgeScript } from './bridge.js';
 import { getSyncServerPort } from '../../node-integration.js';
 import { buildGioMenu } from './menu.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
+import { protocol } from '../../protocol.js';
 
 export class GjsGtk4Window implements IWindowProvider {
   public options: BrowserWindowOptions;
@@ -26,6 +27,7 @@ export class GjsGtk4Window implements IWindowProvider {
   private win: any = null;
   private webView: any = null;
   private ucm: any = null;
+  private _webContext: any = null;
   private _contentBox: any = null;
   private _menuBar: any = null;
   private _menuActionNames: string[] = [];
@@ -112,7 +114,26 @@ export class GjsGtk4Window implements IWindowProvider {
     });
 
     // ── WebView ────────────────────────────────────────────────────────────
-    this.webView = new _WebKit.WebView({ user_content_manager: this.ucm });
+    // If custom protocol schemes are registered, create a WebContext and
+    // register the schemes before creating the WebView.
+    const registeredSchemes = protocol.getRegisteredSchemes();
+    if (registeredSchemes.size > 0) {
+      try {
+        this._webContext = new _WebKit.WebContext();
+      } catch {
+        this._webContext = _WebKit.WebContext.get_default();
+      }
+      for (const [scheme] of registeredSchemes) {
+        this._webContext.register_uri_scheme(scheme, (req: any) => {
+          void this._handleUriSchemeRequest(scheme, req);
+        });
+      }
+    }
+
+    this.webView = new _WebKit.WebView({
+      user_content_manager: this.ucm,
+      ...(this._webContext ? { web_context: this._webContext } : {}),
+    });
 
     try {
       const settings = this.webView.get_settings();
@@ -301,6 +322,55 @@ export class GjsGtk4Window implements IWindowProvider {
     if (!this.webView) return;
     // 6 args: script, length, world_name, source_uri, cancellable, callback
     this.webView.evaluate_javascript(code, -1, null, null, null, null);
+  }
+
+  // ── Protocol scheme handler ────────────────────────────────────────────────
+
+  private async _handleUriSchemeRequest(scheme: string, request: any): Promise<void> {
+    const uri: string    = request.get_uri();
+    const method: string = request.get_http_method();
+    const handler = protocol.getHandler(scheme);
+
+    if (!handler) {
+      try { request.finish_error(new Error(`No handler for scheme: ${scheme}`)); } catch { /* ignore */ }
+      return;
+    }
+
+    let result;
+    try {
+      result = await handler({ url: uri, method });
+    } catch (e) {
+      console.error(`[gjs-gtk4] Protocol handler error for ${scheme}:`, e);
+      try { request.finish_error(e instanceof Error ? e : new Error(String(e))); } catch { /* ignore */ }
+      return;
+    }
+
+    try {
+      const body = result.data ?? '';
+      let bytes: Uint8Array;
+      if (typeof body === 'string') {
+        bytes = new TextEncoder().encode(body);
+      } else {
+        bytes = new Uint8Array((body as Buffer).buffer, (body as Buffer).byteOffset, (body as Buffer).byteLength);
+      }
+
+      const glibBytes = _GLib.Bytes.new(bytes);
+      const stream    = _Gio.MemoryInputStream.new_from_bytes(glibBytes);
+      const mimeType  = result.mimeType ?? 'text/html; charset=utf-8';
+      const status    = result.statusCode ?? 200;
+
+      if (status !== 200) {
+        const resp = new _WebKit.URISchemeResponse(stream, bytes.length);
+        resp.set_status(status, null);
+        resp.set_content_type(mimeType);
+        request.finish_with_response(resp);
+      } else {
+        request.finish(stream, bytes.length, mimeType);
+      }
+    } catch (e) {
+      console.error(`[gjs-gtk4] Protocol finish error for ${scheme}:`, e);
+      try { request.finish_error(e instanceof Error ? e : new Error(String(e))); } catch { /* ignore */ }
+    }
   }
 
   public sendToRenderer(channel: string, ...args: unknown[]): void {
