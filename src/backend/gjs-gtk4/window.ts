@@ -1,6 +1,9 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { imports as gjsImports, startEventDrain, drainCallbacks } from '@devscholar/node-with-gjs';
+import { startEventDrain } from '@devscholar/node-with-gjs';
+import {
+  _Gtk, _Gdk, _WebKit, _Gio, _gtkApp, _appRunning, _pendingWindowCreations, ensureGtkApp,
+} from './gtk-app.js';
 import {
   IWindowProvider,
   BrowserWindowOptions,
@@ -14,60 +17,7 @@ import { ipcMain } from '../../ipc-main.js';
 import { generateBridgeScript } from './bridge.js';
 import { getSyncServerPort } from '../../node-integration.js';
 import { buildGioMenu } from './menu.js';
-
-// ── Module-level shared state ────────────────────────────────────────────────
-// There can only be one Gtk.Application per process.  All BrowserWindows share
-// the same application instance and the same GJS IPC connection.
-
-let _gi: any = null;
-let _Gtk: any = null;
-let _Gdk: any = null;
-let _WebKit: any = null;  // either WebKit 6.0 or WebKit2 4.1
-let _Gio: any = null;
-let _gtkApp: any = null;
-let _appRunning = false;  // true once activate has fired
-/** Callbacks queued before activate fires; drained in the activate handler. */
-const _pendingWindowCreations: Array<() => void> = [];
-
-function ensureGiLoaded(): void {
-  if (_gi) return;
-  _gi = gjsImports.gi;
-  _gi.versions.Gtk = '4.0';
-  _gi.versions.Gdk = '4.0';
-  _Gtk = _gi.Gtk;
-  _Gdk = _gi.Gdk;
-  _Gio = _gi.Gio;
-
-  // Prefer WebKit 6.0 (newer), fall back to WebKit2 4.1 (GTK4 API)
-  try {
-    _gi.versions.WebKit = '6.0';
-    _WebKit = _gi.WebKit;
-  } catch {
-    try {
-      _gi.versions.WebKit2 = '4.1';
-      _WebKit = _gi.WebKit2;
-    } catch (e) {
-      console.error('[gjs-gtk4] Could not load WebKit namespace:', e);
-      _WebKit = null;
-    }
-  }
-}
-
-function ensureGtkApp(): void {
-  if (_gtkApp) return;
-  ensureGiLoaded();
-  _gtkApp = new _Gtk.Application({ application_id: 'org.nodejs.nww' });
-  // MUST be a sync (non-async) callback: GJS blocks in processNestedCommands()
-  // while Node.js creates windows inline.  If async, app.run() sees zero
-  // windows after activate returns and quits immediately, killing the host.
-  _gtkApp.connect('activate', () => {
-    _appRunning = true;
-    const callbacks = _pendingWindowCreations.splice(0);
-    for (const fn of callbacks) fn();
-  });
-}
-
-// ── GjsGtk4Window ────────────────────────────────────────────────────────────
+import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 
 export class GjsGtk4Window implements IWindowProvider {
   public options: BrowserWindowOptions;
@@ -659,89 +609,11 @@ export class GjsGtk4Window implements IWindowProvider {
   // ── Dialogs ────────────────────────────────────────────────────────────────
 
   public showOpenDialog(options: OpenDialogOptions): string[] | undefined {
-    if (!this.win) return undefined;
-
-    let result: string[] | undefined;
-    let done = false;
-
-    try {
-      const dialog = new _Gtk.FileDialog();
-      if (options.title) dialog.title = options.title;
-      if (options.defaultPath) {
-        try { dialog.initial_folder = _Gio.File.new_for_path(options.defaultPath); } catch { /* ignore */ }
-      }
-
-      const isMulti = options.properties?.includes('multiSelections');
-      const isDir   = options.properties?.includes('openDirectory');
-
-      const callback = (source: any, asyncResult: any) => {
-        try {
-          if (isDir) {
-            const folder = source.select_folder_finish(asyncResult);
-            result = folder ? [folder.get_path()] : undefined;
-          } else if (isMulti) {
-            const list = source.open_multiple_finish(asyncResult);
-            const count = list.get_n_items();
-            result = [];
-            for (let i = 0; i < count; i++) result.push(list.get_item(i).get_path());
-          } else {
-            const file = source.open_finish(asyncResult);
-            result = file ? [file.get_path()] : undefined;
-          }
-        } catch { /* user cancelled */ }
-        done = true;
-      };
-
-      if (isDir) dialog.select_folder(this.win, null, callback);
-      else if (isMulti) dialog.open_multiple(this.win, null, callback);
-      else dialog.open(this.win, null, callback);
-
-      while (!done) drainCallbacks();
-    } catch (e) {
-      console.warn('[gjs-gtk4] showOpenDialog failed:', e);
-    }
-
-    return result;
+    return showOpenDialog(this.win, options);
   }
 
   public showSaveDialog(options: SaveDialogOptions): string | undefined {
-    if (!this.win) return undefined;
-
-    let result: string | undefined;
-    let done = false;
-
-    try {
-      const dialog = new _Gtk.FileDialog();
-      if (options.title) dialog.title = options.title;
-      if (options.defaultPath) {
-        const dp = options.defaultPath;
-        try {
-          const stat = fs.statSync(dp);
-          if (stat.isDirectory()) {
-            dialog.initial_folder = _Gio.File.new_for_path(dp);
-          } else {
-            dialog.initial_folder = _Gio.File.new_for_path(path.dirname(dp));
-            dialog.initial_name = path.basename(dp);
-          }
-        } catch {
-          dialog.initial_name = path.basename(dp);
-        }
-      }
-
-      dialog.save(this.win, null, (source: any, asyncResult: any) => {
-        try {
-          const file = source.save_finish(asyncResult);
-          result = file ? file.get_path() : undefined;
-        } catch { /* user cancelled */ }
-        done = true;
-      });
-
-      while (!done) drainCallbacks();
-    } catch (e) {
-      console.warn('[gjs-gtk4] showSaveDialog failed:', e);
-    }
-
-    return result;
+    return showSaveDialog(this.win, options);
   }
 
   public showMessageBox(options: {
@@ -750,11 +622,7 @@ export class GjsGtk4Window implements IWindowProvider {
     message: string;
     buttons?: string[];
   }): number {
-    // GTK4 has no synchronous dialog API. Use JavaScript alert() in the WebView
-    // as a simple fallback — it blocks the renderer until dismissed.
-    if (this.webView) {
-      this._evaluateJs(`alert(${JSON.stringify(options.message || '')})`);
-    }
+    if (this.webView) return showMessageBox(code => this._evaluateJs(code), options);
     return 0;
   }
 }

@@ -1,7 +1,6 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
-import { fileURLToPath } from 'node:url';
 import {
   IWindowProvider,
   BrowserWindowOptions,
@@ -11,11 +10,12 @@ import {
   MenuItemOptions,
 } from '../../interfaces.js';
 import { NativeImage } from '../../native-image.js';
-import { ipcMain } from '../../ipc-main.js';
-import { generateBridgeScript } from './bridge.js';
+import { findWebView2Runtime } from './webview2-runtime.js';
+import { parseBackgroundColor } from './color.js';
+import { WpfIpcBridge } from './ipc-bridge.js';
+import { Win32Chrome } from './win32-chrome.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 import { buildWpfMenu } from './menu.js';
-import { getSyncServerPort } from '../../node-integration.js';
 import { app } from '../../app.js';
 
 /**
@@ -45,114 +45,10 @@ export function setDotNetInstance(instance: unknown): void {
 }
 
 /**
- * Searches common locations for the WebView2 runtime DLLs.
- *
- * Looks for:
- * - Microsoft.Web.WebView2.Core.dll
- * - Microsoft.Web.WebView2.Wpf.dll
- *
- * Supports both subdirectory layouts (versioned) and flat layouts.
- *
- * Primary search is relative to this file's location (import.meta.url),
- * which is reliable regardless of the working directory of the host app.
- * This is what allows the DLLs to be bundled inside the npm package and
- * discovered through node_modules automatically.
- */
-function findWebView2Runtime(): string {
-  // __dirname of this compiled file is dist/backend/netfx-wpf/
-  // Runtimes are at <package-root>/runtimes/webview2/
-  const thisDir = path.dirname(fileURLToPath(import.meta.url));
-  const packageRootRuntimes = path.resolve(thisDir, '..', '..', '..', 'runtimes', 'webview2');
-
-  const possibleBasePaths = [
-    packageRootRuntimes,
-    path.resolve(
-      process.cwd(),
-      'node_modules',
-      '@devscholar',
-      'node-with-window',
-      'runtimes',
-      'webview2'
-    ),
-    path.resolve(process.cwd(), 'runtimes', 'webview2'),
-    path.resolve(process.cwd(), '..', 'node-with-window', 'runtimes', 'webview2'),
-    path.resolve(
-      process.cwd(),
-      '..',
-      '..',
-      'node_modules',
-      '@devscholar',
-      'node-with-window',
-      'runtimes',
-      'webview2'
-    ),
-  ];
-
-  for (const basePath of possibleBasePaths) {
-    if (!fs.existsSync(basePath)) {
-      continue;
-    }
-
-    // Check for versioned subdirectory layout
-    const entries = fs.readdirSync(basePath, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        const runtimePath = path.join(basePath, entry.name);
-        const coreDllPath = path.join(runtimePath, 'Microsoft.Web.WebView2.Core.dll');
-        const wpfDllPath = path.join(runtimePath, 'Microsoft.Web.WebView2.Wpf.dll');
-        if (fs.existsSync(coreDllPath) && fs.existsSync(wpfDllPath)) {
-          return runtimePath;
-        }
-      }
-    }
-
-    // Check for flat layout (DLLs directly in basePath)
-    const coreDllPath = path.join(basePath, 'Microsoft.Web.WebView2.Core.dll');
-    const wpfDllPath = path.join(basePath, 'Microsoft.Web.WebView2.Wpf.dll');
-    if (fs.existsSync(coreDllPath) && fs.existsSync(wpfDllPath)) {
-      return basePath;
-    }
-  }
-
-  throw new Error(`WebView2 DLLs not found. Searched in: ${possibleBasePaths.join(', ')}`);
-}
-
-/**
  * True once the first window's Application.Run() has been called.
  * Subsequent windows skip Application creation and just call Show().
  */
 let _wpfStarted = false;
-
-/**
- * Parses a CSS hex color string into ARGB components (each 0–255).
- * Accepts: #RGB, #RRGGBB, #AARRGGBB (Electron uses AA-prefixed alpha).
- * Returns null if the string is not a recognised hex color.
- */
-function parseBackgroundColor(color: string): { a: number; r: number; g: number; b: number } | null {
-  const hex3 = color.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i);
-  if (hex3) return {
-    a: 255,
-    r: parseInt(hex3[1] + hex3[1], 16),
-    g: parseInt(hex3[2] + hex3[2], 16),
-    b: parseInt(hex3[3] + hex3[3], 16),
-  };
-  const hex6 = color.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
-  if (hex6) return {
-    a: 255,
-    r: parseInt(hex6[1], 16),
-    g: parseInt(hex6[2], 16),
-    b: parseInt(hex6[3], 16),
-  };
-  // #AARRGGBB — Electron convention for transparent background colors
-  const hex8 = color.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
-  if (hex8) return {
-    a: parseInt(hex8[1], 16),
-    r: parseInt(hex8[2], 16),
-    g: parseInt(hex8[3], 16),
-    b: parseInt(hex8[4], 16),
-  };
-  return null;
-}
 
 /**
  * NetFxWpfWindow implements the IWindowProvider interface for Windows using WPF + WebView2.
@@ -172,6 +68,10 @@ function parseBackgroundColor(color: string): { a: number; r: number; g: number;
  *    calls Application.Run() on the .NET side, keeping Node's event loop free.
  *    Node.js polls for queued events every POLL_INTERVAL_MS, exactly like the
  *    Linux backend. This means async ipcMain.handle() callbacks work on Windows.
+ *
+ * 4. DELEGATE CLASSES:
+ *    - WpfIpcBridge  — bridge script injection, WebMessageReceived, executeJavaScript
+ *    - Win32Chrome   — P/Invoke window chrome (buttons, size constraints, HWND helpers)
  */
 export class NetFxWpfWindow implements IWindowProvider {
   public options: BrowserWindowOptions;
@@ -193,29 +93,15 @@ export class NetFxWpfWindow implements IWindowProvider {
   private _isFullScreen = false;
   private _isKiosk = false;
   private _isResizable = true;
-  private _isMinimizable = true;
-  private _isMaximizable = true;
-  private _isClosable = true;
-  private _isMovable = true;
-  private _skipTaskbar = false;
-  private _navCompletedCallback: (() => void) | null = null;
-  private _pendingExecs = new Map<
-    string,
-    { resolve: (v: unknown) => void; reject: (e: Error) => void }
-  >();
-  private _pendingMinSize: [number, number] | null = null;
-  private _pendingMaxSize: [number, number] | null = null;
   private _webViewInitTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private readonly _ipcBridge: WpfIpcBridge;
+  private readonly _windowChrome: Win32Chrome;
 
   constructor(options?: BrowserWindowOptions) {
     this.options = options || {};
     this.webPreferences = this.options.webPreferences || {};
-    this._isResizable   = this.options.resizable    ?? true;
-    this._isMinimizable = this.options.minimizable  ?? true;
-    this._isMaximizable = this.options.maximizable  ?? true;
-    this._isClosable    = this.options.closable     ?? true;
-    this._isMovable     = this.options.movable      ?? true;
-    this._skipTaskbar   = this.options.skipTaskbar  ?? false;
+    this._isResizable = this.options.resizable ?? true;
 
     const partition = this.webPreferences.partition;
     const userDataBase = app.getPath('userData');
@@ -238,6 +124,19 @@ export class NetFxWpfWindow implements IWindowProvider {
     } else {
       this.userDataPath = userDataBase;
     }
+
+    this._ipcBridge = new WpfIpcBridge(
+      () => this.coreWebView2,
+      () => this.browserWindow,
+      () => dotnet,
+      this.webPreferences,
+      () => this,
+    );
+    this._windowChrome = new Win32Chrome(
+      () => this.browserWindow,
+      () => dotnet,
+      this.options,
+    );
   }
 
   public async createWindow(): Promise<void> {
@@ -284,7 +183,7 @@ export class NetFxWpfWindow implements IWindowProvider {
         ? this.options.icon
         : path.resolve(process.cwd(), this.options.icon);
       if (fs.existsSync(absIcon)) {
-        (dotnet as any).setWindowIcon(this.browserWindow, absIcon);
+        dotnetAny.setWindowIcon(this.browserWindow, absIcon);
       }
     }
 
@@ -331,32 +230,27 @@ export class NetFxWpfWindow implements IWindowProvider {
       //   - ResizeMode=NoResize       → required by WPF for correct glass-frame compositing
       //   - Background=Transparent    → WPF DX surface cleared to alpha=0 so DWM glass shows through
       //   - WindowChrome(-1,-1,-1,-1) → WPF manages DWM glass over entire client area
-      //
-      // WindowChrome is a WPF dependency property — no HWND needed, safe to call
-      // before show(). Applying it here (before Application.Run/Show) means the window
-      // is already transparent when it first becomes visible, eliminating the black flash.
       (this.browserWindow as unknown as { ResizeMode: unknown }).ResizeMode =
         Windows.ResizeMode.NoResize;
       (this.browserWindow as unknown as { Background: unknown }).Background =
         Windows.Media.Brushes.Transparent;
-      (dotnet as any).applyWindowChrome(this.browserWindow);
-      (dotnet as any).setWebViewBackground(this.webView, 0, 0, 0, 0);
+      dotnetAny.applyWindowChrome(this.browserWindow);
+      dotnetAny.setWebViewBackground(this.webView, 0, 0, 0, 0);
     } else if (this.options.frame !== false &&
         (this.options.titleBarStyle === 'hidden' || this.options.titleBarStyle === 'hiddenInset')) {
       // titleBarStyle:'hidden'/'hiddenInset' — remove the native title bar while keeping
-      // the resize border (4 px on all sides).  The app is expected to implement its own
-      // drag region in HTML (e.g. -webkit-app-region: drag via a custom CSS class).
-      (dotnet as any).applyHiddenTitleBar(this.browserWindow);
+      // the resize border (4 px on all sides).
+      dotnetAny.applyHiddenTitleBar(this.browserWindow);
       if (this.options.backgroundColor) {
         const parsed = parseBackgroundColor(this.options.backgroundColor);
         if (parsed) {
-          (dotnet as any).setWebViewBackground(this.webView, parsed.a, parsed.r, parsed.g, parsed.b);
+          dotnetAny.setWebViewBackground(this.webView, parsed.a, parsed.r, parsed.g, parsed.b);
         }
       }
     } else if (this.options.backgroundColor) {
       const parsed = parseBackgroundColor(this.options.backgroundColor);
       if (parsed) {
-        (dotnet as any).setWebViewBackground(this.webView, parsed.a, parsed.r, parsed.g, parsed.b);
+        dotnetAny.setWebViewBackground(this.webView, parsed.a, parsed.r, parsed.g, parsed.b);
       }
     }
 
@@ -376,9 +270,15 @@ export class NetFxWpfWindow implements IWindowProvider {
           this._webViewInitTimer = null;
         }
         try {
-          this.setupIpcBridge();
+          // Resolve any pending file path before handing off to the bridge.
+          if (!this._pendingAbsFilePath && this.pendingFilePath) {
+            this._pendingAbsFilePath = this.pendingFilePath;
+            this.pendingFilePath = null;
+          }
+          this._ipcBridge.setup(this._pendingAbsFilePath);
+          this._pendingAbsFilePath = null;
         } catch (e) {
-          console.error('[node-with-window] setupIpcBridge failed:', e);
+          console.error('[node-with-window] IPC bridge setup failed:', e);
         }
         this.isWebViewReady = true;
 
@@ -399,7 +299,6 @@ export class NetFxWpfWindow implements IWindowProvider {
     });
 
     // Timeout fallback: if WebView2 doesn't initialize within 10s, mark as ready anyway.
-    // The timer ID is stored so it can be cleared early on success, failure, or window close.
     this._webViewInitTimer = setTimeout(() => {
       this._webViewInitTimer = null;
       if (!this.isWebViewReady) {
@@ -413,210 +312,24 @@ export class NetFxWpfWindow implements IWindowProvider {
     }, 10000);
   }
 
-  /**
-   * Sets up the IPC bridge and document title sync.
-   * Both sync and async ipcMain.handle() callbacks are supported.
-   */
-  private setupIpcBridge(): void {
-    const handlers = (
-      ipcMain as unknown as {
-        handlers: Map<string, (event: unknown, ...args: unknown[]) => unknown>;
-      }
-    ).handlers;
-
-    // Register the bridge script and navigate in one atomic C# operation.
-    // AddScriptToExecuteOnDocumentCreatedAsync returns a Task<string> that completes
-    // only after the WebView2 browser process confirms the script registration.
-    // In polling mode we cannot Task.Wait() on the UI thread (deadlock), so the
-    // dedicated AddScriptAndNavigate action uses Task.ContinueWith to call Navigate()
-    // only after the ack arrives — guaranteeing the script runs on the first document.
-    let bridgeScript = generateBridgeScript(this.webPreferences, getSyncServerPort());
-    const preloadPath = this.webPreferences.preload;
-    if (preloadPath) {
-      const absPreload = path.isAbsolute(preloadPath)
-        ? preloadPath
-        : path.resolve(process.cwd(), preloadPath);
-      try {
-        bridgeScript += '\n' + fs.readFileSync(absPreload, 'utf-8');
-        // When contextIsolation is true, strip ipcRenderer/contextBridge from the
-        // page's window after the preload has run.  The preload may have captured
-        // references in closures (via contextBridge.exposeInMainWorld), so the
-        // exposed API continues to work; only the raw globals are removed.
-        if (this.webPreferences.contextIsolation === true) {
-          bridgeScript +=
-            '\n(function(){' +
-            'window.ipcRenderer=undefined;' +
-            'window.contextBridge=undefined;' +
-            '})();';
-        }
-      } catch (e) {
-        console.error('[node-with-window] Failed to load preload script:', e);
-      }
-    }
-    // _pendingAbsFilePath is set when loadFile() was called before show().
-    // pendingFilePath is set when loadFile() was called after show() but before
-    // CoreWebView2 was ready (e.g. async user code between create() and loadFile()).
-    if (!this._pendingAbsFilePath && this.pendingFilePath) {
-      this._pendingAbsFilePath = this.pendingFilePath;
-      this.pendingFilePath = null;
-    }
-    if (this._pendingAbsFilePath) {
-      const fileUri = 'file:///' + this._pendingAbsFilePath.replace(/\\/g, '/');
-      (dotnet as any).addScriptAndNavigate(this.coreWebView2, bridgeScript, fileUri);
-      this._pendingAbsFilePath = null;
-    } else {
-      (
-        this.coreWebView2 as unknown as {
-          AddScriptToExecuteOnDocumentCreatedAsync: (s: string) => unknown;
-        }
-      ).AddScriptToExecuteOnDocumentCreatedAsync(bridgeScript);
-    }
-
-    // Automatically sync document.title changes to the WPF window title bar
-    (
-      this.coreWebView2 as unknown as {
-        add_DocumentTitleChanged: (cb: (_sender: unknown, _e: unknown) => void) => void;
-      }
-    ).add_DocumentTitleChanged((_sender, _e) => {
-      const title = (this.coreWebView2 as unknown as { DocumentTitle: string }).DocumentTitle;
-      if (title) {
-        (this.browserWindow as unknown as { Title: string }).Title = title;
-      }
-    });
-
-    (
-      this.coreWebView2 as unknown as {
-        add_WebMessageReceived: (cb: (_sender: unknown, e: unknown) => void) => void;
-      }
-    ).add_WebMessageReceived((_sender, e) => {
-      try {
-        const evt = e as unknown as { WebMessageAsJson: string };
-        // WebMessageAsJson double-encodes string messages: JSON.parse once gives the inner
-        // JSON string, JSON.parse again gives the actual message object.
-        const outer = JSON.parse(evt.WebMessageAsJson);
-        const message = typeof outer === 'string' ? JSON.parse(outer) : outer;
-        const { channel, type, id, args = [] } = message;
-
-        const event = {
-          sender: this,
-          reply: (ch: string, ...a: unknown[]) => this.send(ch, ...a),
-        };
-
-        if (type === 'execResult') {
-          const pending = this._pendingExecs.get(id);
-          if (pending) {
-            this._pendingExecs.delete(id);
-            if (message.error) pending.reject(new Error(message.error));
-            else pending.resolve(message.result);
-          }
-        } else if (type === 'send') {
-          ipcMain.emit(channel, event, ...args);
-        } else if (type === 'invoke') {
-          const handler = handlers.get(channel);
-          if (handler) {
-            try {
-              const result = handler(event, ...args);
-              if (result && typeof (result as unknown as { then: unknown }).then === 'function') {
-                (result as Promise<unknown>)
-                  .then(r => this.sendIpcReply(id, r, null))
-                  .catch(err => this.sendIpcReply(id, null, (err as Error).message || String(err)));
-              } else {
-                this.sendIpcReply(id, result, null);
-              }
-            } catch (err: unknown) {
-              const error = err as { message?: string };
-              this.sendIpcReply(id, null, error.message || String(err));
-            }
-          } else {
-            this.sendIpcReply(id, null, `No handler for channel: ${channel}`);
-          }
-        }
-      } catch (err: unknown) {
-        const error = err as { message?: string };
-        console.error('[WebView2] WebMessageReceived error:', error.message);
-      }
-    });
-
-    // Fire 'did-finish-load' through the registered callback when navigation completes.
-    if (this._navCompletedCallback) {
-      (
-        this.coreWebView2 as unknown as {
-          add_NavigationCompleted: (cb: (_s: unknown, _e: unknown) => void) => void;
-        }
-      ).add_NavigationCompleted((_s, _e) => {
-        this._navCompletedCallback?.();
-      });
-    }
-  }
-
   public onNavigationCompleted(callback: () => void): void {
-    this._navCompletedCallback = callback;
+    this._ipcBridge.onNavigationCompleted(callback);
   }
 
   public executeJavaScript(code: string): Promise<unknown> {
-    return new Promise((resolve, reject) => {
-      if (!this.coreWebView2) {
-        reject(new Error('WebView2 not ready'));
-        return;
-      }
-      const id = Math.random().toString(36).substring(2, 11);
-      const timer = setTimeout(() => {
-        if (this._pendingExecs.delete(id)) {
-          reject(new Error('executeJavaScript timed out after 10000ms'));
-        }
-      }, 10_000);
-      this._pendingExecs.set(id, {
-        resolve: (v) => { clearTimeout(timer); resolve(v); },
-        reject:  (e) => { clearTimeout(timer); reject(e); },
-      });
-      const payload = JSON.stringify({ type: 'exec', id, code });
-      (
-        this.coreWebView2 as unknown as { PostWebMessageAsString: (s: string) => void }
-      ).PostWebMessageAsString(payload);
-    });
+    return this._ipcBridge.executeJavaScript(code);
   }
 
   public sendIpcReply(id: string, result: unknown, error: string | null): void {
-    const payload = JSON.stringify({ type: 'reply', id, result, error });
-    (
-      this.coreWebView2 as unknown as { PostWebMessageAsString: (msg: string) => void }
-    ).PostWebMessageAsString(payload);
+    this._ipcBridge.sendIpcReply(id, result, error);
   }
 
   public send(channel: string, ...args: unknown[]): void {
-    if (!this.coreWebView2) return;
-    const payload = JSON.stringify({ type: 'message', channel, args });
-    (
-      this.coreWebView2 as unknown as { PostWebMessageAsString: (msg: string) => void }
-    ).PostWebMessageAsString(payload);
+    this._ipcBridge.send(channel, ...args);
   }
 
   public sendToRenderer(channel: string, ...args: unknown[]): void {
-    this.send(channel, ...args);
-  }
-
-  public async loadURL(urlStr: string): Promise<void> {
-    if (!this.webView) {
-      this.navigationQueue.push(() => this.loadURL(urlStr));
-      return;
-    }
-    const System = (dotnet as any).System;
-    (this.webView as unknown as { Source: unknown }).Source = new System.Uri(urlStr);
-  }
-
-  public async loadFile(filePath: string): Promise<void> {
-    const absolutePath = path.isAbsolute(filePath)
-      ? filePath
-      : path.resolve(process.cwd(), filePath);
-    if (!this.isWebViewReady) {
-      // Queue whether show() hasn't been called yet OR has been called but
-      // CoreWebView2 isn't ready yet; setupIpcBridge() will pick this up.
-      this.pendingFilePath = absolutePath;
-      return;
-    }
-    const fileUri = 'file:///' + absolutePath.replace(/\\/g, '/');
-    const System = (dotnet as any).System;
-    (this.webView as unknown as { Source: unknown }).Source = new System.Uri(fileUri);
+    this._ipcBridge.send(channel, ...args);
   }
 
   public show(): void {
@@ -656,7 +369,7 @@ export class NetFxWpfWindow implements IWindowProvider {
       } else if (this.options.fullscreen) {
         this.setFullScreen(true);
       }
-      this._applyWindowChrome();
+      this._windowChrome.apply();
 
       // Disable parent for modal windows.
       if (this.options.modal && this.options.parent) {
@@ -676,13 +389,14 @@ export class NetFxWpfWindow implements IWindowProvider {
     }
 
     if (this.pendingFilePath) {
-      // Store absolute path; setupIpcBridge navigates to the file:// URI after registering the bridge script.
+      // Store absolute path; _ipcBridge.setup() navigates to the file:// URI after
+      // registering the bridge script.
       this._pendingAbsFilePath = this.pendingFilePath;
       this.pendingFilePath = null;
     }
 
     // Always start with about:blank so WebView2 doesn't auto-navigate before we can
-    // register AddScriptToExecuteOnDocumentCreated in setupIpcBridge().
+    // register AddScriptToExecuteOnDocumentCreated in _ipcBridge.setup().
     (this.webView as unknown as { Source: unknown }).Source = new System.Uri('about:blank');
     this.app = new Windows.Application();
 
@@ -694,7 +408,6 @@ export class NetFxWpfWindow implements IWindowProvider {
     // on the .NET side — the Node.js event loop is never blocked.
     dotnetAny.startApplication(this.app, this.browserWindow);
 
-    // Apply fullscreen / kiosk option after the window is shown.
     if (this.options.kiosk) {
       this.setKiosk(true);
     } else if (this.options.fullscreen) {
@@ -703,7 +416,7 @@ export class NetFxWpfWindow implements IWindowProvider {
 
     // Apply P/Invoke chrome options. HWND is valid once Application.Run() has been
     // called and the window handle has been created (synchronous after startApplication).
-    this._applyWindowChrome();
+    this._windowChrome.apply();
   }
 
   public close(): void {
@@ -739,16 +452,10 @@ export class NetFxWpfWindow implements IWindowProvider {
       (this.options.parent as any).setEnabled?.(true);
     }
 
-    for (const pending of this._pendingExecs.values()) {
-      pending.reject(new Error('Window closed'));
-    }
-    this._pendingExecs.clear();
-
+    this._ipcBridge.rejectAll('Window closed');
     this.cleanupUserData();
     // Notify BrowserWindow, which will emit 'closed', 'window-all-closed', and
     // call process.exit(0) if no listener handles window-all-closed.
-    // Secondary windows: BrowserWindow._handleClosed() does NOT exit when other
-    // windows remain open, so this is safe for both primary and secondary windows.
     this.onClosed?.();
   }
 
@@ -820,12 +527,11 @@ export class NetFxWpfWindow implements IWindowProvider {
 
     buildItems(cm, items);
 
-    // Explicit screen position
     if (x !== undefined && y !== undefined) {
       try {
         const PlacementModeType = dotnetAny['System.Windows.Controls.Primitives.PlacementMode'];
         const absolutePoint = (PlacementModeType as any).AbsolutePoint;
-        (cm as any).Placement       = absolutePoint;
+        (cm as any).Placement        = absolutePoint;
         (cm as any).HorizontalOffset = x;
         (cm as any).VerticalOffset   = y;
       } catch { /* placement is best-effort */ }
@@ -856,37 +562,33 @@ export class NetFxWpfWindow implements IWindowProvider {
     }
   }
 
-  /** Set the minimum window size (applied immediately if window exists). */
-  public setMinimumSize(width: number, height: number): void {
-    if (!this.browserWindow) {
-      this._pendingMinSize = [width, height];
+  public async loadURL(urlStr: string): Promise<void> {
+    if (!this.webView) {
+      this.navigationQueue.push(() => this.loadURL(urlStr));
       return;
     }
-    (this.browserWindow as any).MinWidth  = width;
-    (this.browserWindow as any).MinHeight = height;
+    const System = (dotnet as any).System;
+    (this.webView as unknown as { Source: unknown }).Source = new System.Uri(urlStr);
   }
 
-  /** Set the maximum window size (applied immediately if window exists). */
-  public setMaximumSize(width: number, height: number): void {
-    if (!this.browserWindow) {
-      this._pendingMaxSize = [width, height];
+  public async loadFile(filePath: string): Promise<void> {
+    const absolutePath = path.isAbsolute(filePath)
+      ? filePath
+      : path.resolve(process.cwd(), filePath);
+    if (!this.isWebViewReady) {
+      this.pendingFilePath = absolutePath;
       return;
     }
-    (this.browserWindow as any).MaxWidth  = width > 0 ? width  : Infinity;
-    (this.browserWindow as any).MaxHeight = height > 0 ? height : Infinity;
+    const fileUri = 'file:///' + absolutePath.replace(/\\/g, '/');
+    const System = (dotnet as any).System;
+    (this.webView as unknown as { Source: unknown }).Source = new System.Uri(fileUri);
   }
 
-  /**
-   * Reloads the current page in WebView2.
-   */
   public reload(): void {
     if (!this.coreWebView2) return;
     (this.coreWebView2 as unknown as { Reload: () => void }).Reload();
   }
 
-  /**
-   * Opens the WebView2 developer tools window.
-   */
   public openDevTools(): void {
     if (!this.coreWebView2) return;
     (this.coreWebView2 as unknown as { OpenDevToolsWindow: () => void }).OpenDevToolsWindow();
@@ -897,13 +599,11 @@ export class NetFxWpfWindow implements IWindowProvider {
     this.close();
   }
 
-  /** Bring window to the foreground and give it input focus. */
   public focus(): void {
     if (!this.browserWindow) return;
     (this.browserWindow as unknown as { Activate: () => void }).Activate();
   }
 
-  /** Remove input focus (no direct WPF equivalent — no-op). */
   public blur(): void {
     /* WPF has no direct blur API */
   }
@@ -944,7 +644,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   public setKiosk(flag: boolean): void {
     this._isKiosk = flag;
     this.setFullScreen(flag);
-    this.setSkipTaskbar(flag || (this.options.skipTaskbar ?? false));
+    this._windowChrome.setSkipTaskbar(flag || (this.options.skipTaskbar ?? false));
   }
 
   public isKiosk(): boolean {
@@ -1028,109 +728,36 @@ export class NetFxWpfWindow implements IWindowProvider {
     if (!this.browserWindow) return;
     const sp = (dotnet as any).System.Windows.SystemParameters;
     const win = this.browserWindow as unknown as {
-      Left: number;
-      Top: number;
-      Width: number;
-      Height: number;
+      Left: number; Top: number; Width: number; Height: number;
     };
-    win.Left = (sp.PrimaryScreenWidth - win.Width) / 2;
-    win.Top = (sp.PrimaryScreenHeight - win.Height) / 2;
+    win.Left = (sp.PrimaryScreenWidth  - win.Width)  / 2;
+    win.Top  = (sp.PrimaryScreenHeight - win.Height) / 2;
   }
 
-  /** Flash (or stop flashing) the taskbar button to attract user attention. */
-  public flashFrame(flag: boolean): void {
-    if (!this.browserWindow) return;
-    (dotnet as any).winHelper(this.browserWindow, 'FlashWindow', flag);
+  // ── Win32Chrome delegation ─────────────────────────────────────────────────
+
+  public setMinimumSize(width: number, height: number): void {
+    this._windowChrome.setMinimumSize(width, height);
   }
 
-  public setMinimizable(flag: boolean): void {
-    this._isMinimizable = flag;
-    if (!this.browserWindow) return;
-    (dotnet as any).winHelper(this.browserWindow, 'SetMinimizable', flag);
+  public setMaximumSize(width: number, height: number): void {
+    this._windowChrome.setMaximumSize(width, height);
   }
 
-  public isMinimizable(): boolean {
-    return this._isMinimizable;
-  }
+  public setMinimizable(flag: boolean): void  { this._windowChrome.setMinimizable(flag); }
+  public isMinimizable(): boolean             { return this._windowChrome.isMinimizable(); }
+  public setMaximizable(flag: boolean): void  { this._windowChrome.setMaximizable(flag); }
+  public isMaximizable(): boolean             { return this._windowChrome.isMaximizable(); }
+  public setClosable(flag: boolean): void     { this._windowChrome.setClosable(flag); }
+  public isClosable(): boolean                { return this._windowChrome.isClosable(); }
+  public setMovable(flag: boolean): void      { this._windowChrome.setMovable(flag); }
+  public isMovable(): boolean                 { return this._windowChrome.isMovable(); }
+  public setSkipTaskbar(flag: boolean): void  { this._windowChrome.setSkipTaskbar(flag); }
+  public getHwnd(): string                    { return this._windowChrome.getHwnd(); }
+  public setEnabled(flag: boolean): void      { this._windowChrome.setEnabled(flag); }
+  public flashFrame(flag: boolean): void      { this._windowChrome.flashFrame(flag); }
 
-  public setMaximizable(flag: boolean): void {
-    this._isMaximizable = flag;
-    if (!this.browserWindow) return;
-    (dotnet as any).winHelper(this.browserWindow, 'SetMaximizable', flag);
-  }
-
-  public isMaximizable(): boolean {
-    return this._isMaximizable;
-  }
-
-  public setClosable(flag: boolean): void {
-    this._isClosable = flag;
-    if (!this.browserWindow) return;
-    (dotnet as any).winHelper(this.browserWindow, 'SetClosable', flag);
-  }
-
-  public isClosable(): boolean {
-    return this._isClosable;
-  }
-
-  public setMovable(flag: boolean): void {
-    this._isMovable = flag;
-    if (!this.browserWindow) return;
-    (dotnet as any).winHelper(this.browserWindow, 'SetMovable', flag);
-  }
-
-  public isMovable(): boolean {
-    return this._isMovable;
-  }
-
-  public setSkipTaskbar(flag: boolean): void {
-    this._skipTaskbar = flag;
-    if (!this.browserWindow) return;
-    (dotnet as any).winHelper(this.browserWindow, 'SetSkipTaskbar', flag);
-  }
-
-  /** Returns the Win32 HWND as a decimal string (valid after show()). */
-  public getHwnd(): string {
-    if (!this.browserWindow) return '0';
-    return (dotnet as any).getHwnd(this.browserWindow) as string;
-  }
-
-  /** Enable or disable user interaction (used to block a parent for modal children). */
-  public setEnabled(flag: boolean): void {
-    if (!this.browserWindow) return;
-    (dotnet as any).setWindowEnabled(this.browserWindow, flag);
-  }
-
-  /** Captures the WebView2 rendering as a PNG and returns a NativeImage. */
-  public async capturePage(): Promise<NativeImage> {
-    if (!this.webView) return new NativeImage(Buffer.alloc(0));
-    const base64 = (dotnet as any).capturePreview(this.webView) as string;
-    if (!base64) return new NativeImage(Buffer.alloc(0));
-    return new NativeImage(Buffer.from(base64, 'base64'));
-  }
-
-  /**
-   * Applies P/Invoke window chrome options that require an HWND.
-   * Called once from show() after Application.Run() has been called.
-   */
-  private _applyWindowChrome(): void {
-    if (!this.browserWindow) return;
-    if (!this._isMinimizable) (dotnet as any).winHelper(this.browserWindow, 'SetMinimizable', false);
-    if (!this._isMaximizable) (dotnet as any).winHelper(this.browserWindow, 'SetMaximizable', false);
-    if (!this._isClosable)   (dotnet as any).winHelper(this.browserWindow, 'SetClosable',    false);
-    if (!this._isMovable)    (dotnet as any).winHelper(this.browserWindow, 'SetMovable',     false);
-    if (this._skipTaskbar)   (dotnet as any).winHelper(this.browserWindow, 'SetSkipTaskbar', true);
-    if (this._pendingMinSize) {
-      (this.browserWindow as any).MinWidth  = this._pendingMinSize[0];
-      (this.browserWindow as any).MinHeight = this._pendingMinSize[1];
-      this._pendingMinSize = null;
-    }
-    if (this._pendingMaxSize) {
-      (this.browserWindow as any).MaxWidth  = this._pendingMaxSize[0] > 0 ? this._pendingMaxSize[0] : Infinity;
-      (this.browserWindow as any).MaxHeight = this._pendingMaxSize[1] > 0 ? this._pendingMaxSize[1] : Infinity;
-      this._pendingMaxSize = null;
-    }
-  }
+  // ── Dialogs ────────────────────────────────────────────────────────────────
 
   public showOpenDialog(options: OpenDialogOptions): string[] | undefined {
     return showOpenDialog(options);
@@ -1147,5 +774,13 @@ export class NetFxWpfWindow implements IWindowProvider {
     buttons?: string[];
   }): number {
     return showMessageBox(options);
+  }
+
+  /** Captures the WebView2 rendering as a PNG and returns a NativeImage. */
+  public async capturePage(): Promise<NativeImage> {
+    if (!this.webView) return new NativeImage(Buffer.alloc(0));
+    const base64 = (dotnet as any).capturePreview(this.webView) as string;
+    if (!base64) return new NativeImage(Buffer.alloc(0));
+    return new NativeImage(Buffer.from(base64, 'base64'));
   }
 }
