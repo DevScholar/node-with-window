@@ -100,7 +100,7 @@ export const protocol = new Protocol();
 
 // ── Windows worker-thread bridge ──────────────────────────────────────────────
 //
-// On Windows, `addSync_WebResourceRequested` is a synchronous C# event.
+// On Windows, `add_WebResourceRequested` is a synchronous C# event.
 // We bridge async handlers by:
 //   1. Running each handler in a dedicated worker thread (worker_threads).
 //   2. Blocking the main thread with Atomics.wait() until the worker responds.
@@ -206,7 +206,7 @@ let _worker: unknown = null;
 /**
  * Spawn (or respawn) the worker thread with the current set of handlers.
  * Must be called on Windows after all `protocol.handle()` calls and before
- * `addSync_WebResourceRequested` is registered.
+ * `add_WebResourceRequested` is registered.
  * @internal
  */
 export function ensureProtocolWorker(handlers: Map<string, ProtocolHandler>): void {
@@ -237,7 +237,7 @@ export function ensureProtocolWorker(handlers: Map<string, ProtocolHandler>): vo
 /**
  * Call a protocol handler synchronously by proxying through the worker thread.
  * Blocks the main thread with Atomics.wait() until the worker responds.
- * Safe to call from inside an `addSync_WebResourceRequested` callback.
+ * Safe to call from inside an `add_WebResourceRequested` callback.
  * @internal
  */
 export function callHandlerSync(

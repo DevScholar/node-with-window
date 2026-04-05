@@ -15,7 +15,11 @@ import {
 import { NativeImage } from '../../native-image.js';
 import { ipcMain } from '../../ipc-main.js';
 import { generateBridgeScript } from './bridge.js';
-import { getSyncServerPort } from '../../node-integration.js';
+import {
+  handleNwwRequest,
+  addNwwCallbackPusher,
+  removeNwwCallbackPusher,
+} from '../../node-integration.js';
 import { buildGioMenu } from './menu.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 import { protocol } from '../../protocol.js';
@@ -28,6 +32,7 @@ export class GjsGtk4Window implements IWindowProvider {
   private webView: any = null;
   private ucm: any = null;
   private _webContext: any = null;
+  private _nwwPushFn: ((id: string, args: unknown[]) => void) | null = null;
   private _contentBox: any = null;
   private _menuBar: any = null;
   private _menuActionNames: string[] = [];
@@ -114,20 +119,25 @@ export class GjsGtk4Window implements IWindowProvider {
     });
 
     // ── WebView ────────────────────────────────────────────────────────────
-    // If custom protocol schemes are registered, create a WebContext and
-    // register the schemes before creating the WebView.
+    // Always create a WebContext so we can register the nww:// scheme for
+    // node integration (require, sendSync) and any user custom schemes.
+    try {
+      this._webContext = new _WebKit.WebContext();
+    } catch {
+      this._webContext = _WebKit.WebContext.get_default();
+    }
+
+    // nww:// — internal scheme for node integration (always registered).
+    this._webContext.register_uri_scheme('nww', (req: any) => {
+      void this._handleNwwSchemeRequest(req);
+    });
+
+    // User custom schemes.
     const registeredSchemes = protocol.getRegisteredSchemes();
-    if (registeredSchemes.size > 0) {
-      try {
-        this._webContext = new _WebKit.WebContext();
-      } catch {
-        this._webContext = _WebKit.WebContext.get_default();
-      }
-      for (const [scheme] of registeredSchemes) {
-        this._webContext.register_uri_scheme(scheme, (req: any) => {
-          void this._handleUriSchemeRequest(scheme, req);
-        });
-      }
+    for (const [scheme] of registeredSchemes) {
+      this._webContext.register_uri_scheme(scheme, (req: any) => {
+        void this._handleUriSchemeRequest(scheme, req);
+      });
     }
 
     this.webView = new _WebKit.WebView({
@@ -141,7 +151,7 @@ export class GjsGtk4Window implements IWindowProvider {
     } catch { /* best-effort */ }
 
     // ── Bridge script (injected at DOCUMENT_START on every page load) ──────
-    let bridgeScript = generateBridgeScript(this.webPreferences, getSyncServerPort());
+    let bridgeScript = generateBridgeScript(this.webPreferences);
     if (this.webPreferences.preload) {
       const absPreload = path.isAbsolute(this.webPreferences.preload)
         ? this.webPreferences.preload
@@ -232,6 +242,10 @@ export class GjsGtk4Window implements IWindowProvider {
       this._pendingMenu = null;
     }
 
+    // ── Register nww callback pusher ───────────────────────────────────────
+    this._nwwPushFn = (id: string, args: unknown[]) => this._pushNwwCallback(id, args);
+    addNwwCallbackPusher(this._nwwPushFn);
+
     // ── Signal: window closed by user ──────────────────────────────────────
     this.win.connect('close-request', async () => {
       this._onWindowClosed();
@@ -266,19 +280,25 @@ export class GjsGtk4Window implements IWindowProvider {
   public close(): void {
     if (this.isClosed) return;
     this.isClosed = true;
+    if (this._nwwPushFn) {
+      removeNwwCallbackPusher(this._nwwPushFn);
+      this._nwwPushFn = null;
+    }
     for (const p of this._pendingExecs.values()) p.reject(new Error('Window closed'));
     this._pendingExecs.clear();
     if (this.win) {
       try { this.win.close(); } catch { /* ignore */ }
     }
-    // Notify BrowserWindow regardless of how close() was called (menu role,
-    // BrowserWindow.close(), etc.). BrowserWindow._handleClosed() is idempotent.
     this.onClosed?.();
   }
 
   private _onWindowClosed(): void {
     if (this.isClosed) return;
     this.isClosed = true;
+    if (this._nwwPushFn) {
+      removeNwwCallbackPusher(this._nwwPushFn);
+      this._nwwPushFn = null;
+    }
     for (const pending of this._pendingExecs.values()) {
       pending.reject(new Error('Window closed'));
     }
@@ -322,6 +342,64 @@ export class GjsGtk4Window implements IWindowProvider {
     if (!this.webView) return;
     // 6 args: script, length, world_name, source_uri, cancellable, callback
     this.webView.evaluate_javascript(code, -1, null, null, null, null);
+  }
+
+  // ── nww:// scheme handler ──────────────────────────────────────────────────
+
+  /** Push a node-integration callback to the renderer via evaluate_javascript. */
+  private _pushNwwCallback(id: string, args: unknown[]): void {
+    const payload = JSON.stringify({ type: 'nwwCallback', id, args });
+    this._evaluateJs(
+      `window.__ipcDispatch && window.__ipcDispatch(${JSON.stringify(payload)})`,
+    );
+  }
+
+  /**
+   * Read the POST body from a WebKitURISchemeRequest.
+   * get_http_body() is available in WebKit 2.40+; returns null on older builds.
+   */
+  private async _readNwwBody(req: any): Promise<string | null> {
+    try {
+      const stream = req.get_http_body?.();
+      if (!stream) return null;
+      return await new Promise<string>((resolve, reject) => {
+        // Read up to 10 MB in one shot — enough for any reasonable payload.
+        stream.read_bytes_async(10 * 1024 * 1024, 0, null, (src: any, res: any) => {
+          try {
+            const gBytes = src.read_bytes_finish(res);
+            const data: Uint8Array = gBytes.get_data();
+            resolve(new TextDecoder().decode(data));
+          } catch (e) { reject(e); }
+        });
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  private async _handleNwwSchemeRequest(req: any): Promise<void> {
+    const uri: string    = req.get_uri();
+    const method: string = req.get_http_method();
+    const body           = method === 'POST' ? await this._readNwwBody(req) : null;
+
+    const result = handleNwwRequest(uri, method, body);
+
+    try {
+      const bytes = result.status === 204
+        ? new Uint8Array(0)
+        : new TextEncoder().encode(result.body);
+      const glibBytes = _GLib.Bytes.new(bytes);
+      const stream    = _Gio.MemoryInputStream.new_from_bytes(glibBytes);
+
+      // Use finish_with_response for all nww:// replies so we can set the
+      // status code correctly (204 No Content for /__nww_release__, etc.).
+      const resp = new _WebKit.URISchemeResponse(stream, bytes.length);
+      resp.set_status(result.status, null);
+      resp.set_content_type(result.mimeType);
+      req.finish_with_response(resp);
+    } catch (e) {
+      try { req.finish_error(e instanceof Error ? e : new Error(String(e))); } catch { /* ignore */ }
+    }
   }
 
   // ── Protocol scheme handler ────────────────────────────────────────────────

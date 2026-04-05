@@ -61,6 +61,11 @@ const dotnetProxy = new Proxy(function() {} as any, {
                 webView2Helper().SetWebViewBackground(webView, a, r, g, b);
             };
         }
+        if (prop === 'setSchemeAllowedOrigins') {
+            return (reg: any, origins: string[]) => {
+                webView2Helper().SetSchemeAllowedOrigins(reg, origins);
+            };
+        }
         if (prop === 'capturePreview') {
             return (webView: any): string => {
                 const result = webView2Helper().ExecuteScriptOrCapture

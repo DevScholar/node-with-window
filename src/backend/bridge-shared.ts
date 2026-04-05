@@ -2,19 +2,28 @@
  * Shared node-bridge code generator.
  *
  * Both the Windows (netfx-wpf) and Linux (gjs-gtk4) bridges include an
- * identical ~200-line JavaScript IIFE that wires up window.require(),
- * window.process, and the ref/callback serialization layer.  This module
- * generates that IIFE so the two bridge files don't diverge.
+ * identical JavaScript IIFE that wires up window.require(), window.process,
+ * and the ref/callback serialization layer.  This module generates that IIFE
+ * so the two bridge files don't diverge.
+ *
+ * Transport: all requests go to the nww:// custom scheme (no HTTP server).
+ *
+ * Callbacks (fs.watch, EventEmitter.on, etc.) and async Promise results arrive
+ * via the existing IPC channel as { type:'nwwCallback', id, args } messages
+ * instead of the old SSE EventSource connection.
+ *
+ * Async result protocol:
+ *   - Sync XHR response: { result: { __nww_async: asyncId } }
+ *   - Later, IPC push:   { type:'nwwCallback', id: asyncId, args: ['__nww_resolve', value] }
+ *                    or  { type:'nwwCallback', id: asyncId, args: ['__nww_reject',  msg]   }
+ *   - Bridge script stores the pending Promise in window.__nwwAsyncPending[asyncId].
  *
  * Platform-specific differences:
  *   - process.platform value
  *   - process.exit() uses the platform's postMessage API
- *   - Linux defers the EventSource connection with setTimeout(0) to avoid
- *     a cold-start freeze in WebKitGTK
  */
 
 export interface NodeBridgeOptions {
-  port: number;
   platform: 'win32' | 'linux';
   /** JSON.stringify'd arch string ready for direct embedding. */
   injectedArch: string;
@@ -37,84 +46,26 @@ export interface NodeBridgeOptions {
 }
 
 /**
- * Generate the lightweight node-bridge stub for when the sync server is not
- * running (nodeIntegration=true but port===0).  Provides window.process and
- * a warning-emitting window.require().
- */
-export function generateNodeBridgeStub(
-  opts: Pick<NodeBridgeOptions, 'platform' | 'injectedArch' | 'injectedVersion' | 'injectedEnv' | 'injectedCwd'>,
-): string {
-  const { platform, injectedArch, injectedVersion, injectedEnv, injectedCwd } = opts;
-  const postMessage =
-    platform === 'win32'
-      ? `window.chrome.webview.postMessage`
-      : `window.webkit.messageHandlers.ipc.postMessage`;
-  return `(function() {
-    if (window.__nodeBridge) return;
-    window.__nodeBridge = true;
-    window.require = function(m) {
-        if (m === '@devscholar/node-with-window') {
-            return { ipcRenderer: window.ipcRenderer, contextBridge: window.contextBridge };
-        }
-        console.warn('[node-with-window] window.require() stub: sync server not available.');
-        return null;
-    };
-    window.process = {
-        platform: '${platform}', arch: ${injectedArch},
-        version: ${injectedVersion},
-        env: JSON.parse(${injectedEnv}),
-        cwd: function() { return ${injectedCwd}; },
-        exit: function(code) {
-            ${postMessage}(
-                JSON.stringify({ type: 'send', channel: 'process:exit', args: [code] }));
-        }
-    };
-})();`;
-}
-
-/**
  * Generate the full node-bridge IIFE for the given platform and options.
  * Returns a JavaScript string starting with `(function() {` and ending with `})();`
  */
 export function generateNodeBridgeIife(opts: NodeBridgeOptions): string {
-  const { port, platform, injectedArch, injectedVersion, injectedEnv, injectedCwd, importMapJson } = opts;
+  const { platform, injectedArch, injectedVersion, injectedEnv, injectedCwd, importMapJson } = opts;
 
   const postMessage =
     platform === 'win32'
       ? `window.chrome.webview.postMessage`
       : `window.webkit.messageHandlers.ipc.postMessage`;
-
-  // Linux defers the EventSource open to avoid blocking GDK seat initialisation.
-  const evtSrcBlock =
-    platform === 'linux'
-      ? `    // Defer EventSource connection to avoid blocking the GDK seat
-    // initialization on first run in WebKitGTK (cold-start freeze).
-    var __nwwEvtSrc = null;
-    setTimeout(function() {
-        __nwwEvtSrc = new EventSource('http://127.0.0.1:${port}/__nww_events__');
-        __nwwEvtSrc.onmessage = function(e) {
-            var msg = JSON.parse(e.data);
-            var cb = window.__nwwCallbacks[msg.id];
-            if (cb) cb.apply(null, msg.args.map(__nwwWrapResult));
-        };
-    }, 0);`
-      : `    var __nwwEvtSrc = new EventSource('http://127.0.0.1:${port}/__nww_events__');
-    __nwwEvtSrc.onmessage = function(e) {
-        var msg = JSON.parse(e.data);
-        var cb = window.__nwwCallbacks[msg.id];
-        if (cb) cb.apply(null, msg.args.map(__nwwWrapResult));
-    };`;
 
   return `(function() {
     if (window.__nodeBridge) return;
     window.__nodeBridge = true;
 
     window.__nwwCallbacks = {};
+    window.__nwwAsyncPending = {};
     // WeakMap from function → id: prevents the same function object from being
     // registered multiple times (e.g. a named handler passed on every call).
     var __nwwFnToId = new WeakMap();
-
-${evtSrcBlock}
 
     function __nwwSerializeArg(a) {
         if (typeof a === 'function') {
@@ -138,6 +89,10 @@ ${evtSrcBlock}
         return result;
     }
 
+    // Expose __nwwWrapResult on window so the IPC bridge (separate IIFE) can
+    // call it when dispatching nwwCallback messages.
+    window.__nwwWrapResult = __nwwWrapResult;
+
     window.__nwwLiveRefs = new Set();
     var __nwwPendingRelease = [];
     var __nwwReleaseTimer = null;
@@ -150,7 +105,7 @@ ${evtSrcBlock}
                 __nwwReleaseTimer = null;
                 var batch = __nwwPendingRelease.splice(0);
                 if (batch.length === 0) return;
-                fetch('http://127.0.0.1:${port}/__nww_release__', {
+                fetch('nww://host/__nww_release__', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ refs: batch })
@@ -168,18 +123,28 @@ ${evtSrcBlock}
                 return function() {
                     var args = Array.prototype.slice.call(arguments);
                     var xhr = new XMLHttpRequest();
-                    xhr.open('POST', 'http://127.0.0.1:${port}/__nww_sync__', false);
+                    xhr.open('POST', 'nww://host/__nww_sync__', false);
                     xhr.setRequestHeader('Content-Type', 'application/json');
                     xhr.send(JSON.stringify({ ref: refId, methodName: prop, args: args.map(__nwwSerializeArg) }));
                     var resp = JSON.parse(xhr.responseText);
                     if (xhr.status !== 200) throw new Error(resp.error || 'ref call failed');
-                    return __nwwWrapResult(resp.result);
+                    return __nwwHandleResult(resp.result);
                 };
             }
         });
         window.__nwwLiveRefs.add(refId);
         __nwwRefFinalizer.register(proxy, refId);
         return proxy;
+    }
+
+    function __nwwHandleResult(result) {
+        if (result !== null && typeof result === 'object' && typeof result.__nww_async === 'string') {
+            var asyncId = result.__nww_async;
+            return new Promise(function(resolve, reject) {
+                window.__nwwAsyncPending[asyncId] = { resolve: resolve, reject: reject };
+            });
+        }
+        return __nwwWrapResult(result);
     }
 
     window.require = function(moduleName) {
@@ -193,12 +158,12 @@ ${evtSrcBlock}
                 return function() {
                     var args = Array.prototype.slice.call(arguments);
                     var xhr = new XMLHttpRequest();
-                    xhr.open('POST', 'http://127.0.0.1:${port}/__nww_sync__', false);
+                    xhr.open('POST', 'nww://host/__nww_sync__', false);
                     xhr.setRequestHeader('Content-Type', 'application/json');
                     xhr.send(JSON.stringify({ moduleName: moduleName, methodName: methodName, args: args.map(__nwwSerializeArg) }));
                     var resp = JSON.parse(xhr.responseText);
                     if (xhr.status !== 200) throw new Error(resp.error || 'require failed');
-                    return __nwwWrapResult(resp.result);
+                    return __nwwHandleResult(resp.result);
                 };
             }
         });
@@ -209,7 +174,7 @@ ${evtSrcBlock}
         var ids = Array.from(window.__nwwLiveRefs);
         window.__nwwLiveRefs.clear();
         var xhr = new XMLHttpRequest();
-        xhr.open('POST', 'http://127.0.0.1:${port}/__nww_release__', false);
+        xhr.open('POST', 'nww://host/__nww_release__', false);
         xhr.setRequestHeader('Content-Type', 'application/json');
         try { xhr.send(JSON.stringify({ refs: ids })); } catch (_e) {}
     });

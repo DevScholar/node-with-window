@@ -8,7 +8,6 @@ import {
 } from './interfaces';
 import { resolveBackend, ensureBackendInitialized } from './backends.js';
 import { app } from './app.js';
-import { startSyncServer } from './node-integration.js';
 import { Menu, MENU_REMOVED } from './menu.js';
 import { WebContents } from './web-contents.js';
 import { NativeImage } from './native-image.js';
@@ -40,6 +39,29 @@ export class BrowserWindow extends EventEmitter {
   private static _lastId = 0;
   /** The window that most recently received focus (via focus() API call). */
   private static _focusedId: number | null = null;
+  /**
+   * Ref'd timer that keeps the Node.js event loop alive while at least one
+   * BrowserWindow exists.  Without this, the process would exit immediately
+   * because node-ps1-dotnet's polling timer is unref'd by design.
+   */
+  private static _keepAlive: ReturnType<typeof setTimeout> | null = null;
+
+  private static _startKeepAlive(): void {
+    if (BrowserWindow._keepAlive) return;
+    // Recursive setTimeout avoids any fixed-interval concerns.
+    // The callback simply reschedules itself — zero side effects.
+    const tick = () => {
+      BrowserWindow._keepAlive = setTimeout(tick, 60_000);
+    };
+    tick();
+  }
+
+  private static _stopKeepAlive(): void {
+    if (BrowserWindow._keepAlive) {
+      clearTimeout(BrowserWindow._keepAlive);
+      BrowserWindow._keepAlive = null;
+    }
+  }
   private _isCreated = false;
   /** True once setMenu() has been called explicitly on this window. */
   private _menuSet = false;
@@ -54,6 +76,11 @@ export class BrowserWindow extends EventEmitter {
     BrowserWindow._lastId++;
     this._id = BrowserWindow._lastId;
     BrowserWindow._allWindows.set(this._id, this);
+
+    // Start the keepalive when the first window is created.
+    if (BrowserWindow._allWindows.size === 1) {
+      BrowserWindow._startKeepAlive();
+    }
 
     const backend = resolveBackend(options?.backend);
     this._backendName = backend.name;
@@ -94,10 +121,6 @@ export class BrowserWindow extends EventEmitter {
 
   private async _init(options?: BrowserWindowOptions): Promise<void> {
     try {
-      // Start the sync HTTP server before the backend so its port is available
-      // when setupIpcBridge() injects the bridge script.  The server is needed
-      // for both window.require (nodeIntegration) and ipcRenderer.sendSync().
-      await startSyncServer();
       await ensureBackendInitialized(this._backendName);
       await this.provider.createWindow();
       this._isCreated = true;
@@ -127,6 +150,8 @@ export class BrowserWindow extends EventEmitter {
     this.emit('closed');
 
     if (BrowserWindow._allWindows.size === 0) {
+      // Clear the keepalive so the event loop can drain.
+      BrowserWindow._stopKeepAlive();
       // Emit window-all-closed. If no listener is registered, default to exit
       // (same as Electron on non-macOS platforms).
       if (app.listenerCount('window-all-closed') === 0) {

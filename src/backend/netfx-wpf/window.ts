@@ -11,6 +11,7 @@ import {
 } from '../../interfaces.js';
 import { NativeImage } from '../../native-image.js';
 import { protocol, ensureProtocolWorker, callHandlerSync } from '../../protocol.js';
+import { handleNwwRequest } from '../../node-integration.js';
 import { findWebView2Runtime } from './webview2-runtime.js';
 import { parseBackgroundColor } from './color.js';
 import { WpfIpcBridge } from './ipc-bridge.js';
@@ -159,24 +160,10 @@ export class NetFxWpfWindow implements IWindowProvider {
     ).GetType('Microsoft.Web.WebView2.Wpf.WebView2');
     this.webView = new WebView2Type();
 
-    // When custom protocol schemes are registered we use CoreWebView2Environment.CreateAsync()
-    // (which accepts CoreWebView2EnvironmentOptions with scheme registrations) instead of
-    // CoreWebView2CreationProperties. EnsureCoreWebView2Async() is called from show() after
-    // the WPF application has started, so we skip CreationProperties entirely in that path.
-    if (protocol.getRegisteredSchemes().size === 0) {
-      const CreationPropertiesType = (
-        WebView2WpfAssembly as unknown as { GetType: (name: string) => { new (): unknown } }
-      ).GetType('Microsoft.Web.WebView2.Wpf.CoreWebView2CreationProperties');
-      const props = new CreationPropertiesType() as unknown as {
-        UserDataFolder: string;
-        AdditionalBrowserArguments: string;
-      };
-      props.UserDataFolder = this.userDataPath;
-      if (this.webPreferences.webSecurity === false) {
-        props.AdditionalBrowserArguments = '--disable-web-security';
-      }
-      (this.webView as unknown as { CreationProperties: unknown }).CreationProperties = props;
-    }
+    // nww:// is always registered, so we always use CoreWebView2Environment.CreateAsync()
+    // (which accepts CoreWebView2EnvironmentOptions with scheme registrations) and never set
+    // CoreWebView2CreationProperties.  EnsureCoreWebView2Async() is called from show() via
+    // _initWebView2WithProtocols() after the WPF application has started.
 
     this.browserWindow = new Windows.Window();
     (this.browserWindow as unknown as { Title: string }).Title =
@@ -372,13 +359,11 @@ export class NetFxWpfWindow implements IWindowProvider {
 
       (this.browserWindow as unknown as { Show: () => void }).Show();
 
-      if (protocol.getRegisteredSchemes().size > 0) {
-        setImmediate(() => {
-          this._initWebView2WithProtocols().catch(e => {
-            console.error('[node-with-window] Protocol WebView2 init error (secondary window):', e);
-          });
+      setImmediate(() => {
+        this._initWebView2WithProtocols().catch(e => {
+          console.error('[node-with-window] Protocol WebView2 init error (secondary window):', e);
         });
-      }
+      });
 
       if (this.options.kiosk) {
         this.setKiosk(true);
@@ -411,17 +396,11 @@ export class NetFxWpfWindow implements IWindowProvider {
       this.pendingFilePath = null;
     }
 
-    // When custom protocols are registered we skip `Source = about:blank` so
-    // that WebView2 does not auto-initialize with default settings before we
-    // can call EnsureCoreWebView2Async with the custom environment.
-    // The IPC bridge setup + navigation happen inside _initWebView2WithProtocols()
-    // after EnsureCoreWebView2Async resolves (CoreWebView2InitializationCompleted fires).
-    const hasSchemes = protocol.getRegisteredSchemes().size > 0;
-    if (!hasSchemes) {
-      // Always start with about:blank so WebView2 doesn't auto-navigate before we can
-      // register AddScriptToExecuteOnDocumentCreated in _ipcBridge.setup().
-      (this.webView as unknown as { Source: unknown }).Source = new System.Uri('about:blank');
-    }
+    // Always use the protocol-based initialization path so that nww:// (node
+    // integration) and any user custom schemes are registered before WebView2
+    // creates its environment.  We never set Source = about:blank here; the
+    // IPC bridge setup and initial navigation happen inside
+    // _initWebView2WithProtocols() after EnsureCoreWebView2Async resolves.
     this.app = new Windows.Application();
 
     (this.browserWindow as unknown as { add_Closed: (cb: () => void) => void }).add_Closed(() => {
@@ -432,15 +411,12 @@ export class NetFxWpfWindow implements IWindowProvider {
     // on the .NET side — the Node.js event loop is never blocked.
     dotnetAny.startApplication(this.app, this.browserWindow);
 
-    if (hasSchemes) {
-      // Delay 100 ms to let the WPF application come up, then initialize
-      // WebView2 with a custom environment that includes the scheme registrations.
-      setTimeout(() => {
-        this._initWebView2WithProtocols().catch(e => {
-          console.error('[node-with-window] Protocol WebView2 init error:', e);
-        });
-      }, 100);
-    }
+    // Always initialize WebView2 via the protocol path so nww:// is registered.
+    setTimeout(() => {
+      this._initWebView2WithProtocols().catch(e => {
+        console.error('[node-with-window] Protocol WebView2 init error:', e);
+      });
+    }, 100);
 
     if (this.options.kiosk) {
       this.setKiosk(true);
@@ -454,12 +430,11 @@ export class NetFxWpfWindow implements IWindowProvider {
   }
 
   /**
-   * Initialize WebView2 using CoreWebView2Environment.CreateAsync() with custom scheme
-   * registrations, then register the sync WebResourceRequested handler.
-   *
-   * Used instead of CreationProperties when protocol.registerSchemesAsPrivileged() has
-   * been called. CoreWebView2InitializationCompleted fires after EnsureCoreWebView2Async
-   * resolves, which triggers the existing _ipcBridge.setup() + navigation queue drain.
+   * Initialize WebView2 using CoreWebView2Environment.CreateAsync() so that nww://
+   * (node integration) and any user custom schemes are registered before the webview
+   * environment is created.  CoreWebView2InitializationCompleted fires after
+   * EnsureCoreWebView2Async resolves and triggers the existing _ipcBridge.setup() +
+   * navigation-queue drain.
    */
   private async _initWebView2WithProtocols(): Promise<void> {
     const dotnetAny = dotnet as any;
@@ -469,7 +444,15 @@ export class NetFxWpfWindow implements IWindowProvider {
     const OptsType   = CoreAssembly.GetType('Microsoft.Web.WebView2.Core.CoreWebView2EnvironmentOptions');
     const SchemeType = CoreAssembly.GetType('Microsoft.Web.WebView2.Core.CoreWebView2CustomSchemeRegistration');
 
-    const schemeRegs: unknown[] = [];
+    // nww:// is always registered first so node integration is always available.
+    const nwwReg = new SchemeType('nww');
+    (nwwReg as any).TreatAsSecure = true;
+    (nwwReg as any).HasAuthorityComponent = true;
+    // AllowedOrigins must be mutated in-place (the property is get-only in most
+    // WebView2 SDK versions — assigning a new list is silently ignored).
+    dotnetAny.setSchemeAllowedOrigins(nwwReg, ['*']);
+
+    const schemeRegs: unknown[] = [nwwReg];
     for (const [scheme, priv] of protocol.getRegisteredSchemes()) {
       const reg = new SchemeType(scheme);
       (reg as any).TreatAsSecure = priv.secure ?? false;
@@ -478,7 +461,14 @@ export class NetFxWpfWindow implements IWindowProvider {
     }
 
     const opts = new OptsType(null, null, null, false, schemeRegs);
-    if (this.webPreferences.webSecurity === false) {
+    // nodeIntegration exposes full Node.js to the renderer, so CORS between
+    // file:// pages and nww:// requests would otherwise block the bridge.
+    // Disabling web security here is safe because nodeIntegration already
+    // grants the renderer more privilege than any CORS policy could protect.
+    const disableWebSecurity =
+      this.webPreferences.webSecurity === false ||
+      this.webPreferences.nodeIntegration === true;
+    if (disableWebSecurity) {
       (opts as any).AdditionalBrowserArguments = '--disable-web-security';
     }
 
@@ -493,26 +483,58 @@ export class NetFxWpfWindow implements IWindowProvider {
     }
 
     // CoreWebView2InitializationCompleted has now fired and _ipcBridge.setup() has run.
-    // Register resource filter and sync handler for every registered scheme.
+    // Register resource filters for nww:// and every user-registered scheme.
     const coreWV2 = (this.webView as any).CoreWebView2;
     const ALL = 0; // CoreWebView2WebResourceContext.All
+    coreWV2.AddWebResourceRequestedFilter('nww://*', ALL);
     for (const [scheme] of protocol.getRegisteredSchemes()) {
       coreWV2.AddWebResourceRequestedFilter(`${scheme}://*`, ALL);
     }
 
-    // Spawn worker thread with all currently registered handlers.
-    ensureProtocolWorker(protocol.getAllHandlers());
+    // Spawn protocol worker for user-registered handlers (if any).
+    if (protocol.getRegisteredSchemes().size > 0) {
+      ensureProtocolWorker(protocol.getAllHandlers());
+    }
 
-    coreWV2.addSync_WebResourceRequested((_s: unknown, e: unknown) => {
+    coreWV2.add_WebResourceRequested((_s: unknown, e: unknown) => {
       const ev = e as any;
       const uri: string  = ev.Request.Uri;
       const meth: string = ev.Request.Method;
       const colonIdx = uri.indexOf('://');
       const scheme   = colonIdx >= 0 ? uri.slice(0, colonIdx) : '';
 
-      const result = callHandlerSync(scheme, uri, meth);
+      // nww:// is handled directly on the main thread (no worker thread needed).
+      if (scheme === 'nww') {
+        // CORS preflight: return 204 with CORS headers immediately.
+        if (meth === 'OPTIONS') {
+          return {
+            html:         '',
+            statusCode:   204,
+            reasonPhrase: 'No Content',
+            headers:      'Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type',
+            base64:       false,
+          };
+        }
+        let body: string | null = null;
+        const contentStream = ev.Request.Content;
+        if (contentStream != null) {
+          try {
+            const reader = new dotnetAny.System.IO.StreamReader(contentStream);
+            body = reader.ReadToEnd() as string;
+            reader.Dispose();
+          } catch { /* no body */ }
+        }
+        const nwwResult = handleNwwRequest(uri, meth, body);
+        return {
+          html:         nwwResult.body,
+          statusCode:   nwwResult.status,
+          reasonPhrase: nwwResult.status === 200 ? 'OK' : 'Error',
+          headers:      `Content-Type: ${nwwResult.mimeType}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type`,
+          base64:       false,
+        };
+      }
 
-      // Build the Content-Type header string for C#.
+      const result = callHandlerSync(scheme, uri, meth);
       const contentType = result.mimeType ?? (result.isBase64 ? 'application/octet-stream' : 'text/html; charset=utf-8');
       return {
         html:         result.body,
@@ -527,6 +549,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   public close(): void {
     if (this.isClosed) return;
     this.isClosed = true;
+    this._ipcBridge.cleanup();
     if (this.browserWindow) {
       try {
         (this.browserWindow as unknown as { Close: () => void }).Close();
@@ -557,7 +580,7 @@ export class NetFxWpfWindow implements IWindowProvider {
       (this.options.parent as any).setEnabled?.(true);
     }
 
-    this._ipcBridge.rejectAll('Window closed');
+    this._ipcBridge.cleanup();
     this.cleanupUserData();
     // Notify BrowserWindow, which will emit 'closed', 'window-all-closed', and
     // call process.exit(0) if no listener handles window-all-closed.

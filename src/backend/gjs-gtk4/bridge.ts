@@ -1,25 +1,24 @@
 import { WebPreferences } from '../../interfaces.js';
 import { buildImports } from '../../esm-importmap.js';
-import { generateNodeBridgeIife, generateNodeBridgeStub } from '../bridge-shared.js';
+import { generateNodeBridgeIife } from '../bridge-shared.js';
 
 /**
  * Linux Bridge - WebKitGTK JavaScript Injection
  *
- * Generates the JavaScript injected into the renderer via WebKit.UserScript.
- *
  * 1. Node.js compatibility layer (when nodeIntegration is enabled)
- *    - window.require() via sync-XHR to local HTTP server
+ *    - window.require() via sync XHR to the nww:// custom scheme
  *    - window.process with platform, arch, version, cwd, exit
  *
  * 2. IPC bridge (when contextIsolation is NOT enabled)
- *    - window.ipcRenderer.send()   - fire-and-forget to main
- *    - window.ipcRenderer.invoke() - request/response (Promise)
- *    - window.ipcRenderer.on()     - receive messages from main
+ *    - window.ipcRenderer.send()    - fire-and-forget to main
+ *    - window.ipcRenderer.invoke()  - request/response (Promise)
+ *    - window.ipcRenderer.sendSync() - synchronous via nww:// scheme
+ *    - window.ipcRenderer.on()      - receive messages from main
  *
  * Renderer → Main: window.webkit.messageHandlers.ipc.postMessage(json)
  * Main → Renderer: evaluate_javascript calls window.__ipcDispatch(json)
  */
-export function generateBridgeScript(webPreferences: WebPreferences, syncServerPort = 0): string {
+export function generateBridgeScript(webPreferences: WebPreferences): string {
   const nodeIntegration = webPreferences.nodeIntegration;
 
   let nodeBridge = '';
@@ -28,29 +27,18 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
     const injectedVersion = JSON.stringify(process.version);
     const injectedEnv     = JSON.stringify(JSON.stringify(process.env));
     const injectedArch    = JSON.stringify(process.arch);
-    const injectedPort    = syncServerPort;
 
-    if (injectedPort > 0) {
-      const imports = buildImports(injectedPort);
-      const importMapJson = JSON.stringify(JSON.stringify({ imports }));
-      nodeBridge = generateNodeBridgeIife({
-        port: injectedPort,
-        platform: 'linux',
-        injectedArch,
-        injectedVersion,
-        injectedEnv,
-        injectedCwd,
-        importMapJson,
-      });
-    } else {
-      nodeBridge = generateNodeBridgeStub({
-        platform: 'linux',
-        injectedArch,
-        injectedVersion,
-        injectedEnv,
-        injectedCwd,
-      });
-    }
+    const imports = buildImports();
+    const importMapJson = JSON.stringify(JSON.stringify({ imports }));
+
+    nodeBridge = generateNodeBridgeIife({
+      platform: 'linux',
+      injectedArch,
+      injectedVersion,
+      injectedEnv,
+      injectedCwd,
+      importMapJson,
+    });
   }
 
   let ipcBridge = '';
@@ -63,7 +51,6 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
     var __ipcPending   = {};
     var __ipcListeners = {};
 
-    // Called by main process via evaluate_javascript to dispatch replies and push messages.
     window.__ipcDispatch = function(jsonStr) {
         var msg;
         try { msg = JSON.parse(jsonStr); } catch (e) { return; }
@@ -77,6 +64,19 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
         } else if (msg.type === 'message') {
             var listeners = __ipcListeners[msg.channel] || [];
             for (var i = 0; i < listeners.length; i++) listeners[i].cb({}, msg.args);
+        } else if (msg.type === 'nwwCallback') {
+            var args = msg.args || [];
+            var wrap = window.__nwwWrapResult || function(x) { return x; };
+            if (args[0] === '__nww_resolve') {
+                var ap = window.__nwwAsyncPending && window.__nwwAsyncPending[msg.id];
+                if (ap) { delete window.__nwwAsyncPending[msg.id]; ap.resolve(wrap(args[1])); }
+            } else if (args[0] === '__nww_reject') {
+                var ap = window.__nwwAsyncPending && window.__nwwAsyncPending[msg.id];
+                if (ap) { delete window.__nwwAsyncPending[msg.id]; ap.reject(new Error(args[1])); }
+            } else {
+                var cb = window.__nwwCallbacks && window.__nwwCallbacks[msg.id];
+                if (cb) cb.apply(null, args.map(wrap));
+            }
         }
     };
 
@@ -100,7 +100,7 @@ export function generateBridgeScript(webPreferences: WebPreferences, syncServerP
         sendSync: function(channel) {
             var args = Array.prototype.slice.call(arguments, 1);
             var xhr = new XMLHttpRequest();
-            xhr.open('POST', 'http://127.0.0.1:${syncServerPort}/__nww_ipc_sync__', false);
+            xhr.open('POST', 'nww://host/__nww_ipc_sync__', false);
             xhr.setRequestHeader('Content-Type', 'application/json');
             xhr.send(JSON.stringify({ channel: channel, args: args }));
             if (xhr.status !== 200) return undefined;

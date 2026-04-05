@@ -67,8 +67,8 @@ export function getUserPackageNames(): string[] {
  * Includes Node.js builtins, @devscholar/node-with-window, and all packages
  * declared in the user project's package.json.
  */
-export function buildImports(syncServerPort: number): Record<string, string> {
-  const base = `http://127.0.0.1:${syncServerPort}/__nww_esm__/`;
+export function buildImports(): Record<string, string> {
+  const base = 'nww://host/__nww_esm__/';
   const imports: Record<string, string> = {};
 
   // @devscholar/node-with-window → renderer-side shim (ipcRenderer, etc.)
@@ -95,6 +95,6 @@ export function buildImports(syncServerPort: number): Record<string, string> {
  * Must be the **first** element inside `<head>` so it takes effect before
  * any `<script type="module">` in the page.
  */
-export function generateImportMapTag(syncServerPort: number): string {
-  return `<script type="importmap">${JSON.stringify({ imports: buildImports(syncServerPort) })}</script>`;
+export function generateImportMapTag(): string {
+  return `<script type="importmap">${JSON.stringify({ imports: buildImports() })}</script>`;
 }

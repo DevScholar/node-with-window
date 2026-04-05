@@ -726,6 +726,36 @@ public static class WebView2Helper
         return null;
     }
 
+    /// <summary>
+    /// Mutates the AllowedOrigins list on a CoreWebView2CustomSchemeRegistration object
+    /// directly in C# to avoid Protocol.cs converting IList&lt;string&gt; to a JS array and
+    /// losing the reference.  The origins array is passed as object[] from JS.
+    /// </summary>
+    public static void SetSchemeAllowedOrigins(object schemeReg, object[] origins)
+    {
+        var prop = schemeReg.GetType().GetProperty("AllowedOrigins");
+        if (prop == null) return;
+
+        // Try property setter first (some SDK versions have it).
+        if (prop.CanWrite)
+        {
+            var list = new List<string>();
+            if (origins != null)
+                foreach (var o in origins)
+                    if (o != null) list.Add(o.ToString());
+            prop.SetValue(schemeReg, list, null);
+            return;
+        }
+
+        // Getter-only: mutate the existing IList<string> in-place.
+        var existing = prop.GetValue(schemeReg, null) as System.Collections.IList;
+        if (existing == null) return;
+        existing.Clear();
+        if (origins != null)
+            foreach (var o in origins)
+                if (o != null) existing.Add(o.ToString());
+    }
+
     public static void AddScriptAndNavigate(object coreWebView2, string script, string url)
     {
         var addScriptMethod = FindMethod(coreWebView2.GetType(), "AddScriptToExecuteOnDocumentCreatedAsync", 1);

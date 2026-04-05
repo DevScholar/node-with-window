@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import { WebPreferences } from '../../interfaces.js';
 import { ipcMain } from '../../ipc-main.js';
 import { generateBridgeScript } from './bridge.js';
-import { getSyncServerPort } from '../../node-integration.js';
+import { addNwwCallbackPusher, removeNwwCallbackPusher } from '../../node-integration.js';
 
 /**
  * Owns the WebView2 IPC channel for one window: bridge script injection,
@@ -11,6 +11,7 @@ import { getSyncServerPort } from '../../node-integration.js';
  *
  * Uses lazy getters so it can be constructed before coreWebView2 exists.
  * Call setup() once inside add_CoreWebView2InitializationCompleted.
+ * Call cleanup() when the window closes.
  */
 export class WpfIpcBridge {
   private _pendingExecs = new Map<
@@ -18,6 +19,7 @@ export class WpfIpcBridge {
     { resolve: (v: unknown) => void; reject: (e: Error) => void }
   >();
   private _navCompletedCallback: (() => void) | null = null;
+  private _nwwPushFn: ((id: string, args: unknown[]) => void) | null = null;
 
   constructor(
     private readonly getCoreWebView2: () => unknown,
@@ -42,8 +44,8 @@ export class WpfIpcBridge {
       (event: unknown, ...args: unknown[]) => unknown
     >;
 
-    // ── Bridge + preload script ────────────────────────────────────────────
-    let bridgeScript = generateBridgeScript(this.webPreferences, getSyncServerPort());
+    // ── Bridge + preload script ────────────────────────────────────────────────
+    let bridgeScript = generateBridgeScript(this.webPreferences);
     const preloadPath = this.webPreferences.preload;
     if (preloadPath) {
       const absPreload = path.isAbsolute(preloadPath)
@@ -63,10 +65,6 @@ export class WpfIpcBridge {
       }
     }
 
-    // Register the bridge script and navigate in one atomic C# operation.
-    // addScriptAndNavigate uses Task.ContinueWith so Navigate() only fires
-    // after the script-registration ack, guaranteeing the script runs on
-    // the first document.  Without a pending file we just register the script.
     if (pendingAbsFilePath) {
       const fileUri = 'file:///' + pendingAbsFilePath.replace(/\\/g, '/');
       dotnetAny.addScriptAndNavigate(coreWebView2, bridgeScript, fileUri);
@@ -78,7 +76,11 @@ export class WpfIpcBridge {
       ).AddScriptToExecuteOnDocumentCreatedAsync(bridgeScript);
     }
 
-    // ── Document title → WPF window title sync ─────────────────────────────
+    // ── Register nww callback pusher ───────────────────────────────────────────
+    this._nwwPushFn = (id: string, args: unknown[]) => this.pushNwwCallback(id, args);
+    addNwwCallbackPusher(this._nwwPushFn);
+
+    // ── Document title → WPF window title sync ─────────────────────────────────
     (
       coreWebView2 as unknown as {
         add_DocumentTitleChanged: (cb: (_sender: unknown, _e: unknown) => void) => void;
@@ -90,7 +92,7 @@ export class WpfIpcBridge {
       }
     });
 
-    // ── WebMessageReceived → IPC dispatch ──────────────────────────────────
+    // ── WebMessageReceived → IPC dispatch ──────────────────────────────────────
     (
       coreWebView2 as unknown as {
         add_WebMessageReceived: (cb: (_sender: unknown, e: unknown) => void) => void;
@@ -98,8 +100,6 @@ export class WpfIpcBridge {
     ).add_WebMessageReceived((_sender, e) => {
       try {
         const evt = e as unknown as { WebMessageAsJson: string };
-        // WebMessageAsJson double-encodes string messages: JSON.parse once gives the inner
-        // JSON string, JSON.parse again gives the actual message object.
         const outer = JSON.parse(evt.WebMessageAsJson);
         const message = typeof outer === 'string' ? JSON.parse(outer) : outer;
         const { channel, type, id, args = [] } = message;
@@ -144,7 +144,7 @@ export class WpfIpcBridge {
       }
     });
 
-    // ── NavigationCompleted → did-finish-load callback ─────────────────────
+    // ── NavigationCompleted → did-finish-load callback ─────────────────────────
     if (this._navCompletedCallback) {
       (
         coreWebView2 as unknown as {
@@ -154,6 +154,24 @@ export class WpfIpcBridge {
         this._navCompletedCallback?.();
       });
     }
+  }
+
+  /** Push a node-integration callback to the renderer via the IPC channel. */
+  public pushNwwCallback(id: string, args: unknown[]): void {
+    const coreWebView2 = this.getCoreWebView2();
+    if (!coreWebView2) return;
+    const payload = JSON.stringify({ type: 'nwwCallback', id, args });
+    (coreWebView2 as unknown as { PostWebMessageAsString: (s: string) => void })
+      .PostWebMessageAsString(payload);
+  }
+
+  /** Remove the callback pusher registration. Call when the window closes. */
+  public cleanup(): void {
+    if (this._nwwPushFn) {
+      removeNwwCallbackPusher(this._nwwPushFn);
+      this._nwwPushFn = null;
+    }
+    this.rejectAll('Window closed');
   }
 
   public onNavigationCompleted(callback: () => void): void {
@@ -198,7 +216,7 @@ export class WpfIpcBridge {
     });
   }
 
-  /** Reject all in-flight executeJavaScript promises. Call on window close. */
+  /** Reject all in-flight executeJavaScript promises. */
   public rejectAll(reason: string): void {
     for (const pending of this._pendingExecs.values()) {
       pending.reject(new Error(reason));
