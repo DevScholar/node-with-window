@@ -208,6 +208,13 @@ export interface IWindowProvider {
    */
   onClosed?: () => void;
 
+  /**
+   * Called when the user requests to close the window (e.g. clicks X).
+   * Return true to cancel the close, false to allow it.
+   * BrowserWindow sets this to emit the cancelable 'close' event.
+   */
+  onCloseRequest?: () => boolean;
+
   // ── Methods required by all backends ──────────────────────────────────────
   sendToRenderer(channel: string, ...args: unknown[]): void;
   reload(): void;

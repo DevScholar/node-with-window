@@ -89,6 +89,7 @@ export class BrowserWindow extends EventEmitter {
     // Register the external-close callback BEFORE createWindow() so that any
     // close triggered during initialization (unlikely but possible) is handled.
     this.provider.onClosed = () => this._handleClosed();
+    this.provider.onCloseRequest = () => this._handleCloseRequest();
 
     this.webContents = new WebContents({
       sendToRenderer: (channel, ...args) => {
@@ -130,6 +131,18 @@ export class BrowserWindow extends EventEmitter {
       this.emit('error', error);
       throw error;
     }
+  }
+
+  /**
+   * Called when the window is about to close (X button or close() call).
+   * Emits the cancelable 'close' event. Returns true if the close was prevented.
+   */
+  private _handleCloseRequest(): boolean {
+    if (this.listenerCount('close') === 0) return false;
+    let prevented = false;
+    const event = { preventDefault: () => { prevented = true; } };
+    this.emit('close', event);
+    return prevented;
   }
 
   /**
@@ -245,6 +258,7 @@ export class BrowserWindow extends EventEmitter {
   }
 
   public close(): void {
+    if (this._handleCloseRequest()) return; // cancelled by 'close' listener
     this.provider.close();
     this._handleClosed();
   }
@@ -298,9 +312,10 @@ export class BrowserWindow extends EventEmitter {
     }
   }
 
-  /** Alias for close(). */
+  /** Forcibly destroys the window without emitting 'close'. Use close() for a graceful shutdown. */
   public destroy(): void {
-    this.close();
+    this.provider.close();
+    this._handleClosed();
   }
 
   public focus(): void {

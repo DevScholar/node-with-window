@@ -28,7 +28,7 @@ if (!target || target === '.') {
 
 const targetFile = path.resolve(cwd, target);
 if (!fs.existsSync(targetFile)) {
-    console.error(`[node-with-window] Error: ${targetFile} not found`);
+    console.error(`[nww] Error: ${targetFile} not found`);
     process.exit(1);
 }
 
@@ -37,7 +37,7 @@ const isWin = process.platform === 'win32';
 
 // JS entry: run directly without building
 if (!isTs) {
-    console.log(`[node-with-window] Running ${target} with ${runtime}...`);
+    console.log(`[nww] Running ${target} with ${runtime}...`);
     const runArgs = runtime === 'deno'
         ? ['run', '--allow-all', targetFile, ...extraArgs]
         : [targetFile, ...extraArgs];
@@ -55,7 +55,7 @@ if (!isTs) {
     const esbuildPre   = usingLocal ? [] : ['esbuild'];
     const external     = isWin ? '@devscholar/node-ps1-dotnet' : '@devscholar/node-with-gjs';
 
-    console.log(`[node-with-window] Building ${target}...`);
+    console.log(`[nww] Building ${target}...`);
     const build = spawnSync(
         esbuildCmd,
         [...esbuildPre, targetFile,
@@ -66,7 +66,7 @@ if (!isTs) {
     );
     if (build.status !== 0) process.exit(build.status ?? 1);
 
-    console.log(`[node-with-window] Running with ${runtime}...`);
+    console.log(`[nww] Running with ${runtime}...`);
     const runArgs = runtime === 'deno'
         ? ['run', '--allow-all', outfile, ...extraArgs]
         : [outfile, ...extraArgs];

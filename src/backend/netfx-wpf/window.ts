@@ -91,6 +91,8 @@ export class NetFxWpfWindow implements IWindowProvider {
   public pendingMenu: MenuItemOptions[] | null = null;
   /** Registered by BrowserWindow; called when the WPF window is closed externally. */
   public onClosed?: () => void;
+  /** Registered by BrowserWindow; called when the user requests close (X button). Return true to cancel. */
+  public onCloseRequest?: () => boolean;
   private isClosed = false;
   private _isFullScreen = false;
   private _isKiosk = false;
@@ -327,6 +329,31 @@ export class NetFxWpfWindow implements IWindowProvider {
     this._ipcBridge.send(channel, ...args);
   }
 
+  /**
+   * Registers cancelable Closing and final Closed handlers on the WPF window.
+   * Call once per window after the window object is created.
+   *
+   * - add_Closing: fires before the window closes (X button only, not programmatic).
+   *   `FireSyncEventAndWait` blocks C# until Node.js replies, so `e.Cancel = true`
+   *   is applied synchronously — this is the same mechanism as the node-ps1-dotnet
+   *   prevent-close example.  When `isClosed` is already set (programmatic path),
+   *   the handler returns without cancelling.
+   * - add_Closed: fires after the window has been destroyed.
+   */
+  private _registerWindowCloseHandlers(): void {
+    (this.browserWindow as any).add_Closing((_s: unknown, e: any) => {
+      // Programmatic close (provider.close() sets isClosed before calling WPF Close()).
+      // Let it proceed without consulting the JS layer — BrowserWindow already handled it.
+      if (this.isClosed) return;
+      if (this.onCloseRequest?.()) {
+        e.Cancel = true; // syncEvent: this property set reaches C# before FireSyncEventAndWait returns
+      }
+    });
+    (this.browserWindow as unknown as { add_Closed: (cb: () => void) => void }).add_Closed(() => {
+      this._onWindowClosed();
+    });
+  }
+
   public show(): void {
     if (this.app) {
       (this.browserWindow as unknown as { Show: () => void }).Show();
@@ -345,9 +372,7 @@ export class NetFxWpfWindow implements IWindowProvider {
         buildWpfMenu(Object.assign(this, { pendingMenu: this.pendingMenu }));
       }
 
-      (this.browserWindow as unknown as { add_Closed: (cb: () => void) => void }).add_Closed(() => {
-        this._onWindowClosed();
-      });
+      this._registerWindowCloseHandlers();
 
       // Set WPF Owner before Show() if a parent window is provided.
       if (this.options.parent) {
@@ -403,9 +428,7 @@ export class NetFxWpfWindow implements IWindowProvider {
     // _initWebView2WithProtocols() after EnsureCoreWebView2Async resolves.
     this.app = new Windows.Application();
 
-    (this.browserWindow as unknown as { add_Closed: (cb: () => void) => void }).add_Closed(() => {
-      this._onWindowClosed();
-    });
+    this._registerWindowCloseHandlers();
 
     // StartApplication pre-sends {type:'ok'} immediately, then calls Application.Run()
     // on the .NET side — the Node.js event loop is never blocked.

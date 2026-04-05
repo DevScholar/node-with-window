@@ -56,6 +56,8 @@ export class GjsGtk4Window implements IWindowProvider {
   >();
 
   public onClosed?: () => void;
+  /** Registered by BrowserWindow; called when the user requests close (X button). Return true to cancel. */
+  public onCloseRequest?: () => boolean;
 
   constructor(options?: BrowserWindowOptions) {
     this.options = options || {};
@@ -247,8 +249,21 @@ export class GjsGtk4Window implements IWindowProvider {
     addNwwCallbackPusher(this._nwwPushFn);
 
     // ── Signal: window closed by user ──────────────────────────────────────
-    this.win.connect('close-request', async () => {
+    // close-request fires synchronously via FireSyncEventAndWait — the return
+    // value (true = cancel, false = allow) reaches GTK before the signal returns.
+    // Same mechanism as the node-with-gjs prevent-close example.
+    this.win.connect('close-request', () => {
+      if (this.isClosed) {
+        // Programmatic close (provider.close() already set isClosed).
+        // _onWindowClosed() will return early; just allow GTK to destroy the widget.
+        this._onWindowClosed();
+        return false;
+      }
+      if (this.onCloseRequest?.()) {
+        return true; // prevented — keep window open
+      }
       this._onWindowClosed();
+      return false;
     });
 
     // ── Signal: page load progress ────────────────────────────────────────
@@ -763,7 +778,6 @@ export class GjsGtk4Window implements IWindowProvider {
     message: string;
     buttons?: string[];
   }): number {
-    if (this.webView) return showMessageBox(code => this._evaluateJs(code), options);
-    return 0;
+    return showMessageBox(this.win, options);
   }
 }

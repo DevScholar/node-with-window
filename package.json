@@ -12,7 +12,7 @@
     }
   },
   "bin": {
-    "node-with-window": "./bin/node-with-window.js"
+    "nww": "./bin/nww.js"
   },
   "files": [
     "bin",

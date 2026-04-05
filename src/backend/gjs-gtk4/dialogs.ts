@@ -91,11 +91,47 @@ export function showSaveDialog(win: any, options: SaveDialogOptions): string | u
 }
 
 export function showMessageBox(
-  evaluateJs: (code: string) => void,
+  win: any,
   options: { type?: string; title?: string; message: string; buttons?: string[] },
 ): number {
-  // GTK4 has no synchronous dialog API. Use JavaScript alert() in the WebView
-  // as a simple fallback — it blocks the renderer until dismissed.
-  evaluateJs(`alert(${JSON.stringify(options.message || '')})`);
-  return 0;
+  if (!win) return 0;
+
+  let result = 0;
+  let done = false;
+
+  try {
+    const typeMap: Record<string, number> = {
+      none:     0,  // Gtk.MessageType.OTHER
+      info:     1,  // Gtk.MessageType.INFO
+      warning:  2,  // Gtk.MessageType.WARNING
+      question: 3,  // Gtk.MessageType.QUESTION
+      error:    4,  // Gtk.MessageType.ERROR
+    };
+
+    const dialog = new _Gtk.MessageDialog({
+      transient_for: win,
+      modal: true,
+      message_type: typeMap[options.type || 'none'] ?? 0,
+      text: options.title || 'Message',
+      secondary_text: options.message || '',
+    });
+
+    const buttons = options.buttons || ['OK'];
+    for (let i = 0; i < buttons.length; i++) {
+      dialog.add_button(buttons[i], i);
+    }
+
+    dialog.connect('response', (_d: any, response: number) => {
+      result = response >= 0 ? response : 0;
+      _d.close();
+      done = true;
+    });
+
+    dialog.present();
+    while (!done) drainCallbacks();
+  } catch (e) {
+    console.warn('[gjs-gtk4] showMessageBox failed:', e);
+  }
+
+  return result;
 }
