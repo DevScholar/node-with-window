@@ -358,46 +358,39 @@ export class GjsGtk4Window implements IWindowProvider {
    * Read the POST body from a WebKitURISchemeRequest.
    * get_http_body() is available in WebKit 2.40+; returns null on older builds.
    */
-  private async _readNwwBody(req: any): Promise<string | null> {
+  private _readNwwBody(req: any): string | null {
     try {
       const stream = req.get_http_body?.();
       if (!stream) return null;
-      return await new Promise<string>((resolve, reject) => {
-        // Read up to 10 MB in one shot — enough for any reasonable payload.
-        stream.read_bytes_async(10 * 1024 * 1024, 0, null, (src: any, res: any) => {
-          try {
-            const gBytes = src.read_bytes_finish(res);
-            const data: Uint8Array = gBytes.get_data();
-            resolve(new TextDecoder().decode(data));
-          } catch (e) { reject(e); }
-        });
-      });
+      const gBytes = stream.read_bytes(10 * 1024 * 1024, null);
+      const data: Uint8Array = gBytes.get_data();
+      return new TextDecoder().decode(data);
     } catch {
       return null;
     }
   }
 
-  private async _handleNwwSchemeRequest(req: any): Promise<void> {
-    const uri: string    = req.get_uri();
-    const method: string = req.get_http_method();
-    const body           = method === 'POST' ? await this._readNwwBody(req) : null;
-
-    const result = handleNwwRequest(uri, method, body);
-
+  private _handleNwwSchemeRequest(req: any): void {
     try {
+      const uri: string    = req.get_uri();
+      const method: string = req.get_http_method?.() ?? 'GET';
+      const body           = method === 'POST' ? this._readNwwBody(req) : null;
+
+      const result = handleNwwRequest(uri, method, body);
+
       const bytes = result.status === 204
         ? new Uint8Array(0)
         : new TextEncoder().encode(result.body);
-      const glibBytes = _GLib.Bytes.new(bytes);
+      const glibBytes = new (_GLib.Bytes as any)(bytes);
       const stream    = _Gio.MemoryInputStream.new_from_bytes(glibBytes);
 
-      // Use finish_with_response for all nww:// replies so we can set the
-      // status code correctly (204 No Content for /__nww_release__, etc.).
-      const resp = new _WebKit.URISchemeResponse(stream, bytes.length);
-      resp.set_status(result.status, null);
-      resp.set_content_type(result.mimeType);
-      req.finish_with_response(resp);
+      // Use req.finish() directly — the URISchemeResponse constructor in some
+      // WebKit versions doesn't properly store the input stream, causing
+      // g_input_stream_read_async assertion failures.  Status code is always
+      // 200 but the nww bridge checks the JSON body, not HTTP status.
+      req.finish(stream, bytes.length, result.mimeType);
     } catch (e) {
+      console.error('[gjs-gtk4] nww scheme handler error:', e);
       try { req.finish_error(e instanceof Error ? e : new Error(String(e))); } catch { /* ignore */ }
     }
   }
@@ -432,13 +425,13 @@ export class GjsGtk4Window implements IWindowProvider {
         bytes = new Uint8Array((body as Buffer).buffer, (body as Buffer).byteOffset, (body as Buffer).byteLength);
       }
 
-      const glibBytes = _GLib.Bytes.new(bytes);
+      const glibBytes = new (_GLib.Bytes as any)(bytes);
       const stream    = _Gio.MemoryInputStream.new_from_bytes(glibBytes);
       const mimeType  = result.mimeType ?? 'text/html; charset=utf-8';
       const status    = result.statusCode ?? 200;
 
       if (status !== 200) {
-        const resp = new _WebKit.URISchemeResponse(stream, bytes.length);
+        const resp = new _WebKit.URISchemeResponse(stream);
         resp.set_status(status, null);
         resp.set_content_type(mimeType);
         request.finish_with_response(resp);
