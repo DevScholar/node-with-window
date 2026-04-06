@@ -13,9 +13,10 @@ export function showOpenDialog(win: any, options: OpenDialogOptions): string[] |
   try {
     const dialog = new _Gtk.FileDialog();
     if (options.title) dialog.title = options.title;
-    if (options.defaultPath) {
-      try { dialog.initial_folder = _Gio.File.new_for_path(options.defaultPath); } catch { /* ignore */ }
-    }
+    const openFolder = options.defaultPath
+      ? _Gio.File.new_for_path(options.defaultPath)
+      : _Gio.File.new_for_path(process.cwd());
+    try { dialog.initial_folder = openFolder; } catch { /* ignore */ }
 
     const isMulti = options.properties?.includes('multiSelections');
     const isDir   = options.properties?.includes('openDirectory');
@@ -59,8 +60,8 @@ export function showSaveDialog(win: any, options: SaveDialogOptions): string | u
   try {
     const dialog = new _Gtk.FileDialog();
     if (options.title) dialog.title = options.title;
-    if (options.defaultPath) {
-      const dp = options.defaultPath;
+    const dp = options.defaultPath;
+    if (dp) {
       try {
         const stat = fs.statSync(dp);
         if (stat.isDirectory()) {
@@ -70,8 +71,13 @@ export function showSaveDialog(win: any, options: SaveDialogOptions): string | u
           dialog.initial_name = path.basename(dp);
         }
       } catch {
+        dialog.initial_folder = _Gio.File.new_for_path(
+          path.isAbsolute(dp) ? path.dirname(dp) : process.cwd()
+        );
         dialog.initial_name = path.basename(dp);
       }
+    } else {
+      try { dialog.initial_folder = _Gio.File.new_for_path(process.cwd()); } catch { /* ignore */ }
     }
 
     dialog.save(win, null, (source: any, asyncResult: any) => {

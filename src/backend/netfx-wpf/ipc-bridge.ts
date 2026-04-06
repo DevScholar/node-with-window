@@ -4,6 +4,7 @@ import { WebPreferences } from '../../interfaces.js';
 import { ipcMain } from '../../ipc-main.js';
 import { generateBridgeScript } from './bridge.js';
 import { addNwwCallbackPusher, removeNwwCallbackPusher } from '../../node-integration.js';
+import { addAsyncEvent, addDeferredEvent } from '@devscholar/node-ps1-dotnet';
 
 /**
  * Owns the WebView2 IPC channel for one window: bridge script injection,
@@ -80,12 +81,12 @@ export class WpfIpcBridge {
     this._nwwPushFn = (id: string, args: unknown[]) => this.pushNwwCallback(id, args);
     addNwwCallbackPusher(this._nwwPushFn);
 
+    const coreRef = (coreWebView2 as unknown as { __ref: string }).__ref;
+
     // ── Document title → WPF window title sync ─────────────────────────────────
-    (
-      coreWebView2 as unknown as {
-        add_DocumentTitleChanged: (cb: (_sender: unknown, _e: unknown) => void) => void;
-      }
-    ).add_DocumentTitleChanged((_sender, _e) => {
+    // Use addAsyncEvent (EventQueue polling) so this runs at syncEventDepth=0,
+    // avoiding response-mismatch issues from nested syncEvents.
+    addAsyncEvent(coreRef, 'DocumentTitleChanged', (_sender: unknown, _e: unknown) => {
       const title = (coreWebView2 as unknown as { DocumentTitle: string }).DocumentTitle;
       if (title) {
         (this.getBrowserWindow() as unknown as { Title: string }).Title = title;
@@ -93,11 +94,11 @@ export class WpfIpcBridge {
     });
 
     // ── WebMessageReceived → IPC dispatch ──────────────────────────────────────
-    (
-      coreWebView2 as unknown as {
-        add_WebMessageReceived: (cb: (_sender: unknown, e: unknown) => void) => void;
-      }
-    ).add_WebMessageReceived((_sender, e) => {
+    // Use addAsyncEvent (EventQueue polling) instead of add_WebMessageReceived
+    // (FireSyncEventAndWait) so that the handler runs at syncEventDepth=0.
+    // This allows ShowDialog spin-polls and other blocking patterns inside
+    // ipcMain.handle() callbacks to work without deadlocking the pipe.
+    addAsyncEvent(coreRef, 'WebMessageReceived', (_sender: unknown, e: unknown) => {
       try {
         const evt = e as unknown as { WebMessageAsJson: string };
         const outer = JSON.parse(evt.WebMessageAsJson);

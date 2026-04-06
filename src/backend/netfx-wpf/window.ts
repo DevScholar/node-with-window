@@ -12,6 +12,7 @@ import {
 import { NativeImage } from '../../native-image.js';
 import { protocol, ensureProtocolWorker, callHandlerSync } from '../../protocol.js';
 import { handleNwwRequest } from '../../node-integration.js';
+import { addDeferredEvent } from '@devscholar/node-ps1-dotnet';
 import { findWebView2Runtime } from './webview2-runtime.js';
 import { parseBackgroundColor } from './color.js';
 import { WpfIpcBridge } from './ipc-bridge.js';
@@ -519,7 +520,13 @@ export class NetFxWpfWindow implements IWindowProvider {
       ensureProtocolWorker(protocol.getAllHandlers());
     }
 
-    coreWV2.add_WebResourceRequested((_s: unknown, e: unknown) => {
+    // ── WebResourceRequested → nww:// and custom protocol handling ──────────────
+    // Use addDeferredEvent (GetDeferral + EventQueue) instead of sync
+    // add_WebResourceRequested (FireSyncEventAndWait).  This prevents the STA
+    // thread from blocking, so ShowDialog and other WPF blocking patterns can
+    // coexist with nww:// requests (e.g. require() from the renderer).
+    const coreRef = (coreWV2 as unknown as { __ref: string }).__ref;
+    addDeferredEvent(coreRef, 'WebResourceRequested', (_s: unknown, e: unknown) => {
       const ev = e as any;
       const uri: string  = ev.Request.Uri;
       const meth: string = ev.Request.Method;
