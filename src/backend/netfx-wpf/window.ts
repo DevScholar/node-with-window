@@ -12,7 +12,7 @@ import {
 import { NativeImage } from '../../native-image.js';
 import { protocol, ensureProtocolWorker, callHandlerSync } from '../../protocol.js';
 import { handleNwwRequest } from '../../node-integration.js';
-import { addDeferredEvent } from '@devscholar/node-ps1-dotnet';
+import { addDeferredEvent } from '@devscholar/node-ps1-dotnet/internal';
 import { findWebView2Runtime } from './webview2-runtime.js';
 import { parseBackgroundColor } from './color.js';
 import { WpfIpcBridge } from './ipc-bridge.js';

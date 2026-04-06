@@ -4,7 +4,7 @@ import { WebPreferences } from '../../interfaces.js';
 import { ipcMain } from '../../ipc-main.js';
 import { generateBridgeScript } from './bridge.js';
 import { addNwwCallbackPusher, removeNwwCallbackPusher } from '../../node-integration.js';
-import { addAsyncEvent } from '@devscholar/node-ps1-dotnet';
+import { addAsyncEvent } from '@devscholar/node-ps1-dotnet/internal';
 
 /**
  * Owns the WebView2 IPC channel for one window: bridge script injection,
