@@ -53,7 +53,7 @@ export function buildGioMenu(
     const action = new Gio.SimpleAction({ name: actionId });
 
     if (clickFn) {
-      action.connect('activate', async () => { clickFn(); });
+      action.connect('activate', () => { clickFn(); });
     }
     if (item.enabled === false) {
       action.set_enabled(false);

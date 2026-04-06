@@ -68,11 +68,11 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
             var args = msg.args || [];
             var wrap = window.__nwwWrapResult || function(x) { return x; };
             if (args[0] === '__nww_resolve') {
-                var ap = window.__nwwAsyncPending && window.__nwwAsyncPending[msg.id];
-                if (ap) { delete window.__nwwAsyncPending[msg.id]; ap.resolve(wrap(args[1])); }
+                var apResolve = window.__nwwAsyncPending && window.__nwwAsyncPending[msg.id];
+                if (apResolve) { delete window.__nwwAsyncPending[msg.id]; apResolve.resolve(wrap(args[1])); }
             } else if (args[0] === '__nww_reject') {
-                var ap = window.__nwwAsyncPending && window.__nwwAsyncPending[msg.id];
-                if (ap) { delete window.__nwwAsyncPending[msg.id]; ap.reject(new Error(args[1])); }
+                var apReject = window.__nwwAsyncPending && window.__nwwAsyncPending[msg.id];
+                if (apReject) { delete window.__nwwAsyncPending[msg.id]; apReject.reject(new Error(args[1])); }
             } else {
                 var cb = window.__nwwCallbacks && window.__nwwCallbacks[msg.id];
                 if (cb) cb.apply(null, args.map(wrap));

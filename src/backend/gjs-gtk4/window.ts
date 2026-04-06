@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { startEventDrain } from '@devscholar/node-with-gjs';
 import {
   _Gtk, _Gdk, _WebKit, _Gio, _GLib, _gtkApp, _appRunning, _pendingWindowCreations, ensureGtkApp,
@@ -56,7 +57,6 @@ export class GjsGtk4Window implements IWindowProvider {
   >();
 
   public onClosed?: () => void;
-  /** Registered by BrowserWindow; called when the user requests close (X button). Return true to cancel. */
   public onCloseRequest?: () => boolean;
 
   constructor(options?: BrowserWindowOptions) {
@@ -106,7 +106,7 @@ export class GjsGtk4Window implements IWindowProvider {
     }
 
     // Async callback: messages arrive via poll every 16 ms
-    this.ucm.connect('script-message-received::ipc', async (_ucm: any, jsResult: any) => {
+    this.ucm.connect('script-message-received::ipc', (_ucm: any, jsResult: any) => {
       try {
         let json: string;
         try {
@@ -144,7 +144,7 @@ export class GjsGtk4Window implements IWindowProvider {
 
     this.webView = new _WebKit.WebView({
       user_content_manager: this.ucm,
-      ...(this._webContext ? { web_context: this._webContext } : {}),
+      web_context: this._webContext,
     });
 
     try {
@@ -249,40 +249,23 @@ export class GjsGtk4Window implements IWindowProvider {
     addNwwCallbackPusher(this._nwwPushFn);
 
     // ── Signal: window closed by user ──────────────────────────────────────
-    // close-request fires synchronously via FireSyncEventAndWait — the return
-    // value (true = cancel, false = allow) reaches GTK before the signal returns.
-    //
-    // IMPORTANT: do NOT call drainCallbacks() (directly or indirectly via
-    // showMessageBox/showOpenDialog/showSaveDialog) from inside this handler.
-    // Doing so creates a nested GTK event loop inside a signal dispatch and
-    // freezes the window.  When onCloseRequest is registered we therefore
-    // always return true immediately and defer the actual check via setImmediate
-    // so that it runs outside the signal handler.
+    // Always return true (prevent GTK auto-close) and handle asynchronously via
+    // setImmediate. This frees the GJS event loop before onCloseRequest runs, so
+    // showMessageBox() and other dialog calls inside a 'close' listener work
+    // without deadlocking the GJS/GTK event processing.
     this.win.connect('close-request', () => {
-      if (this.isClosed) {
-        // Programmatic close (provider.close() already set isClosed).
-        // _onWindowClosed() will return early; just allow GTK to destroy the widget.
-        this._onWindowClosed();
-        return false;
-      }
-      if (this.onCloseRequest) {
-        // Defer to avoid nested GTK event loop (freeze) when the handler
-        // shows a dialog (drainCallbacks) synchronously.
-        setImmediate(() => {
-          if (!this.onCloseRequest?.()) {
-            // Not prevented — proceed with the close.
-            this.close();
-          }
-        });
-        return true; // prevent for now; close() is called if confirmed above
-      }
-      this._onWindowClosed();
-      return false;
+      setImmediate(() => {
+        if (!this.onCloseRequest?.()) {
+          this._onWindowClosed();
+          if (this.win) try { this.win.destroy(); } catch { /* ignore */ }
+        }
+      });
+      return true;
     });
 
     // ── Signal: page load progress ────────────────────────────────────────
     // LoadEvent enum: STARTED=0, REDIRECTED=1, COMMITTED=2, FINISHED=3
-    this.webView.connect('load-changed', async (_wv: any, loadEvent: any) => {
+    this.webView.connect('load-changed', (_wv: any, loadEvent: any) => {
       if (loadEvent === 3) {  // FINISHED
         this.isWebViewReady = true;
         this._navCompletedCallback?.();
@@ -293,9 +276,18 @@ export class GjsGtk4Window implements IWindowProvider {
       }
     });
 
+    // ── Document title → GTK window title sync ────────────────────────────
+    // Mirrors WPF's DocumentTitleChanged handler in ipc-bridge.ts.
+    this.webView.connect('notify::title', () => {
+      try {
+        const pageTitle: string = this.webView.get_title?.() ?? '';
+        if (pageTitle) this.win.set_title(pageTitle);
+      } catch { /* best-effort */ }
+    });
+
     // ── Initial navigation ─────────────────────────────────────────────────
     if (this._pendingFilePath) {
-      this.webView.load_uri('file://' + this._pendingFilePath);
+      this.webView.load_uri(pathToFileURL(this._pendingFilePath).href);
       this._pendingFilePath = null;
     } else {
       this.webView.load_uri('about:blank');
@@ -306,33 +298,31 @@ export class GjsGtk4Window implements IWindowProvider {
     if (this.win) this.win.present();
   }
 
-  public close(): void {
-    if (this.isClosed) return;
-    this.isClosed = true;
+  /** Release JS-side resources (nww pusher, pending execs) without touching the GTK widget. */
+  private _cleanup(): void {
     if (this._nwwPushFn) {
       removeNwwCallbackPusher(this._nwwPushFn);
       this._nwwPushFn = null;
     }
     for (const p of this._pendingExecs.values()) p.reject(new Error('Window closed'));
     this._pendingExecs.clear();
-    if (this.win) {
-      try { this.win.close(); } catch { /* ignore */ }
-    }
-    this.onClosed?.();
   }
 
   private _onWindowClosed(): void {
     if (this.isClosed) return;
     this.isClosed = true;
-    if (this._nwwPushFn) {
-      removeNwwCallbackPusher(this._nwwPushFn);
-      this._nwwPushFn = null;
-    }
-    for (const pending of this._pendingExecs.values()) {
-      pending.reject(new Error('Window closed'));
-    }
-    this._pendingExecs.clear();
+    this._cleanup();
     this.onClosed?.();
+  }
+
+  public close(): void {
+    if (this.isClosed) return;
+    this.isClosed = true;
+    this._cleanup();
+    if (this.win) {
+      try { this.win.destroy(); } catch { /* ignore */ }
+    }
+    // Do NOT call onClosed — BrowserWindow owns the programmatic-close path.
   }
 
   // ── Navigation ─────────────────────────────────────────────────────────────
@@ -349,7 +339,7 @@ export class GjsGtk4Window implements IWindowProvider {
     const absolutePath = path.isAbsolute(filePath)
       ? filePath
       : path.resolve(process.cwd(), filePath);
-    const fileUri = 'file://' + absolutePath;
+    const fileUri = pathToFileURL(absolutePath).href;
     if (!this.webView) {
       this._pendingFilePath = absolutePath;
       return;
