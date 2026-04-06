@@ -4,7 +4,7 @@ import { WebPreferences } from '../../interfaces.js';
 import { ipcMain } from '../../ipc-main.js';
 import { generateBridgeScript } from './bridge.js';
 import { addNwwCallbackPusher, removeNwwCallbackPusher } from '../../node-integration.js';
-import { addAsyncEvent, addDeferredEvent } from '@devscholar/node-ps1-dotnet';
+import { addAsyncEvent } from '@devscholar/node-ps1-dotnet';
 
 /**
  * Owns the WebView2 IPC channel for one window: bridge script injection,
@@ -29,6 +29,7 @@ export class WpfIpcBridge {
     private readonly webPreferences: WebPreferences,
     /** The IWindowProvider instance — passed as event.sender to ipcMain handlers. */
     private readonly getWindowSender: () => unknown,
+    private readonly getWebView: () => unknown,
   ) {}
 
   /**
@@ -68,7 +69,15 @@ export class WpfIpcBridge {
 
     if (pendingAbsFilePath) {
       const fileUri = 'file:///' + pendingAbsFilePath.replace(/\\/g, '/');
-      dotnetAny.addScriptAndNavigate(coreWebView2, bridgeScript, fileUri);
+      (coreWebView2 as unknown as {
+        AddScriptToExecuteOnDocumentCreatedAsync: (s: string) => unknown;
+      }).AddScriptToExecuteOnDocumentCreatedAsync(bridgeScript);
+      // Defer navigation by one event-loop tick so the script registration
+      // IPC round-trip completes before WebView2 starts loading the document.
+      setImmediate(() => {
+        (this.getWebView() as unknown as { Source: unknown }).Source =
+          new dotnetAny.System.Uri(fileUri);
+      });
     } else {
       (
         coreWebView2 as unknown as {

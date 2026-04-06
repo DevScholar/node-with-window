@@ -137,6 +137,7 @@ export class NetFxWpfWindow implements IWindowProvider {
       () => dotnet,
       this.webPreferences,
       () => this,
+      () => this.webView,
     );
     this._windowChrome = new Win32Chrome(
       () => this.browserWindow,
