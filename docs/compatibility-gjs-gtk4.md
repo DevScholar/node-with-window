@@ -148,7 +148,7 @@
 | `win.popupMenu(items, x?, y?)` | ❌ | Not implemented; logs `console.warn` |
 | `win.showOpenDialog(options)` | ✅ | `Gtk.FileDialog` async + `drainCallbacks()` spin-wait; returns `string[] \| undefined` |
 | `win.showSaveDialog(options)` | ✅ | Same mechanism |
-| `win.showMessageBox(options)` | ⚠️ | Falls back to `alert()` via `evaluate_javascript`; always returns `0`; `buttons` array ignored |
+| `win.showMessageBox(options)` | ✅ | `Gtk.AlertDialog` (GTK ≥ 4.10) or `Gtk.MessageDialog` fallback; `drainCallbacks()` spin-wait; returns button index |
 | `win.capturePage()` | ❌ | Returns an empty `NativeImage`; WebKit snapshot API not yet wired |
 
 ### Window Events
@@ -156,7 +156,7 @@
 | Event | Status | Notes |
 |---|---|---|
 | `'closed'` | ✅ | Emitted after the window has been destroyed |
-| `'close'` | ❌ | Pre-close cancelable event not implemented |
+| `'close'` | ✅ | Pre-close cancelable event; `event.preventDefault()` prevents the window from closing |
 | `'focus'` | ❌ | Not emitted |
 | `'blur'` | ❌ | Not emitted |
 | `'show'` | ❌ | Not emitted |
@@ -246,8 +246,8 @@ All methods execute synchronously underneath (`Gtk.FileDialog` async callbacks d
 |---|---|---|
 | `dialog.showOpenDialog([win,] options)` | ✅ | `Gtk.FileDialog`; returns `Promise<{ canceled, filePaths }>` |
 | `dialog.showSaveDialog([win,] options)` | ✅ | `Gtk.FileDialog`; returns `Promise<{ canceled, filePath }>` |
-| `dialog.showMessageBox([win,] options)` | ⚠️ | Falls back to `alert()` via `evaluate_javascript`; always returns `{ response: 0 }`; `buttons` array and `type` are ignored |
-| `dialog.showErrorBox(title, content)` | ✅ | Gtk.AlertDialog (GTk 4.10+)|
+| `dialog.showMessageBox([win,] options)` | ✅ | `Gtk.AlertDialog` (GTK ≥ 4.10) or `Gtk.MessageDialog` fallback; returns `Promise<{ response }>` |
+| `dialog.showErrorBox(title, content)` | ✅ | Delegates to `showMessageBox` |
 | `dialog.showCertificateTrustDialog()` | ❌ | Not implemented | macOS only |
 
 ---
@@ -347,18 +347,14 @@ The following Electron modules have no equivalent in this library:
 
 2. **`contextIsolation` is simulated, not enforced.** When `contextIsolation: true` and a preload is present, `ipcRenderer` and `contextBridge` are deleted from `window` after the preload runs. This is not V8 context isolation.
 
-3. **No cancelable `'close'` event.** Only `'closed'` (post-destruction) is emitted.
+3. **Window events are not emitted.** `'focus'`, `'blur'`, `'resize'`, `'move'`, etc. are not wired to GTK signals.
 
-4. **Window events are not emitted.** `'focus'`, `'blur'`, `'resize'`, `'move'`, etc. are not wired to GTK signals.
+4. **`win.capturePage()` returns an empty image.** The WebKit snapshot API is not yet wired; `NativeImage.isEmpty()` will return `true`.
 
-5. **`dialog.showMessageBox` uses `alert()`.** GTK4 removed synchronous dialog APIs. `showMessageBox` evaluates `alert(message)` in the WebView as a fallback — it always returns `0` and ignores the `buttons` array.
+5. **`webPreferences.partition` is ignored.** WebKitGTK uses a single default data manager; per-window session isolation is not supported.
 
-6. **`win.capturePage()` returns an empty image.** The WebKit snapshot API is not yet wired; `NativeImage.isEmpty()` will return `true`.
+6. **`x`, `y`, `maxWidth`, `maxHeight`, `alwaysOnTop`, `skipTaskbar`, `flashFrame` have no effect.** GTK4 removed the relevant APIs (`window.move()`, maximum size, urgency hints); window placement and stacking are managed entirely by the compositor.
 
-7. **`webPreferences.partition` is ignored.** WebKitGTK uses a single default data manager; per-window session isolation is not supported.
-
-8. **`x`, `y`, `maxWidth`, `maxHeight`, `alwaysOnTop`, `skipTaskbar`, `flashFrame` have no effect.** GTK4 removed the relevant APIs (`window.move()`, maximum size, urgency hints); window placement and stacking are managed entirely by the compositor.
-
-9. **`win.popupMenu()` is not implemented.** It logs a warning. The `menu.popup()` method is equally unimplemented for GTK4.
+7. **`win.popupMenu()` is not implemented.** It logs a warning. The `menu.popup()` method is equally unimplemented for GTK4.
 
 10. **Preload scripts** are registered via `WebKit.UserContentManager.add_script()` at `DOCUMENT_START` — they run on every navigation before the page's own scripts, matching Electron's behaviour.
