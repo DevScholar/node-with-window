@@ -247,7 +247,7 @@ All methods execute synchronously underneath (`Gtk.FileDialog` async callbacks d
 | `dialog.showOpenDialog([win,] options)` | ✅ | `Gtk.FileDialog`; returns `Promise<{ canceled, filePaths }>` |
 | `dialog.showSaveDialog([win,] options)` | ✅ | `Gtk.FileDialog`; returns `Promise<{ canceled, filePath }>` |
 | `dialog.showMessageBox([win,] options)` | ⚠️ | Falls back to `alert()` via `evaluate_javascript`; always returns `{ response: 0 }`; `buttons` array and `type` are ignored |
-| `dialog.showErrorBox(title, content)` | ⚠️ | Calls `showMessageBox` — same `alert()` fallback |
+| `dialog.showErrorBox(title, content)` | ✅ | Gtk.AlertDialog (GTk 4.10+)|
 | `dialog.showCertificateTrustDialog()` | ❌ | Not implemented | macOS only |
 
 ---
