@@ -72,8 +72,20 @@ export class WpfIpcBridge {
       (coreWebView2 as unknown as {
         AddScriptToExecuteOnDocumentCreatedAsync: (s: string) => unknown;
       }).AddScriptToExecuteOnDocumentCreatedAsync(bridgeScript);
-      // Defer navigation by one event-loop tick so the script registration
-      // IPC round-trip completes before WebView2 starts loading the document.
+      // Defer navigation by one event-loop tick (analogous to setTimeout(0) in
+      // browsers).  Two things must be true before it is safe to navigate:
+      //   1. AddScriptToExecuteOnDocumentCreatedAsync's C# async Task must have
+      //      completed — otherwise WebView2 may create the document before the
+      //      bridge script is registered, leaving the page without IPC.
+      //   2. setup() must have returned and the CoreWebView2InitializationCompleted
+      //      syncEvent reply must have been sent (syncEventDepth back to 0).
+      //      Navigating while still inside a syncEvent callback can confuse the
+      //      IPC pipe's response ordering.
+      // setImmediate fires after the current call stack unwinds, satisfying both
+      // conditions cheaply.  The previous implementation achieved the same effect
+      // accidentally via a no-op IPC round-trip (addScriptAndNavigate sent a
+      // command that had no handler in C# and returned void, consuming just enough
+      // time for the Task to finish while also deferring past the syncEvent).
       setImmediate(() => {
         (this.getWebView() as unknown as { Source: unknown }).Source =
           new dotnetAny.System.Uri(fileUri);
