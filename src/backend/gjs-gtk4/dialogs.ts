@@ -102,9 +102,43 @@ export function showMessageBox(
 ): number {
   if (!win) return 0;
 
+  const buttons = options.buttons || ['OK'];
   let result = 0;
   let done = false;
 
+  // Prefer AlertDialog (GTK 4.10+) — MessageDialog is deprecated since 4.10
+  // and its response-id mapping is unreliable on newer GTK versions.
+  if (_Gtk.AlertDialog) {
+    try {
+      const dialog = new _Gtk.AlertDialog({
+        message: options.title || options.message,
+        detail: options.title ? options.message : '',
+        buttons,
+        modal: true,
+      });
+      // Last button is conventionally Cancel; pressing Escape triggers it.
+      try { dialog.cancel_button = buttons.length - 1; } catch { /* ignore */ }
+
+      dialog.choose(win, null, (source: any, asyncResult: any) => {
+        try {
+          result = source.choose_finish(asyncResult);
+        } catch {
+          // Dismissed via Escape or titlebar X → treat as last button (Cancel).
+          result = buttons.length - 1;
+        }
+        done = true;
+      });
+
+      while (!done) drainCallbacks();
+      return result;
+    } catch (e) {
+      console.warn('[gjs-gtk4] AlertDialog failed, falling back to MessageDialog:', e);
+      done = false;
+      result = 0;
+    }
+  }
+
+  // Fallback for GTK < 4.10: Gtk.MessageDialog
   try {
     const typeMap: Record<string, number> = {
       none:     0,  // Gtk.MessageType.OTHER
@@ -122,7 +156,6 @@ export function showMessageBox(
       secondary_text: options.message || '',
     });
 
-    const buttons = options.buttons || ['OK'];
     for (let i = 0; i < buttons.length; i++) {
       dialog.add_button(buttons[i], i);
     }

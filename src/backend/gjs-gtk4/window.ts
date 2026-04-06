@@ -251,7 +251,13 @@ export class GjsGtk4Window implements IWindowProvider {
     // ── Signal: window closed by user ──────────────────────────────────────
     // close-request fires synchronously via FireSyncEventAndWait — the return
     // value (true = cancel, false = allow) reaches GTK before the signal returns.
-    // Same mechanism as the node-with-gjs prevent-close example.
+    //
+    // IMPORTANT: do NOT call drainCallbacks() (directly or indirectly via
+    // showMessageBox/showOpenDialog/showSaveDialog) from inside this handler.
+    // Doing so creates a nested GTK event loop inside a signal dispatch and
+    // freezes the window.  When onCloseRequest is registered we therefore
+    // always return true immediately and defer the actual check via setImmediate
+    // so that it runs outside the signal handler.
     this.win.connect('close-request', () => {
       if (this.isClosed) {
         // Programmatic close (provider.close() already set isClosed).
@@ -259,8 +265,16 @@ export class GjsGtk4Window implements IWindowProvider {
         this._onWindowClosed();
         return false;
       }
-      if (this.onCloseRequest?.()) {
-        return true; // prevented — keep window open
+      if (this.onCloseRequest) {
+        // Defer to avoid nested GTK event loop (freeze) when the handler
+        // shows a dialog (drainCallbacks) synchronously.
+        setImmediate(() => {
+          if (!this.onCloseRequest?.()) {
+            // Not prevented — proceed with the close.
+            this.close();
+          }
+        });
+        return true; // prevent for now; close() is called if confirmed above
       }
       this._onWindowClosed();
       return false;
