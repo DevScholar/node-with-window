@@ -224,7 +224,7 @@
 |---|---|---|
 | `ipcRenderer.send(channel, ...args)` | ✅ | `chrome.webview.postMessage` |
 | `ipcRenderer.invoke(channel, ...args)` | ✅ | Returns `Promise` |
-| `ipcRenderer.sendSync(channel, ...args)` | ✅ | Sync XHR to loopback server |
+| `ipcRenderer.sendSync(channel, ...args)` | ✅ | Sync XHR to custom protocol |
 | `ipcRenderer.on(channel, listener)` | ✅ | |
 | `ipcRenderer.once(channel, listener)` | ✅ | |
 | `ipcRenderer.off(channel, listener)` | ✅ | |
@@ -254,7 +254,7 @@ All methods are exposed as Promises but execute synchronously underneath (blocki
 | `dialog.showMessageBox([win,] options)` | ✅ | Returns `Promise<{ response }>`; `buttons` array supported |
 | `dialog.showErrorBox(title, content)` | ✅ | |
 | `dialog.showOpenDialogSync()` | ❌ | Not implemented (use `dialog.showOpenDialog` — behaviour is already synchronous) |
-| `dialog.showCertificateTrustDialog()` | ❌ | Not implemented |
+| `dialog.showCertificateTrustDialog()` | ❌ | Not implemented | macOS only |
 
 ---
 

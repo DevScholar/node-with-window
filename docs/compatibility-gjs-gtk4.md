@@ -220,7 +220,7 @@
 |---|---|---|
 | `ipcRenderer.send(channel, ...args)` | ✅ | `window.webkit.messageHandlers.ipc.postMessage` |
 | `ipcRenderer.invoke(channel, ...args)` | ✅ | Returns `Promise` |
-| `ipcRenderer.sendSync(channel, ...args)` | ✅ | Sync XHR to loopback server |
+| `ipcRenderer.sendSync(channel, ...args)` | ✅ | Sync XHR to custom protocol |
 | `ipcRenderer.on(channel, listener)` | ✅ | |
 | `ipcRenderer.once(channel, listener)` | ✅ | |
 | `ipcRenderer.off(channel, listener)` | ✅ | |
@@ -248,7 +248,7 @@ All methods execute synchronously underneath (`Gtk.FileDialog` async callbacks d
 | `dialog.showSaveDialog([win,] options)` | ✅ | `Gtk.FileDialog`; returns `Promise<{ canceled, filePath }>` |
 | `dialog.showMessageBox([win,] options)` | ⚠️ | Falls back to `alert()` via `evaluate_javascript`; always returns `{ response: 0 }`; `buttons` array and `type` are ignored |
 | `dialog.showErrorBox(title, content)` | ⚠️ | Calls `showMessageBox` — same `alert()` fallback |
-| `dialog.showCertificateTrustDialog()` | ❌ | Not implemented |
+| `dialog.showCertificateTrustDialog()` | ❌ | Not implemented | macOS only |
 
 ---
 
