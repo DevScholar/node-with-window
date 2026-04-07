@@ -4,6 +4,7 @@
 // (SetMovable, RegisterAccelerators, WebView2Helper async).
 // All other helpers are implemented directly in TypeScript (win32-helpers.ts).
 import dotnetBase from '@devscholar/node-ps1-dotnet';
+import { startApplication } from '@devscholar/node-ps1-dotnet/internal';
 import { getWin32HelperSource } from '../Win32Helper.js';
 import * as win32 from '../win32-helpers.js';
 export { callbackRegistry, createProxy, createProxyWithInlineProps } from '@devscholar/node-ps1-dotnet';
@@ -42,7 +43,7 @@ const dotnetProxy = new Proxy(function() {} as any, {
         if (prop === 'runtimeVersion') return (dotnetBase as any).runtimeVersion;
         if (prop === 'addListener') return (dotnetBase as any).addListener;
         if (prop === 'System') return (dotnetBase as any).System;
-        if (prop === 'startApplication') return (dotnetBase as any).startApplication;
+        if (prop === 'startApplication') return startApplication;
         if (prop === 'pollEvent') return () => ({ type: 'none' });
         if (prop === 'addType') return (dotnetBase as any).addType;
         if (prop === 'awaitTask') return (dotnetBase as any).awaitTask;
