@@ -54,6 +54,9 @@ These are typically pre-installed on Ubuntu 24.04 LTS / GNOME desktops. If missi
 ```bash
 sudo apt install gjs gir1.2-gtk-4.0 gir1.2-webkit-6.0
 ```
+### macOS
+
+Due to the limited energy of the developers, this project does not currently support macOS. If there is a real need, you can submit an issue for feedback. The author of this project cannot afford to buy a MacBook, so he can only accept installing a Hackintosh virtual machine on Windows. Because this project does not require compiling native components and plans to use JXA technology as the backend, Apple's decision to stop releasing new x86 versions of macOS theoretically has no impact on this project.
 
 ## API
 
