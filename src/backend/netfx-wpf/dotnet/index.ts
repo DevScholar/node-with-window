@@ -4,7 +4,7 @@
 // (SetMovable, RegisterAccelerators, WebView2Helper async).
 // All other helpers are implemented directly in TypeScript (win32-helpers.ts).
 import dotnetBase from '@devscholar/node-ps1-dotnet';
-import { startApplication } from '@devscholar/node-ps1-dotnet/internal';
+import { startApplication, addType } from '@devscholar/node-ps1-dotnet/internal';
 import { getWin32HelperSource } from '../Win32Helper.js';
 import * as win32 from '../win32-helpers.js';
 export { callbackRegistry, createProxy, createProxyWithInlineProps } from '@devscholar/node-ps1-dotnet';
@@ -14,7 +14,7 @@ let _win32HelperCompiled = false;
 function ensureWin32Helper(): void {
     if (_win32HelperCompiled) return;
     _win32HelperCompiled = true;
-    const result = (dotnetBase as any).addType(getWin32HelperSource());
+    const result = addType(getWin32HelperSource());
     if (result && result.__type === 'error') {
         throw new Error('[node-with-window] Win32Helper AddType failed: ' + (result.__message || JSON.stringify(result)));
     }
@@ -45,7 +45,7 @@ const dotnetProxy = new Proxy(function() {} as any, {
         if (prop === 'System') return (dotnetBase as any).System;
         if (prop === 'startApplication') return startApplication;
         if (prop === 'pollEvent') return () => ({ type: 'none' });
-        if (prop === 'addType') return (dotnetBase as any).addType;
+        if (prop === 'addType') return addType;
         if (prop === 'awaitTask') return (dotnetBase as any).awaitTask;
 
         // ── TS-implemented Win32/WPF helpers ──────────────────────────────────

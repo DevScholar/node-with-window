@@ -10,6 +10,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import dotnetBase from '@devscholar/node-ps1-dotnet';
+import { addType } from '@devscholar/node-ps1-dotnet/internal';
 import {
     User32, Shell32, Kernel32,
     GWL_STYLE, GWL_EXSTYLE,
@@ -230,15 +231,26 @@ export function setWebViewBackground(webView: any, a: number, r: number, g: numb
     webView.DefaultBackgroundColor = Color.FromArgb(a, r, g, b);
 }
 
+let _captureHelper: any = null;
+
 export async function capturePreview(webView: any): Promise<string> {
-    const cw2            = webView.CoreWebView2;
-    const captureMethod  = cw2.GetType().GetMethod('CapturePreviewAsync');
-    const formatType     = captureMethod.GetParameters()[0].ParameterType;
-    const pngFormat      = (dotnetBase as any)('System').Enum.Parse(formatType, 'Png');
-    const MemoryStream   = (dotnetBase as any)('System.IO').MemoryStream;
-    const stream         = new MemoryStream();
-    const task           = cw2.CapturePreviewAsync(pngFormat, stream);
+    if (!_captureHelper) {
+        addType([
+            'using Microsoft.Web.WebView2.Core;',
+            'using System.IO;',
+            'using System.Threading.Tasks;',
+            'public static class __CaptureHelper__ {',
+            '    public static Task CapturePng(CoreWebView2 cw2, Stream stream) {',
+            '        return cw2.CapturePreviewAsync(CoreWebView2CaptureOutputFormat.Png, stream);',
+            '    }',
+            '}',
+        ].join('\n'));
+        _captureHelper = (dotnetBase as any).__CaptureHelper__;
+    }
+    const MemoryStream = (dotnetBase as any)('System.IO').MemoryStream;
+    const stream = new MemoryStream();
+    const task   = _captureHelper.CapturePng(webView.CoreWebView2, stream);
     await (dotnetBase as any).awaitTask(task);
-    const bytes          = stream.ToArray();
+    const bytes  = stream.ToArray();
     return (dotnetBase as any)('System').Convert.ToBase64String(bytes) as string;
 }
