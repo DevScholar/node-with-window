@@ -105,9 +105,14 @@ export class WpfIpcBridge {
     const coreRef = (coreWebView2 as unknown as { __ref: string }).__ref;
 
     // ── Document title → WPF window title sync ─────────────────────────────────
-    // Use addAsyncEvent (EventQueue polling) so this runs at syncEventDepth=0,
-    // avoiding response-mismatch issues from nested syncEvents.
-    addAsyncEvent(coreRef, 'DocumentTitleChanged', (_sender: unknown, _e: unknown) => {
+    // Pure TS: add_DocumentTitleChanged fires as a syncEvent, but the callback
+    // only does GetProperty (DocumentTitle) + SetProperty (Title) — both are
+    // non-poll IPC responses and are returned immediately regardless of
+    // syncEventDepth.  No awaitTask / spin-poll is involved, so there is no
+    // buffering hazard.  addAsyncEvent is not needed here.
+    (coreWebView2 as unknown as {
+      add_DocumentTitleChanged: (cb: (_s: unknown, _e: unknown) => void) => void;
+    }).add_DocumentTitleChanged((_sender: unknown, _e: unknown) => {
       const title = (coreWebView2 as unknown as { DocumentTitle: string }).DocumentTitle;
       if (title) {
         (this.getBrowserWindow() as unknown as { Title: string }).Title = title;
