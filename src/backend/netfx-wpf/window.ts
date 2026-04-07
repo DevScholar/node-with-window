@@ -93,6 +93,14 @@ export class NetFxWpfWindow implements IWindowProvider {
   public onClosed?: () => void;
   /** Registered by BrowserWindow; called when the user requests close (X button). Return true to cancel. */
   public onCloseRequest?: () => boolean;
+  /** Registered by BrowserWindow; called when the window gains focus. */
+  public onFocus?: () => void;
+  /** Registered by BrowserWindow; called when the window loses focus. */
+  public onBlur?: () => void;
+  /** Registered by BrowserWindow; called when the window is resized. */
+  public onResize?: (width: number, height: number) => void;
+  /** Registered by BrowserWindow; called when the page title changes. */
+  public onTitleUpdated?: (title: string) => void;
   private isClosed = false;
   private _isFullScreen = false;
   private _isKiosk = false;
@@ -314,6 +322,18 @@ export class NetFxWpfWindow implements IWindowProvider {
     this._ipcBridge.onNavigationCompleted(callback);
   }
 
+  public onNavigate(callback: (url: string) => void): void {
+    this._ipcBridge.onNavigate(callback);
+  }
+
+  public onDomReady(callback: () => void): void {
+    this._ipcBridge.onDomReady(callback);
+  }
+
+  public onNavigateFailed(callback: (errorCode: number, errorDescription: string, url: string) => void): void {
+    this._ipcBridge.onNavigateFailed(callback);
+  }
+
   public executeJavaScript(code: string): Promise<unknown> {
     return this._ipcBridge.executeJavaScript(code);
   }
@@ -352,6 +372,19 @@ export class NetFxWpfWindow implements IWindowProvider {
     });
     (this.browserWindow as unknown as { add_Closed: (cb: () => void) => void }).add_Closed(() => {
       this._onWindowClosed();
+    });
+    (this.browserWindow as any).add_Activated((_s: unknown, _e: unknown) => {
+      this.onFocus?.();
+    });
+    (this.browserWindow as any).add_Deactivated((_s: unknown, _e: unknown) => {
+      this.onBlur?.();
+    });
+    (this.browserWindow as any).add_SizeChanged((_s: unknown, e: any) => {
+      try {
+        const w = Math.round(e.NewSize.Width as number);
+        const h = Math.round(e.NewSize.Height as number);
+        this.onResize?.(w, h);
+      } catch { /* best-effort */ }
     });
   }
 

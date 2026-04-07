@@ -251,6 +251,7 @@ class App extends EventEmitter {
   public quit(): void {
     this.isQuitting = true;
     this.emit('before-quit');
+    this.emit('will-quit');
     if (this._shouldRelaunch) this._doRelaunch();
     process.exit(0);
   }

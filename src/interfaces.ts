@@ -215,6 +215,15 @@ export interface IWindowProvider {
    */
   onCloseRequest?: () => boolean;
 
+  /** Called when the window gains focus (Activated / notify::is-active). */
+  onFocus?: () => void;
+  /** Called when the window loses focus (Deactivated / notify::is-active). */
+  onBlur?: () => void;
+  /** Called when the window is resized. Width and height are in logical pixels. */
+  onResize?: (width: number, height: number) => void;
+  /** Called when the page title changes (DocumentTitleChanged / notify::title). */
+  onTitleUpdated?: (title: string) => void;
+
   // ── Methods required by all backends ──────────────────────────────────────
   sendToRenderer(channel: string, ...args: unknown[]): void;
   reload(): void;
@@ -240,6 +249,12 @@ export interface IWindowProvider {
   flashFrame(flag: boolean): void;
   executeJavaScript(code: string): Promise<unknown>;
   onNavigationCompleted(callback: () => void): void;
+  /** Register a callback fired when a main-frame navigation commits (did-navigate). */
+  onNavigate(callback: (url: string) => void): void;
+  /** Register a callback fired when the DOM is ready (DOMContentLoaded / load COMMITTED). */
+  onDomReady(callback: () => void): void;
+  /** Register a callback fired when a navigation fails. */
+  onNavigateFailed(callback: (errorCode: number, errorDescription: string, url: string) => void): void;
   getHwnd(): string;
   setEnabled(flag: boolean): void;
   capturePage(): Promise<import('./native-image.js').NativeImage>;

@@ -90,6 +90,13 @@ export class BrowserWindow extends EventEmitter {
     // close triggered during initialization (unlikely but possible) is handled.
     this.provider.onClosed = () => this._handleClosed();
     this.provider.onCloseRequest = () => this._handleCloseRequest();
+    this.provider.onFocus = () => {
+      BrowserWindow._focusedId = this._id;
+      this.emit('focus');
+    };
+    this.provider.onBlur = () => this.emit('blur');
+    this.provider.onResize = (width, height) => this.emit('resize', width, height);
+    this.provider.onTitleUpdated = (title) => this.emit('page-title-updated', {}, title, false);
 
     this.webContents = new WebContents({
       sendToRenderer: (channel, ...args) => {
@@ -107,6 +114,9 @@ export class BrowserWindow extends EventEmitter {
       onNavigationCompleted: cb => {
         this.provider.onNavigationCompleted(cb);
       },
+      onNavigate: cb => this.provider.onNavigate(cb),
+      onDomReady: cb => this.provider.onDomReady(cb),
+      onNavigateFailed: cb => this.provider.onNavigateFailed(cb),
     });
 
     this._createdPromise = this._init(options);
@@ -126,6 +136,7 @@ export class BrowserWindow extends EventEmitter {
       await this.provider.createWindow();
       this._isCreated = true;
       this.emit('created');
+      app.emit('browser-window-created', this);
     } catch (error) {
       this._isCreated = false;
       this.emit('error', error);

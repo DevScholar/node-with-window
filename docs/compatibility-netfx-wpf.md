@@ -16,7 +16,7 @@
 | `app.getVersion()` | ✅ | Reads `version` from `package.json` |
 | `app.getPath(name)` | ✅ | `home`, `temp`, `desktop`, `downloads`, `documents`, `music`, `pictures`, `videos`, `appData`, `userData`, `logs`, `exe`, `module` |
 | `app.setPath(name, path)` | ✅ | Overrides a named path returned by `getPath()` |
-| `app.quit()` | ✅ | Emits `before-quit`, then `process.exit(0)` |
+| `app.quit()` | ✅ | Emits `before-quit`, then `will-quit`, then `process.exit(0)` |
 | `app.exit(exitCode?)` | ✅ | `process.exit(exitCode)`; relaunches first if `relaunch()` was called |
 | `app.relaunch([options])` | ✅ | Spawns new process on next `quit()`/`exit()`; accepts `execPath` and `args` |
 | `app.focus()` | ✅ | Calls `focus()` on the first open BrowserWindow |
@@ -26,11 +26,12 @@
 | `app.isReady()` | ✅ | |
 | Event: `ready` | ✅ | Also fires immediately (via `setImmediate`) when `on('ready')` is called after the app is already ready |
 | Event: `before-quit` | ✅ | |
+| Event: `will-quit` | ✅ | Emitted just before `process.exit(0)`, after `before-quit` |
 | Event: `window-all-closed` | ✅ | Process exits with code 0 if no listener is registered |
 | Event: `second-instance` | ❌ | `requestSingleInstanceLock()` detects existing instances but does not notify them |
-| Event: `will-quit` | ❌ | Not emitted |
 | Event: `activate` | ❌ | macOS only |
-| Event: `browser-window-focus/blur/created` | ❌ | Not emitted |
+| Event: `browser-window-created` | ✅ | Emitted with the new `BrowserWindow` instance after backend initialization |
+| Event: `browser-window-focus` / `browser-window-blur` | ❌ | Not emitted |
 | Event: `web-contents-created` | ❌ | Not emitted |
 | `app.dock` | ❌ | macOS only |
 | `app.setAppUserModelId()` | ❌ | Not implemented |
@@ -160,12 +161,12 @@
 | Event | Status | Notes |
 |---|---|---|
 | `'closed'` | ✅ | Emitted after the window has been destroyed |
-| `'close'` | ❌ | Pre-close cancelable event not implemented; there is no way to call `event.preventDefault()` to cancel a close |
-| `'focus'` | ❌ | Not emitted |
-| `'blur'` | ❌ | Not emitted |
+| `'close'` | ✅ | Pre-close cancelable event; fires on X-button click; `event.preventDefault()` sets `e.Cancel = true` via `add_Closing` sync event |
+| `'focus'` | ✅ | `Window.Activated` |
+| `'blur'` | ✅ | `Window.Deactivated` |
 | `'show'` | ❌ | Not emitted |
 | `'hide'` | ❌ | Not emitted |
-| `'resize'` | ❌ | Not emitted |
+| `'resize'` | ✅ | `Window.SizeChanged`; args: `(width, height)` in logical pixels |
 | `'move'` | ❌ | Not emitted |
 | `'maximize'` | ❌ | Not emitted |
 | `'unmaximize'` | ❌ | Not emitted |
@@ -173,7 +174,7 @@
 | `'restore'` | ❌ | Not emitted |
 | `'enter-full-screen'` | ❌ | Not emitted |
 | `'leave-full-screen'` | ❌ | Not emitted |
-| `'page-title-updated'` | ❌ | Not emitted (title bar is synced silently) |
+| `'page-title-updated'` | ✅ | Emitted on `CoreWebView2.DocumentTitleChanged`; args: `(event, title, explicitSet)` |
 | `'ready-to-show'` | ❌ | Not emitted |
 
 ### `win.webContents`
@@ -188,10 +189,10 @@
 | `webContents.executeJavaScript(code)` | ✅ | Returns `Promise`; supports async expressions; 10 s timeout |
 | `webContents.session.clearCache()` | ✅ | Clears Cache API entries via `caches.keys()` |
 | `webContents.session.clearStorageData()` | ✅ | Clears `localStorage`, `sessionStorage`, `indexedDB`; cookies not supported |
-| Event: `'did-finish-load'` | ✅ | Emitted on `CoreWebView2.NavigationCompleted` |
-| Event: `'did-navigate'` | ❌ | Not emitted |
-| Event: `'dom-ready'` | ❌ | Not emitted |
-| Event: `'did-fail-load'` | ❌ | Not emitted |
+| Event: `'did-finish-load'` | ✅ | Emitted on `CoreWebView2.NavigationCompleted` (success) |
+| Event: `'did-navigate'` | ✅ | Emitted on `NavigationCompleted` (success); arg: `url` |
+| Event: `'dom-ready'` | ✅ | Emitted on `CoreWebView2.DOMContentLoaded` |
+| Event: `'did-fail-load'` | ✅ | Emitted on `NavigationCompleted` (failure); args: `(event, errorCode, url, errorDescription, isMainFrame)` |
 | Event: `'will-navigate'` | ❌ | Not emitted |
 | `webContents.getURL()` | ❌ | Not implemented |
 | `webContents.getTitle()` | ❌ | Not implemented |
@@ -327,6 +328,21 @@ All methods are exposed as Promises but execute synchronously underneath (blocki
 
 ---
 
+## `protocol`
+
+Must be configured **before** any `BrowserWindow` is created (before `app` is ready).
+
+| API | Status | Notes |
+|---|---|---|
+| `protocol.registerSchemesAsPrivileged(schemes)` | ✅ | Registers custom schemes with `{ secure?, standard? }` privileges; must be called before the first `BrowserWindow` |
+| `protocol.handle(scheme, handler)` | ✅ | Registers an async request handler: `(req: { url, method }) => { statusCode?, mimeType?, data: string \| Buffer \| null }` |
+| `protocol.unhandle(scheme)` | ✅ | Removes the handler for the scheme |
+| `protocol.isProtocolHandled(scheme)` | ✅ | Returns `true` if a handler is registered |
+
+**Windows note:** the handler runs in a dedicated `worker_threads` worker (so async handlers work inside the synchronous `add_WebResourceRequested` C# callback). Because the function source is serialized and `eval`'d in the worker, **closures over outer-scope variables are not supported**. Use inline `require()`/`await import()` instead.
+
+---
+
 ## Not Implemented
 
 The following Electron modules have no equivalent in this library:
@@ -341,7 +357,7 @@ The following Electron modules have no equivalent in this library:
 | `nativeTheme` | Dark/light mode detection and `prefers-color-scheme` |
 | `powerMonitor` | Sleep/wake/lock/unlock events, battery status |
 | `powerSaveBlocker` | Prevent display sleep |
-| `protocol` | Custom URL scheme registration |
+| `protocol.interceptBufferProtocol()` | Not implemented (use `protocol.handle()` instead) |
 | `net` | Chromium-routed HTTP requests |
 | `autoUpdater` | App auto-update |
 | `desktopCapturer` | Screen/window recording |
@@ -359,9 +375,9 @@ The following Electron modules have no equivalent in this library:
 
 2. **`contextIsolation` is simulated, not enforced.** When `contextIsolation: true` and a preload is present, `ipcRenderer` and `contextBridge` are deleted from `window` after the preload executes. This is not V8 context isolation — malicious page scripts can still access any closures created by the preload.
 
-3. **No cancelable `'close'` event.** Electron fires `'close'` before destroying the window, allowing `event.preventDefault()` to cancel it. Only `'closed'` (post-destruction) is emitted here.
+3. **`'close'` event is supported.** Electron fires `'close'` before destroying the window, allowing `event.preventDefault()` to cancel it. This is implemented via WPF's `add_Closing` sync-event mechanism.
 
-4. **Window events are not emitted.** `'focus'`, `'blur'`, `'resize'`, `'move'`, `'maximize'`, etc. are not wired to WPF events. Code that depends on these events needs to poll state manually.
+4. **Most window state-change events are not emitted.** `'focus'`, `'blur'`, `'resize'`, and `'page-title-updated'` are emitted. `'move'`, `'maximize'`, `'minimize'`, `'enter-full-screen'` etc. are not wired to WPF events.
 
 5. **`dialog` methods block the event loop.** All dialog methods execute synchronously on the Node.js thread. Unlike Electron's async native dialogs, they block until dismissed.
 

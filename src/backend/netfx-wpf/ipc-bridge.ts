@@ -20,6 +20,9 @@ export class WpfIpcBridge {
     { resolve: (v: unknown) => void; reject: (e: Error) => void }
   >();
   private _navCompletedCallback: (() => void) | null = null;
+  private _navigateCallback: ((url: string) => void) | null = null;
+  private _domReadyCallback: (() => void) | null = null;
+  private _navigateFailedCallback: ((errorCode: number, errorDescription: string, url: string) => void) | null = null;
   private _nwwPushFn: ((id: string, args: unknown[]) => void) | null = null;
 
   constructor(
@@ -104,18 +107,14 @@ export class WpfIpcBridge {
 
     const coreRef = (coreWebView2 as unknown as { __ref: string }).__ref;
 
-    // ── Document title → WPF window title sync ─────────────────────────────────
-    // Pure TS: add_DocumentTitleChanged fires as a syncEvent, but the callback
-    // only does GetProperty (DocumentTitle) + SetProperty (Title) — both are
-    // non-poll IPC responses and are returned immediately regardless of
-    // syncEventDepth.  No awaitTask / spin-poll is involved, so there is no
-    // buffering hazard.  addAsyncEvent is not needed here.
+    // ── Document title → WPF window title sync + page-title-updated ──────────────
     (coreWebView2 as unknown as {
       add_DocumentTitleChanged: (cb: (_s: unknown, _e: unknown) => void) => void;
     }).add_DocumentTitleChanged((_sender: unknown, _e: unknown) => {
       const title = (coreWebView2 as unknown as { DocumentTitle: string }).DocumentTitle;
       if (title) {
         (this.getBrowserWindow() as unknown as { Title: string }).Title = title;
+        (this.getWindowSender() as any)?.onTitleUpdated?.(title);
       }
     });
 
@@ -171,16 +170,29 @@ export class WpfIpcBridge {
       }
     });
 
-    // ── NavigationCompleted → did-finish-load callback ─────────────────────────
-    if (this._navCompletedCallback) {
-      (
-        coreWebView2 as unknown as {
-          add_NavigationCompleted: (cb: (_s: unknown, _e: unknown) => void) => void;
-        }
-      ).add_NavigationCompleted((_s, _e) => {
+    // ── DOMContentLoaded → dom-ready ──────────────────────────────────────────
+    (coreWebView2 as unknown as {
+      add_DOMContentLoaded: (cb: (_s: unknown, _e: unknown) => void) => void;
+    }).add_DOMContentLoaded((_s: unknown, _e: unknown) => {
+      this._domReadyCallback?.();
+    });
+
+    // ── NavigationCompleted → did-finish-load / did-navigate / did-fail-load ──
+    (
+      coreWebView2 as unknown as {
+        add_NavigationCompleted: (cb: (_s: unknown, _e: unknown) => void) => void;
+      }
+    ).add_NavigationCompleted((_s, e) => {
+      const evt = e as unknown as { IsSuccess: boolean; HttpStatusCode?: number };
+      const url = (coreWebView2 as unknown as { Source: string }).Source ?? '';
+      if (evt.IsSuccess) {
         this._navCompletedCallback?.();
-      });
-    }
+        this._navigateCallback?.(url);
+      } else {
+        const errorCode = evt.HttpStatusCode ?? -1;
+        this._navigateFailedCallback?.(errorCode, 'Navigation failed', url);
+      }
+    });
   }
 
   /** Push a node-integration callback to the renderer via the IPC channel. */
@@ -203,6 +215,18 @@ export class WpfIpcBridge {
 
   public onNavigationCompleted(callback: () => void): void {
     this._navCompletedCallback = callback;
+  }
+
+  public onNavigate(callback: (url: string) => void): void {
+    this._navigateCallback = callback;
+  }
+
+  public onDomReady(callback: () => void): void {
+    this._domReadyCallback = callback;
+  }
+
+  public onNavigateFailed(callback: (errorCode: number, errorDescription: string, url: string) => void): void {
+    this._navigateFailedCallback = callback;
   }
 
   public send(channel: string, ...args: unknown[]): void {

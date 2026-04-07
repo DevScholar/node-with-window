@@ -51,6 +51,9 @@ export class GjsGtk4Window implements IWindowProvider {
   private _isResizable = true;
   private _zoomLevel = 1.0;
   private _navCompletedCallback: (() => void) | null = null;
+  private _navigateCallback: ((url: string) => void) | null = null;
+  private _domReadyCallback: (() => void) | null = null;
+  private _navigateFailedCallback: ((errorCode: number, errorDescription: string, url: string) => void) | null = null;
   private _pendingExecs = new Map<
     string,
     { resolve: (v: unknown) => void; reject: (e: Error) => void }
@@ -58,6 +61,10 @@ export class GjsGtk4Window implements IWindowProvider {
 
   public onClosed?: () => void;
   public onCloseRequest?: () => boolean;
+  public onFocus?: () => void;
+  public onBlur?: () => void;
+  public onResize?: (width: number, height: number) => void;
+  public onTitleUpdated?: (title: string) => void;
 
   constructor(options?: BrowserWindowOptions) {
     this.options = options || {};
@@ -263,9 +270,33 @@ export class GjsGtk4Window implements IWindowProvider {
       return true;
     });
 
+    // ── Signal: focus / blur ───────────────────────────────────────────────
+    this.win.connect('notify::is-active', () => {
+      try {
+        if (this.win.is_active) this.onFocus?.();
+        else                    this.onBlur?.();
+      } catch { /* best-effort */ }
+    });
+
+    // ── Signal: resize ─────────────────────────────────────────────────────
+    this.win.connect('size-allocate', () => {
+      try {
+        const w = this.win.get_width() as number;
+        const h = this.win.get_height() as number;
+        this.onResize?.(Math.round(w), Math.round(h));
+      } catch { /* best-effort */ }
+    });
+
     // ── Signal: page load progress ────────────────────────────────────────
     // LoadEvent enum: STARTED=0, REDIRECTED=1, COMMITTED=2, FINISHED=3
     this.webView.connect('load-changed', (_wv: any, loadEvent: any) => {
+      if (loadEvent === 2) {  // COMMITTED — DOM is being parsed (dom-ready / did-navigate)
+        try {
+          const url: string = this.webView.get_uri?.() ?? '';
+          this._domReadyCallback?.();
+          this._navigateCallback?.(url);
+        } catch { /* best-effort */ }
+      }
       if (loadEvent === 3) {  // FINISHED
         this.isWebViewReady = true;
         this._navCompletedCallback?.();
@@ -276,12 +307,25 @@ export class GjsGtk4Window implements IWindowProvider {
       }
     });
 
+    // ── Signal: navigation failed ─────────────────────────────────────────
+    this.webView.connect('load-failed', (_wv: any, _loadEvent: any, uri: string, error: any) => {
+      try {
+        const code: number = error?.code ?? -1;
+        const msg: string  = error?.message ?? 'Navigation failed';
+        this._navigateFailedCallback?.(code, msg, uri ?? '');
+      } catch { /* best-effort */ }
+      return false; // allow WebKit to show its own error page
+    });
+
     // ── Document title → GTK window title sync ────────────────────────────
     // Mirrors WPF's DocumentTitleChanged handler in ipc-bridge.ts.
     this.webView.connect('notify::title', () => {
       try {
         const pageTitle: string = this.webView.get_title?.() ?? '';
-        if (pageTitle) this.win.set_title(pageTitle);
+        if (pageTitle) {
+          this.win.set_title(pageTitle);
+          this.onTitleUpdated?.(pageTitle);
+        }
       } catch { /* best-effort */ }
     });
 
@@ -353,6 +397,18 @@ export class GjsGtk4Window implements IWindowProvider {
 
   public onNavigationCompleted(callback: () => void): void {
     this._navCompletedCallback = callback;
+  }
+
+  public onNavigate(callback: (url: string) => void): void {
+    this._navigateCallback = callback;
+  }
+
+  public onDomReady(callback: () => void): void {
+    this._domReadyCallback = callback;
+  }
+
+  public onNavigateFailed(callback: (errorCode: number, errorDescription: string, url: string) => void): void {
+    this._navigateFailedCallback = callback;
   }
 
   // ── IPC ────────────────────────────────────────────────────────────────────

@@ -1,11 +1,14 @@
 // src/backend/netfx-wpf/dotnet/index.ts
 // WPF backend bridge — delegates to @devscholar/node-ps1-dotnet for all .NET IPC.
-// Win32/WPF helpers are compiled at first use via AddType (Win32Helper.ts).
+// Win32Helper (C#) is compiled at first use via AddType for the irreducible parts
+// (SetMovable, RegisterAccelerators, WebView2Helper async).
+// All other helpers are implemented directly in TypeScript (win32-helpers.ts).
 import dotnetBase from '@devscholar/node-ps1-dotnet';
 import { getWin32HelperSource } from '../Win32Helper.js';
+import * as win32 from '../win32-helpers.js';
 export { callbackRegistry, createProxy, createProxyWithInlineProps } from '@devscholar/node-ps1-dotnet';
 
-// Compile Win32Helper on first use.
+// Compile the residual Win32Helper.cs (SetMovable, RegisterAccelerators, WebView2Helper).
 let _win32HelperCompiled = false;
 function ensureWin32Helper(): void {
     if (_win32HelperCompiled) return;
@@ -27,7 +30,6 @@ function webView2Helper(): any {
 }
 
 // The dotnet proxy exposed to window.ts / dialogs.ts / menu.ts via setDotNetInstance.
-// Retains the same surface as the old self-contained proxy.
 const dotnetProxy = new Proxy(function() {} as any, {
     get: (_target: any, prop: string) => {
         if (prop === 'default') return dotnetProxy;
@@ -45,7 +47,56 @@ const dotnetProxy = new Proxy(function() {} as any, {
         if (prop === 'addType') return (dotnetBase as any).addType;
         if (prop === 'awaitTask') return (dotnetBase as any).awaitTask;
 
-        // ── WebView2 async helpers ─────────────────────────────────────────
+        // ── TS-implemented Win32/WPF helpers ──────────────────────────────────
+        if (prop === 'getHwnd')
+            return (win: any) => win32.getHwndString(win);
+        if (prop === 'minimize')
+            return (win: any) => win32.minimize(win);
+        if (prop === 'setFullScreen')
+            return (win: any, flag: boolean, needFrameless: boolean, alwaysOnTop: boolean) =>
+                win32.setFullScreen(win, flag, needFrameless, alwaysOnTop);
+        if (prop === 'applyWindowChrome')
+            return (win: any) => win32.applyWindowChrome(win);
+        if (prop === 'applyHiddenTitleBar')
+            return (win: any) => win32.applyHiddenTitleBar(win);
+        if (prop === 'setWindowIcon')
+            return (win: any, iconPath: string) => win32.setWindowIcon(win, iconPath);
+        if (prop === 'setOwnerByHwnd')
+            return (win: any, ownerHwnd: string) => win32.setOwnerByHwnd(win, ownerHwnd);
+        if (prop === 'setWindowEnabled')
+            return (win: any, enabled: boolean) => win32.setWindowEnabled(win, enabled);
+        if (prop === 'setWebViewBackground')
+            return (wv: any, a: number, r: number, g: number, b: number) =>
+                win32.setWebViewBackground(wv, a, r, g, b);
+        if (prop === 'capturePreview')
+            return (wv: any) => win32.capturePreview(wv);
+        if (prop === 'trashItem')
+            return (filePath: string) => win32.trashItem(filePath);
+
+        // ── Mixed: most ops are TS; SetMovable stays in C# (HwndSourceHook) ──
+        if (prop === 'winHelper') {
+            return (win: any, op: string, flag?: boolean) => {
+                switch (op) {
+                    case 'FlashWindow':    win32.flashWindow(win, flag ?? false); break;
+                    case 'SetMinimizable': win32.setMinimizable(win, flag ?? true); break;
+                    case 'SetMaximizable': win32.setMaximizable(win, flag ?? true); break;
+                    case 'SetClosable':    win32.setClosable(win, flag ?? true); break;
+                    case 'SetMovable':     windowHelper().SetMovable(win, flag ?? true); break;
+                    case 'SetSkipTaskbar': win32.setSkipTaskbar(win, flag ?? false); break;
+                    default: break;
+                }
+            };
+        }
+
+        // ── RegisterAccelerators stays in C# (PreviewKeyDown + pipe write) ───
+        if (prop === 'registerWindowAccelerators') {
+            return (win: any, shortcuts: Array<{ vk: number; modifiers: number; callbackId: string }>) => {
+                const winId = win && win.__ref ? win.__ref : String(win);
+                windowHelper().RegisterAccelerators(winId, win, shortcuts);
+            };
+        }
+
+        // ── WebView2 async helpers stay in C# (Task.ContinueWith + Dispatcher) ─
         if (prop === 'addScriptAndNavigate') {
             return (coreWebView2: any, script: string, url: string) => {
                 webView2Helper().AddScriptAndNavigate(coreWebView2, script, url);
@@ -56,94 +107,9 @@ const dotnetProxy = new Proxy(function() {} as any, {
                 webView2Helper().AddScriptAndNavigateToString(coreWebView2, script, html);
             };
         }
-        if (prop === 'setWebViewBackground') {
-            return (webView: any, a: number, r: number, g: number, b: number) => {
-                webView2Helper().SetWebViewBackground(webView, a, r, g, b);
-            };
-        }
         if (prop === 'setSchemeAllowedOrigins') {
             return (reg: any, origins: string[]) => {
                 webView2Helper().SetSchemeAllowedOrigins(reg, origins);
-            };
-        }
-        if (prop === 'capturePreview') {
-            return (webView: any): string => {
-                const result = webView2Helper().ExecuteScriptOrCapture
-                    ? null
-                    : (webView2Helper() as any).CapturePreview(webView);
-                // CapturePreview returns a primitive string proxy — unwrap it
-                return result && result.__ref
-                    ? String((dotnetBase as any).__inspect?.(result.__ref, '') ?? '')
-                    : (result as string) ?? '';
-            };
-        }
-
-        // ── Win32/WPF window management ────────────────────────────────────
-        if (prop === 'winHelper') {
-            return (win: any, op: string, flag?: boolean) => {
-                const wh = windowHelper();
-                switch (op) {
-                    case 'FlashWindow':    wh.FlashWindow(win, flag ?? false); break;
-                    case 'SetMinimizable': wh.SetMinimizable(win, flag ?? true); break;
-                    case 'SetMaximizable': wh.SetMaximizable(win, flag ?? true); break;
-                    case 'SetClosable':    wh.SetClosable(win, flag ?? true); break;
-                    case 'SetMovable':     wh.SetMovable(win, flag ?? true); break;
-                    case 'SetSkipTaskbar': wh.SetSkipTaskbar(win, flag ?? false); break;
-                    default: break;
-                }
-            };
-        }
-        if (prop === 'minimize') {
-            return (win: any) => windowHelper().Minimize(win);
-        }
-        if (prop === 'setFullScreen') {
-            return (win: any, flag: boolean, needFrameless: boolean, alwaysOnTop: boolean) => {
-                windowHelper().SetFullScreen(win, flag, needFrameless, alwaysOnTop);
-            };
-        }
-        if (prop === 'fixTransparentInput') {
-            return (win: any) => windowHelper().FixTransparentInput(win);
-        }
-        if (prop === 'fixTransparentInputChildren') {
-            return (win: any) => windowHelper().FixTransparentInputChildren(win);
-        }
-        if (prop === 'applyWindowChrome') {
-            return (win: any) => windowHelper().ApplyWindowChrome(win);
-        }
-        if (prop === 'applyHiddenTitleBar') {
-            return (win: any) => windowHelper().ApplyHiddenTitleBar(win);
-        }
-        if (prop === 'fixDwmTransparent') {
-            return (win: any) => windowHelper().DwmTransparent(win);
-        }
-        if (prop === 'setWindowIcon') {
-            return (win: any, iconPath: string) => windowHelper().SetWindowIcon(win, iconPath);
-        }
-        if (prop === 'getHwnd') {
-            return (win: any): string => {
-                const r = windowHelper().GetHwndString(win) as any;
-                // result may be a proxy wrapping a string primitive — toString() it
-                return r && r.__ref ? '0' : String(r ?? '0');
-            };
-        }
-        if (prop === 'setOwnerByHwnd') {
-            return (win: any, ownerHwnd: string) => {
-                windowHelper().SetOwnerByHwnd(win, parseInt(ownerHwnd, 10));
-            };
-        }
-        if (prop === 'setWindowEnabled') {
-            return (win: any, enabled: boolean) => windowHelper().SetWindowEnabled(win, enabled);
-        }
-        if (prop === 'trashItem') {
-            return (filePath: string) => {
-                const res = windowHelper().TrashItem(filePath) as any;
-                if (res && res.type === 'error') throw new Error(res.message || 'TrashItem failed');
-            };
-        }
-        if (prop === 'registerWindowAccelerators') {
-            return (win: any, shortcuts: Array<{ vk: number; modifiers: number; callbackId: string }>) => {
-                const winId = win && win.__ref ? win.__ref : String(win);
-                windowHelper().RegisterAccelerators(winId, win, shortcuts);
             };
         }
 

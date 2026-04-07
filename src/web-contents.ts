@@ -12,6 +12,9 @@ export interface WebContentsDelegate {
   loadFile(filePath: string): Promise<void>;
   executeJavaScript?(code: string): Promise<unknown>;
   onNavigationCompleted?(callback: () => void): void;
+  onNavigate?(callback: (url: string) => void): void;
+  onDomReady?(callback: () => void): void;
+  onNavigateFailed?(callback: (errorCode: number, errorDescription: string, url: string) => void): void;
 }
 
 /**
@@ -72,6 +75,11 @@ export class WebContents extends EventEmitter {
     this._session = new Session(code => this.executeJavaScript(code));
     // Wire 'did-finish-load' event through the backend navigation signal.
     delegate.onNavigationCompleted?.(() => this.emit('did-finish-load'));
+    delegate.onDomReady?.(() => this.emit('dom-ready'));
+    delegate.onNavigate?.((url) => this.emit('did-navigate', url));
+    delegate.onNavigateFailed?.((errorCode, errorDescription, url) => {
+      this.emit('did-fail-load', null, errorCode, url, errorDescription, true);
+    });
   }
 
   public send(channel: string, ...args: unknown[]): void {

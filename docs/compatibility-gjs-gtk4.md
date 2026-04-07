@@ -16,7 +16,7 @@
 | `app.getVersion()` | ✅ | Reads `version` from `package.json` |
 | `app.getPath(name)` | ✅ | `home`, `temp`, `desktop`, `downloads`, `documents`, `music`, `pictures`, `videos`, `appData`, `userData`, `logs`, `exe`, `module` |
 | `app.setPath(name, path)` | ✅ | Overrides a named path returned by `getPath()` |
-| `app.quit()` | ✅ | Emits `before-quit`, then `process.exit(0)` |
+| `app.quit()` | ✅ | Emits `before-quit`, then `will-quit`, then `process.exit(0)` |
 | `app.exit(exitCode?)` | ✅ | `process.exit(exitCode)`; relaunches first if `relaunch()` was called |
 | `app.relaunch([options])` | ✅ | Spawns new process on next `quit()`/`exit()`; accepts `execPath` and `args` |
 | `app.focus()` | ✅ | Calls `present()` on the first open BrowserWindow |
@@ -25,11 +25,12 @@
 | `app.requestSingleInstanceLock()` | ✅ | PID-file based; returns `true` for first instance, `false` if another is alive |
 | Event: `ready` | ✅ | Also fires immediately (via `setImmediate`) when `on('ready')` is called after the app is already ready |
 | Event: `before-quit` | ✅ | |
+| Event: `will-quit` | ✅ | Emitted just before `process.exit(0)`, after `before-quit` |
 | Event: `window-all-closed` | ✅ | Process exits with code 0 if no listener is registered |
 | Event: `second-instance` | ❌ | `requestSingleInstanceLock()` detects existing instances but does not notify them |
-| Event: `will-quit` | ❌ | Not emitted |
 | Event: `activate` | ❌ | macOS only |
-| Event: `browser-window-focus/blur/created` | ❌ | Not emitted |
+| Event: `browser-window-created` | ✅ | Emitted with the new `BrowserWindow` instance after backend initialization |
+| Event: `browser-window-focus` / `browser-window-blur` | ❌ | Not emitted |
 | Event: `web-contents-created` | ❌ | Not emitted |
 | `app.dock` | ❌ | macOS only |
 | `app.setAppUserModelId()` | ❌ | Not implemented |
@@ -157,19 +158,19 @@
 |---|---|---|
 | `'closed'` | ✅ | Emitted after the window has been destroyed |
 | `'close'` | ✅ | Pre-close cancelable event; `event.preventDefault()` prevents the window from closing |
-| `'focus'` | ❌ | Not emitted |
-| `'blur'` | ❌ | Not emitted |
+| `'focus'` | ✅ | `notify::is-active` (GTK `is_active` becomes `true`) |
+| `'blur'` | ✅ | `notify::is-active` (GTK `is_active` becomes `false`) |
 | `'show'` | ❌ | Not emitted |
 | `'hide'` | ❌ | Not emitted |
-| `'resize'` | ❌ | Not emitted |
-| `'move'` | ❌ | Not emitted |
+| `'resize'` | ✅ | `size-allocate`; args: `(width, height)` in logical pixels |
+| `'move'` | ❌ | Not emitted (compositor-managed) |
 | `'maximize'` | ❌ | Not emitted |
 | `'unmaximize'` | ❌ | Not emitted |
 | `'minimize'` | ❌ | Not emitted |
 | `'restore'` | ❌ | Not emitted |
 | `'enter-full-screen'` | ❌ | Not emitted |
 | `'leave-full-screen'` | ❌ | Not emitted |
-| `'page-title-updated'` | ❌ | Not emitted |
+| `'page-title-updated'` | ✅ | Emitted on WebKit `notify::title`; args: `(event, title, explicitSet)` |
 | `'ready-to-show'` | ❌ | Not emitted |
 
 ### `win.webContents`
@@ -185,9 +186,9 @@
 | `webContents.session.clearCache()` | ✅ | Clears Cache API entries via `caches.keys()` |
 | `webContents.session.clearStorageData()` | ✅ | Clears `localStorage`, `sessionStorage`, `indexedDB`; cookies not supported |
 | Event: `'did-finish-load'` | ✅ | Emitted on WebKit `load-changed` (`FINISHED`) |
-| Event: `'did-navigate'` | ❌ | Not emitted |
-| Event: `'dom-ready'` | ❌ | Not emitted |
-| Event: `'did-fail-load'` | ❌ | Not emitted |
+| Event: `'did-navigate'` | ✅ | Emitted on `load-changed` (`COMMITTED`); arg: `url` |
+| Event: `'dom-ready'` | ✅ | Emitted on `load-changed` (`COMMITTED`); fires together with `did-navigate` |
+| Event: `'did-fail-load'` | ✅ | Emitted on WebKit `load-failed`; args: `(event, errorCode, url, errorDescription, isMainFrame)` |
 | Event: `'will-navigate'` | ❌ | Not emitted |
 | `webContents.getURL()` | ❌ | Not implemented |
 | `webContents.getTitle()` | ❌ | Not implemented |
@@ -315,6 +316,21 @@ All methods execute synchronously underneath (`Gtk.FileDialog` async callbacks d
 
 ---
 
+## `protocol`
+
+Must be configured **before** any `BrowserWindow` is created (before `app` is ready).
+
+| API | Status | Notes |
+|---|---|---|
+| `protocol.registerSchemesAsPrivileged(schemes)` | ✅ | Registers custom schemes with `{ secure?, standard? }` privileges; must be called before the first `BrowserWindow` |
+| `protocol.handle(scheme, handler)` | ✅ | Registers an async request handler: `(req: { url, method }) => { statusCode?, mimeType?, data: string \| Buffer \| null }` |
+| `protocol.unhandle(scheme)` | ✅ | Removes the handler for the scheme |
+| `protocol.isProtocolHandled(scheme)` | ✅ | Returns `true` if a handler is registered |
+
+**Linux note:** the handler runs on the main thread via `WebContext.register_uri_scheme()`; async handlers and closures both work normally.
+
+---
+
 ## Not Implemented
 
 The following Electron modules have no equivalent in this library:
@@ -329,7 +345,7 @@ The following Electron modules have no equivalent in this library:
 | `nativeTheme` | Dark/light mode detection |
 | `powerMonitor` | Sleep/wake/lock/unlock events |
 | `powerSaveBlocker` | Prevent display sleep |
-| `protocol` | Custom URL scheme registration |
+| `protocol.interceptBufferProtocol()` | Not implemented (use `protocol.handle()` instead) |
 | `net` | Network requests routed via WebKit |
 | `autoUpdater` | App auto-update |
 | `desktopCapturer` | Screen/window recording |
@@ -347,7 +363,7 @@ The following Electron modules have no equivalent in this library:
 
 2. **`contextIsolation` is simulated, not enforced.** When `contextIsolation: true` and a preload is present, `ipcRenderer` and `contextBridge` are deleted from `window` after the preload runs. This is not V8 context isolation.
 
-3. **Window events are not emitted.** `'focus'`, `'blur'`, `'resize'`, `'move'`, etc. are not wired to GTK signals.
+3. **Most window state-change events are not emitted.** `'focus'`, `'blur'`, `'resize'`, and `'page-title-updated'` are emitted. `'move'`, `'maximize'`, `'minimize'`, `'enter-full-screen'` etc. are not wired to GTK signals.
 
 4. **`win.capturePage()` returns an empty image.** The WebKit snapshot API is not yet wired; `NativeImage.isEmpty()` will return `true`.
 
