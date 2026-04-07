@@ -12,7 +12,6 @@ import {
 import { NativeImage } from '../../native-image.js';
 import { protocol, ensureProtocolWorker, callHandlerSync } from '../../protocol.js';
 import { handleNwwRequest } from '../../node-integration.js';
-import { addDeferredEvent } from '@devscholar/node-ps1-dotnet/internal';
 import { findWebView2Runtime } from './webview2-runtime.js';
 import { parseBackgroundColor } from './color.js';
 import { WpfIpcBridge } from './ipc-bridge.js';
@@ -522,12 +521,13 @@ export class NetFxWpfWindow implements IWindowProvider {
     }
 
     // ── WebResourceRequested → nww:// and custom protocol handling ──────────────
-    // Use addDeferredEvent (GetDeferral + EventQueue) instead of sync
-    // add_WebResourceRequested (FireSyncEventAndWait).  This prevents the STA
-    // thread from blocking, so ShowDialog and other WPF blocking patterns can
-    // coexist with nww:// requests (e.g. require() from the renderer).
-    const coreRef = (coreWV2 as unknown as { __ref: string }).__ref;
-    addDeferredEvent(coreRef, 'WebResourceRequested', (_s: unknown, e: unknown) => {
+    // FireSyncEventAndWait already extracts Request.Uri/Method into inlineProps
+    // and creates WebResourceResponse from the callback return value — same as
+    // addDeferredEvent+CompleteDeferral did, without the C# DeferralStore hole.
+    // callHandlerSync uses Atomics.wait+SharedArrayBuffer (no IPC pipe), so it
+    // is safe at syncEventDepth=1.  Tradeoff: STA thread blocks for the duration
+    // of the handler (~ms); ShowDialog + concurrent nww:// is acceptable in practice.
+    (coreWV2 as any).add_WebResourceRequested((_s: unknown, e: unknown) => {
       const ev = e as any;
       const uri: string  = ev.Request.Uri;
       const meth: string = ev.Request.Method;
