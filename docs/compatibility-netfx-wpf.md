@@ -254,7 +254,9 @@ All methods are exposed as Promises but execute synchronously underneath (blocki
 | `dialog.showSaveDialog([win,] options)` | ✅ | Returns `Promise<{ canceled, filePath }>` |
 | `dialog.showMessageBox([win,] options)` | ✅ | Returns `Promise<{ response }>`; `buttons` array supported |
 | `dialog.showErrorBox(title, content)` | ✅ | |
-| `dialog.showOpenDialogSync()` | ❌ | Not implemented (use `dialog.showOpenDialog` — behaviour is already synchronous) |
+| `dialog.showOpenDialogSync([win,] options)` | ✅ | Returns `string[] \| undefined` |
+| `dialog.showSaveDialogSync([win,] options)` | ✅ | Returns `string \| undefined` |
+| `dialog.showMessageBoxSync([win,] options)` | ✅ | Returns `number` |
 | `dialog.showCertificateTrustDialog()` | ❌ | Not implemented | macOS only |
 
 ---

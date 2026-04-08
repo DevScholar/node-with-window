@@ -248,6 +248,9 @@ All methods execute synchronously underneath (`Gtk.FileDialog` async callbacks d
 | `dialog.showOpenDialog([win,] options)` | ✅ | `Gtk.FileDialog`; returns `Promise<{ canceled, filePaths }>` |
 | `dialog.showSaveDialog([win,] options)` | ✅ | `Gtk.FileDialog`; returns `Promise<{ canceled, filePath }>` |
 | `dialog.showMessageBox([win,] options)` | ✅ | `Gtk.AlertDialog` (GTK ≥ 4.10) or `Gtk.MessageDialog` fallback; returns `Promise<{ response }>` |
+| `dialog.showOpenDialogSync([win,] options)` | ✅ | Returns `string[] \| undefined` |
+| `dialog.showSaveDialogSync([win,] options)` | ✅ | Returns `string \| undefined` |
+| `dialog.showMessageBoxSync([win,] options)` | ✅ | Returns `number` |
 | `dialog.showErrorBox(title, content)` | ✅ | Delegates to `showMessageBox` |
 | `dialog.showCertificateTrustDialog()` | ❌ | Not implemented | macOS only |
 

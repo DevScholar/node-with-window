@@ -53,6 +53,34 @@ export const dialog = {
     return Promise.resolve({ response });
   },
 
+  showOpenDialogSync(
+    winOrOpts: BrowserWindow | OpenDialogOptions,
+    options?: OpenDialogOptions
+  ): string[] | undefined {
+    const win = resolveWindow(winOrOpts);
+    const opts = resolveOpts(winOrOpts, options) ?? ({} as OpenDialogOptions);
+    const result = win?.showOpenDialog(opts);
+    return result && result.length > 0 ? result : undefined;
+  },
+
+  showSaveDialogSync(
+    winOrOpts: BrowserWindow | SaveDialogOptions,
+    options?: SaveDialogOptions
+  ): string | undefined {
+    const win = resolveWindow(winOrOpts);
+    const opts = resolveOpts(winOrOpts, options) ?? ({} as SaveDialogOptions);
+    return win?.showSaveDialog(opts);
+  },
+
+  showMessageBoxSync(
+    winOrOpts: BrowserWindow | MessageBoxOptions,
+    options?: MessageBoxOptions
+  ): number {
+    const win = resolveWindow(winOrOpts);
+    const opts = resolveOpts(winOrOpts, options) ?? ({ message: '' } as MessageBoxOptions);
+    return win?.showMessageBox(opts) ?? 0;
+  },
+
   showErrorBox(title: string, content: string): void {
     const win = BrowserWindow.getFocusedWindow();
     win?.showMessageBox({ type: 'error', title, message: content, buttons: ['OK'] });
