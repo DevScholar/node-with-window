@@ -520,8 +520,10 @@ export class NetFxWpfWindow implements IWindowProvider {
     const opts = new OptsType(null, null, null, false, schemeRegs);
     // nodeIntegration exposes full Node.js to the renderer, so CORS between
     // file:// pages and nww:// requests would otherwise block the bridge.
-    // Disabling web security here is safe because nodeIntegration already
-    // grants the renderer more privilege than any CORS policy could protect.
+    // file:// pages send Origin: null; Chromium does not match null against
+    // AllowedOrigins:['*'] or any ACAO response header — the enforcement
+    // happens below WebResourceRequested at the scheme-registration level.
+    // Disabling web security is the only escape hatch that keeps file:// navigation.
     const disableWebSecurity =
       this.webPreferences.webSecurity === false ||
       this.webPreferences.nodeIntegration === true;
