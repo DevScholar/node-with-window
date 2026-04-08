@@ -362,18 +362,18 @@ The following Electron modules have no equivalent in this library:
 
 ## Key Differences from Electron
 
-1. **Single-process model.** GTK and Node.js share the same OS process via `@devscholar/node-with-gjs`. There is no separate renderer process. `nodeIntegration` works via a local HTTP server and sync XHR.
+- **Single-process model.** GTK and Node.js share the same OS process via `@devscholar/node-with-gjs`. There is no separate renderer process. `nodeIntegration` works via a local HTTP server and sync XHR.
 
-2. **`contextIsolation` is simulated, not enforced.** When `contextIsolation: true` and a preload is present, `ipcRenderer` and `contextBridge` are deleted from `window` after the preload runs. This is not V8 context isolation.
+- **`contextIsolation` is simulated, not enforced.** When `contextIsolation: true` and a preload is present, `ipcRenderer` and `contextBridge` are deleted from `window` after the preload runs. This is not V8 context isolation.
 
-3. **Most window state-change events are not emitted.** `'focus'`, `'blur'`, `'resize'`, and `'page-title-updated'` are emitted. `'move'`, `'maximize'`, `'minimize'`, `'enter-full-screen'` etc. are not wired to GTK signals.
+- **Most window state-change events are not emitted.** `'focus'`, `'blur'`, `'resize'`, and `'page-title-updated'` are emitted. `'move'`, `'maximize'`, `'minimize'`, `'enter-full-screen'` etc. are not wired to GTK signals.
 
-4. **`win.capturePage()` returns an empty image.** The WebKit snapshot API is not yet wired; `NativeImage.isEmpty()` will return `true`.
+- **`win.capturePage()` returns an empty image.** The WebKit snapshot API is not yet wired; `NativeImage.isEmpty()` will return `true`.
 
-5. **`webPreferences.partition` is ignored.** WebKitGTK uses a single default data manager; per-window session isolation is not supported.
+- **`webPreferences.partition` is ignored.** WebKitGTK uses a single default data manager; per-window session isolation is not supported.
 
-6. **`x`, `y`, `maxWidth`, `maxHeight`, `alwaysOnTop`, `skipTaskbar`, `flashFrame` have no effect.** GTK4 removed the relevant APIs (`window.move()`, maximum size, urgency hints); window placement and stacking are managed entirely by the compositor.
+- **`x`, `y`, `maxWidth`, `maxHeight`, `alwaysOnTop`, `skipTaskbar`, `flashFrame` have no effect.** GTK4 removed the relevant APIs (`window.move()`, maximum size, urgency hints); window placement and stacking are managed entirely by the compositor.
 
-7. **`win.popupMenu()` is not implemented.** It logs a warning. The `menu.popup()` method is equally unimplemented for GTK4.
+- **`win.popupMenu()` is not implemented.** It logs a warning. The `menu.popup()` method is equally unimplemented for GTK4.
 
-10. **Preload scripts** are registered via `WebKit.UserContentManager.add_script()` at `DOCUMENT_START` — they run on every navigation before the page's own scripts, matching Electron's behaviour.
+- **Preload scripts** are registered via `WebKit.UserContentManager.add_script()` at `DOCUMENT_START` — they run on every navigation before the page's own scripts, matching Electron's behaviour.

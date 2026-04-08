@@ -373,20 +373,18 @@ The following Electron modules have no equivalent in this library:
 
 ## Key Differences from Electron
 
-1. **Single-process model.** There is no separate renderer process. Node.js and the WebView run in the same OS process. `nodeIntegration` works via a local HTTP server and sync XHR — not by directly running Node in the renderer.
+- **Single-process model.** There is no separate renderer process. Node.js and the WebView run in the same OS process. `nodeIntegration` works via a local HTTP server and sync XHR — not by directly running Node in the renderer.
 
-2. **`contextIsolation` is simulated, not enforced.** When `contextIsolation: true` and a preload is present, `ipcRenderer` and `contextBridge` are deleted from `window` after the preload executes. This is not V8 context isolation — malicious page scripts can still access any closures created by the preload.
+- **`contextIsolation` is simulated, not enforced.** When `contextIsolation: true` and a preload is present, `ipcRenderer` and `contextBridge` are deleted from `window` after the preload executes. This is not V8 context isolation — malicious page scripts can still access any closures created by the preload.
 
-3. **`'close'` event is supported.** Electron fires `'close'` before destroying the window, allowing `event.preventDefault()` to cancel it. This is implemented via WPF's `add_Closing` sync-event mechanism.
+- **Most window state-change events are not emitted.** `'focus'`, `'blur'`, `'resize'`, and `'page-title-updated'` are emitted. `'move'`, `'maximize'`, `'minimize'`, `'enter-full-screen'` etc. are not wired to WPF events.
 
-4. **Most window state-change events are not emitted.** `'focus'`, `'blur'`, `'resize'`, and `'page-title-updated'` are emitted. `'move'`, `'maximize'`, `'minimize'`, `'enter-full-screen'` etc. are not wired to WPF events.
+- **`dialog` methods block the event loop.** All dialog methods execute synchronously on the Node.js thread. Unlike Electron's async native dialogs, they block until dismissed.
 
-5. **`dialog` methods block the event loop.** All dialog methods execute synchronously on the Node.js thread. Unlike Electron's async native dialogs, they block until dismissed.
+- **`win.blur()` is a no-op.** WPF has no programmatic focus-removal API.
 
-6. **`win.blur()` is a no-op.** WPF has no programmatic focus-removal API.
+- **`setFullScreen()` is not exclusive fullscreen.** It sets `WindowStyle.None` + `WindowState.Maximized` + `Topmost`. The taskbar may remain visible depending on system settings.
 
-7. **`setFullScreen()` is not exclusive fullscreen.** It sets `WindowStyle.None` + `WindowState.Maximized` + `Topmost`. The taskbar may remain visible depending on system settings.
+- **`transparent: true` requires no host-page CSS.** Uses `AllowsTransparency=false` (hardware DX renderer) + `WindowChrome(GlassFrameThickness=-1)` + WPF `Background=Transparent` + WebView2 alpha=0. Mouse clicks reach WebView2 on fully transparent pixels.
 
-8. **`transparent: true` requires no host-page CSS.** Uses `AllowsTransparency=false` (hardware DX renderer) + `WindowChrome(GlassFrameThickness=-1)` + WPF `Background=Transparent` + WebView2 alpha=0. Mouse clicks reach WebView2 on fully transparent pixels.
-
-9. **Preload scripts** run via `AddScriptToExecuteOnDocumentCreatedAsync` — they execute on every navigation before the page's own scripts, matching Electron's behaviour.
+- **Preload scripts** run via `AddScriptToExecuteOnDocumentCreatedAsync` — they execute on every navigation before the page's own scripts, matching Electron's behaviour.
