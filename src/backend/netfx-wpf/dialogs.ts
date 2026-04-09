@@ -6,7 +6,7 @@ export function setDotNetInstance(instance: unknown): void {
   dotnet = instance;
 }
 
-export function showOpenDialog(options: OpenDialogOptions): string[] | undefined {
+export function showOpenDialog(options: OpenDialogOptions): Promise<string[] | undefined> {
   try {
     const dotnetAny = dotnet as any;
     const OpenFileDlgType = dotnetAny['Microsoft.Win32.OpenFileDialog'];
@@ -27,16 +27,16 @@ export function showOpenDialog(options: OpenDialogOptions): string[] | undefined
     const ok = dlg.ShowDialog();
     if (ok) {
       const fileName: string = dlg.FileName;
-      return fileName ? [fileName] : undefined;
+      return Promise.resolve(fileName ? [fileName] : undefined);
     }
-    return undefined;
+    return Promise.resolve(undefined);
   } catch (e) {
     console.error('[node-with-window] Open dialog error:', e);
-    return undefined;
+    return Promise.resolve(undefined);
   }
 }
 
-export function showSaveDialog(options: SaveDialogOptions): string | undefined {
+export function showSaveDialog(options: SaveDialogOptions): Promise<string | undefined> {
   try {
     const dotnetAny = dotnet as any;
     const SaveFileDlgType = dotnetAny['Microsoft.Win32.SaveFileDialog'];
@@ -56,12 +56,12 @@ export function showSaveDialog(options: SaveDialogOptions): string | undefined {
     const ok = dlg.ShowDialog();
     if (ok) {
       const fileName: string = dlg.FileName;
-      return fileName || undefined;
+      return Promise.resolve(fileName || undefined);
     }
-    return undefined;
+    return Promise.resolve(undefined);
   } catch (e) {
     console.error('[node-with-window] Save dialog error:', e);
-    return undefined;
+    return Promise.resolve(undefined);
   }
 }
 
@@ -70,7 +70,7 @@ export function showMessageBox(options: {
   title?: string;
   message: string;
   buttons?: string[];
-}): number {
+}): Promise<number> {
   try {
     const System = (
       dotnet as unknown as {
@@ -116,12 +116,13 @@ export function showMessageBox(options: {
       buttonType,
       iconType
     );
-    if (result === 6) return 0;
-    if (result === 7) return 1;
-    if (result === 2) return options.buttons && options.buttons.length > 2 ? 2 : 1;
-    return 0;
+    let response = 0;
+    if (result === 6) response = 0;
+    else if (result === 7) response = 1;
+    else if (result === 2) response = options.buttons && options.buttons.length > 2 ? 2 : 1;
+    return Promise.resolve(response);
   } catch (e) {
     console.error('[node-with-window] MessageBox error:', e);
-    return 0;
+    return Promise.resolve(0);
   }
 }

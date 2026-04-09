@@ -46,6 +46,9 @@ export class GjsGtk4Window implements IWindowProvider {
   private navigationQueue: Array<() => void> = [];
   private isWebViewReady = false;
   private isClosed = false;
+  private _isVisible = false;
+  private _isMinimized = false;
+  private _isMaximized = false;
   private _isFullScreen = false;
   private _isKiosk = false;
   private _isResizable = true;
@@ -54,17 +57,26 @@ export class GjsGtk4Window implements IWindowProvider {
   private _navigateCallback: ((url: string) => void) | null = null;
   private _domReadyCallback: (() => void) | null = null;
   private _navigateFailedCallback: ((errorCode: number, errorDescription: string, url: string) => void) | null = null;
+  private _willNavigateCallback: ((url: string) => void) | null = null;
   private _pendingExecs = new Map<
     string,
     { resolve: (v: unknown) => void; reject: (e: Error) => void }
   >();
 
   public onClosed?: () => void;
-  public onCloseRequest?: () => boolean;
+  public onCloseRequest?: () => Promise<boolean> | boolean;
   public onFocus?: () => void;
   public onBlur?: () => void;
   public onResize?: (width: number, height: number) => void;
   public onTitleUpdated?: (title: string) => void;
+  public onMinimize?: () => void;
+  public onMaximize?: () => void;
+  public onUnmaximize?: () => void;
+  public onRestore?: () => void;
+  public onEnterFullScreen?: () => void;
+  public onLeaveFullScreen?: () => void;
+  public onShow?: () => void;
+  public onHide?: () => void;
 
   constructor(options?: BrowserWindowOptions) {
     this.options = options || {};
@@ -112,8 +124,10 @@ export class GjsGtk4Window implements IWindowProvider {
       this.ucm.register_script_message_handler('ipc');
     }
 
-    // Async callback: messages arrive via poll every 16 ms
-    this.ucm.connect('script-message-received::ipc', (_ucm: any, jsResult: any) => {
+    // Async callback so GJS does NOT block in processNestedCommands().
+    // Without async, invoke handlers that call showOpenDialog()/showMessageBox()
+    // would deadlock because the dialog needs the GLib main loop to be running.
+    this.ucm.connect('script-message-received::ipc', async (_ucm: any, jsResult: any) => {
       try {
         let json: string;
         try {
@@ -256,19 +270,19 @@ export class GjsGtk4Window implements IWindowProvider {
     addNwwCallbackPusher(this._nwwPushFn);
 
     // ── Signal: window closed by user ──────────────────────────────────────
-    // Always return true (prevent GTK auto-close) and handle asynchronously via
-    // setImmediate. This frees the GJS event loop before onCloseRequest runs, so
-    // showMessageBox() and other dialog calls inside a 'close' listener work
-    // without deadlocking the GJS/GTK event processing.
-    this.win.connect('close-request', () => {
-      setImmediate(() => {
-        if (!this.onCloseRequest?.()) {
-          this._onWindowClosed();
-          if (this.win) try { this.win.destroy(); } catch { /* ignore */ }
-        }
-      });
-      return true;
-    });
+    // Tag the callback with __nwwCloseRequest so marshal.ts encodes it as
+    // closeRequest:true. GJS then synchronously returns true to GTK (preventing
+    // auto-close) AND pushes the event to eventQueue. Node.js receives it via
+    // the normal Poll path — no postDrainHook timing dependency.
+    const closeRequestHandler = async () => {
+      const prevented = await (this.onCloseRequest?.() ?? false);
+      if (!prevented) {
+        this._onWindowClosed();
+        if (this.win) try { this.win.destroy(); } catch { /* ignore */ }
+      }
+    };
+    (closeRequestHandler as any).__nwwCloseRequest = true;
+    this.win.connect('close-request', closeRequestHandler);
 
     // ── Signal: focus / blur ───────────────────────────────────────────────
     this.win.connect('notify::is-active', () => {
@@ -278,14 +292,56 @@ export class GjsGtk4Window implements IWindowProvider {
       } catch { /* best-effort */ }
     });
 
-    // ── Signal: resize ─────────────────────────────────────────────────────
-    this.win.connect('size-allocate', () => {
+    // ── Signal: maximize / unmaximize ──────────────────────────────────────
+    this.win.connect('notify::maximized', () => {
       try {
-        const w = this.win.get_width() as number;
-        const h = this.win.get_height() as number;
-        this.onResize?.(Math.round(w), Math.round(h));
+        const isMax: boolean = this.win.is_maximized ?? false;
+        if (isMax !== this._isMaximized) {
+          this._isMaximized = isMax;
+          if (isMax) this.onMaximize?.();
+          else       this.onUnmaximize?.();
+        }
       } catch { /* best-effort */ }
     });
+
+    // ── Signal: fullscreen ─────────────────────────────────────────────────
+    this.win.connect('notify::fullscreened', () => {
+      try {
+        const isFull: boolean = this.win.fullscreened ?? false;
+        if (isFull !== this._isFullScreen) {
+          this._isFullScreen = isFull;
+          if (isFull) this.onEnterFullScreen?.();
+          else        this.onLeaveFullScreen?.();
+        }
+      } catch { /* best-effort */ }
+    });
+
+    // ── Signal: minimize / restore (GTK 4.12+ notify::suspended) ──────────
+    try {
+      this.win.connect('notify::suspended', () => {
+        try {
+          const isSuspended: boolean = (this.win as any).suspended ?? false;
+          if (isSuspended !== this._isMinimized) {
+            this._isMinimized = isSuspended;
+            if (isSuspended) this.onMinimize?.();
+            else             this.onRestore?.();
+          }
+        } catch { /* best-effort */ }
+      });
+    } catch { /* notify::suspended not available on this GTK version */ }
+
+    // ── Signal: resize ─────────────────────────────────────────────────────
+    // GTK4 removed 'size-allocate' from the public widget signal API.
+    // 'notify::default-width' fires when the window's layout size changes.
+    try {
+      this.win.connect('notify::default-width', () => {
+        try {
+          const w = this.win.get_width() as number;
+          const h = this.win.get_height() as number;
+          this.onResize?.(Math.round(w), Math.round(h));
+        } catch { /* best-effort */ }
+      });
+    } catch { /* best-effort */ }
 
     // ── Signal: page load progress ────────────────────────────────────────
     // LoadEvent enum: STARTED=0, REDIRECTED=1, COMMITTED=2, FINISHED=3
@@ -317,6 +373,23 @@ export class GjsGtk4Window implements IWindowProvider {
       return false; // allow WebKit to show its own error page
     });
 
+    // ── Signal: will-navigate (decide-policy) ─────────────────────────────
+    this.webView.connect('decide-policy', (_wv: any, decision: any, decisionType: any) => {
+      try {
+        // decisionType 0 = NAVIGATION_ACTION (main frame link/form navigation)
+        if (decisionType === 0 && this._willNavigateCallback) {
+          const navAction = decision.get_navigation_action?.();
+          const request = navAction?.get_request?.();
+          const url: string = request?.get_uri?.() ?? '';
+          if (url && url !== 'about:blank') {
+            this._willNavigateCallback(url);
+          }
+        }
+        decision.use();
+      } catch { /* best-effort */ }
+      return false;
+    });
+
     // ── Document title → GTK window title sync ────────────────────────────
     // Mirrors WPF's DocumentTitleChanged handler in ipc-bridge.ts.
     this.webView.connect('notify::title', () => {
@@ -339,7 +412,45 @@ export class GjsGtk4Window implements IWindowProvider {
   }
 
   public show(): void {
-    if (this.win) this.win.present();
+    if (this.win) {
+      this._isVisible = true;
+      this.win.present();
+      this.onShow?.();
+    }
+  }
+
+  public hide(): void {
+    if (this.win) {
+      this._isVisible = false;
+      this.win.hide();
+      this.onHide?.();
+    }
+  }
+
+  public isVisible(): boolean {
+    return this._isVisible && !this.isClosed;
+  }
+
+  public isDestroyed(): boolean {
+    return this.isClosed;
+  }
+
+  public isMinimized(): boolean {
+    return this._isMinimized;
+  }
+
+  public isMaximized(): boolean {
+    if (this.win) {
+      try { return this.win.is_maximized as boolean; } catch { /* ignore */ }
+    }
+    return this._isMaximized;
+  }
+
+  public isFocused(): boolean {
+    if (this.win) {
+      try { return this.win.is_active as boolean; } catch { /* ignore */ }
+    }
+    return false;
   }
 
   /** Release JS-side resources (nww pusher, pending execs) without touching the GTK widget. */
@@ -362,6 +473,7 @@ export class GjsGtk4Window implements IWindowProvider {
   public close(): void {
     if (this.isClosed) return;
     this.isClosed = true;
+    this._isVisible = false;
     this._cleanup();
     if (this.win) {
       try { this.win.destroy(); } catch { /* ignore */ }
@@ -409,6 +521,33 @@ export class GjsGtk4Window implements IWindowProvider {
 
   public onNavigateFailed(callback: (errorCode: number, errorDescription: string, url: string) => void): void {
     this._navigateFailedCallback = callback;
+  }
+
+  public onWillNavigate(callback: (url: string) => void): void {
+    this._willNavigateCallback = callback;
+  }
+
+  public goBack(): void {
+    if (this.webView) try { this.webView.go_back(); } catch { /* ignore */ }
+  }
+
+  public goForward(): void {
+    if (this.webView) try { this.webView.go_forward(); } catch { /* ignore */ }
+  }
+
+  public getURL(): string {
+    if (!this.webView) return '';
+    try { return (this.webView.get_uri?.() as string) ?? ''; } catch { return ''; }
+  }
+
+  public getWebTitle(): string {
+    if (!this.webView) return '';
+    try { return (this.webView.get_title?.() as string) ?? ''; } catch { return ''; }
+  }
+
+  public isLoading(): boolean {
+    if (!this.webView) return false;
+    try { return this.webView.is_loading as boolean; } catch { return false; }
   }
 
   // ── IPC ────────────────────────────────────────────────────────────────────
@@ -710,12 +849,12 @@ export class GjsGtk4Window implements IWindowProvider {
   public unmaximize(): void {
     if (this.win) this.win.unmaximize();
   }
-
   public setFullScreen(flag: boolean): void {
     if (!this.win) return;
-    this._isFullScreen = flag;
     if (flag) this.win.fullscreen();
     else      this.win.unfullscreen();
+    // _isFullScreen is updated by notify::fullscreened signal; update here as fallback
+    this._isFullScreen = flag;
   }
 
   public isFullScreen(): boolean {
@@ -824,11 +963,11 @@ export class GjsGtk4Window implements IWindowProvider {
 
   // ── Dialogs ────────────────────────────────────────────────────────────────
 
-  public showOpenDialog(options: OpenDialogOptions): string[] | undefined {
+  public showOpenDialog(options: OpenDialogOptions): Promise<string[] | undefined> {
     return showOpenDialog(this.win, options);
   }
 
-  public showSaveDialog(options: SaveDialogOptions): string | undefined {
+  public showSaveDialog(options: SaveDialogOptions): Promise<string | undefined> {
     return showSaveDialog(this.win, options);
   }
 
@@ -837,7 +976,7 @@ export class GjsGtk4Window implements IWindowProvider {
     title?: string;
     message: string;
     buttons?: string[];
-  }): number {
+  }): Promise<number> {
     return showMessageBox(this.win, options);
   }
 }

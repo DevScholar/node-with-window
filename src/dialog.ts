@@ -21,68 +21,66 @@ function resolveOpts<T>(winOrOpts: BrowserWindow | T, opts?: T): T {
 }
 
 export const dialog = {
-  showOpenDialog(
+  async showOpenDialog(
     winOrOpts: BrowserWindow | OpenDialogOptions,
     options?: OpenDialogOptions
   ): Promise<OpenDialogResult> {
     const win = resolveWindow(winOrOpts);
     const opts = resolveOpts(winOrOpts, options) ?? ({} as OpenDialogOptions);
-    const result = win?.showOpenDialog(opts);
-    if (!result || result.length === 0) return Promise.resolve({ canceled: true, filePaths: [] });
-    return Promise.resolve({ canceled: false, filePaths: result });
+    const result = await win?.showOpenDialog(opts);
+    if (!result || result.length === 0) return { canceled: true, filePaths: [] };
+    return { canceled: false, filePaths: result };
   },
 
-  showSaveDialog(
+  async showSaveDialog(
     winOrOpts: BrowserWindow | SaveDialogOptions,
     options?: SaveDialogOptions
   ): Promise<SaveDialogResult> {
     const win = resolveWindow(winOrOpts);
     const opts = resolveOpts(winOrOpts, options) ?? ({} as SaveDialogOptions);
-    const result = win?.showSaveDialog(opts);
-    if (!result) return Promise.resolve({ canceled: true, filePath: undefined });
-    return Promise.resolve({ canceled: false, filePath: result });
+    const result = await win?.showSaveDialog(opts);
+    if (!result) return { canceled: true, filePath: undefined };
+    return { canceled: false, filePath: result };
   },
 
-  showMessageBox(
+  async showMessageBox(
     winOrOpts: BrowserWindow | MessageBoxOptions,
     options?: MessageBoxOptions
   ): Promise<MessageBoxResult> {
     const win = resolveWindow(winOrOpts);
     const opts = resolveOpts(winOrOpts, options) ?? ({ message: '' } as MessageBoxOptions);
-    const response = win?.showMessageBox(opts) ?? 0;
-    return Promise.resolve({ response });
+    const response = (await win?.showMessageBox(opts)) ?? 0;
+    return { response };
   },
 
   showOpenDialogSync(
     winOrOpts: BrowserWindow | OpenDialogOptions,
     options?: OpenDialogOptions
   ): string[] | undefined {
-    const win = resolveWindow(winOrOpts);
-    const opts = resolveOpts(winOrOpts, options) ?? ({} as OpenDialogOptions);
-    const result = win?.showOpenDialog(opts);
-    return result && result.length > 0 ? result : undefined;
+    // Note: sync variants are deprecated; use showOpenDialog (async) instead.
+    // These now return undefined because dialogs are truly async.
+    console.warn('[node-with-window] showOpenDialogSync: not supported with async dialogs, use showOpenDialog');
+    return undefined;
   },
 
   showSaveDialogSync(
     winOrOpts: BrowserWindow | SaveDialogOptions,
     options?: SaveDialogOptions
   ): string | undefined {
-    const win = resolveWindow(winOrOpts);
-    const opts = resolveOpts(winOrOpts, options) ?? ({} as SaveDialogOptions);
-    return win?.showSaveDialog(opts);
+    console.warn('[node-with-window] showSaveDialogSync: not supported with async dialogs, use showSaveDialog');
+    return undefined;
   },
 
   showMessageBoxSync(
     winOrOpts: BrowserWindow | MessageBoxOptions,
     options?: MessageBoxOptions
   ): number {
-    const win = resolveWindow(winOrOpts);
-    const opts = resolveOpts(winOrOpts, options) ?? ({ message: '' } as MessageBoxOptions);
-    return win?.showMessageBox(opts) ?? 0;
+    console.warn('[node-with-window] showMessageBoxSync: not supported with async dialogs, use showMessageBox');
+    return 0;
   },
 
   showErrorBox(title: string, content: string): void {
     const win = BrowserWindow.getFocusedWindow();
-    win?.showMessageBox({ type: 'error', title, message: content, buttons: ['OK'] });
+    void win?.showMessageBox({ type: 'error', title, message: content, buttons: ['OK'] });
   },
 };

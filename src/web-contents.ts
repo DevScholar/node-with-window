@@ -15,6 +15,12 @@ export interface WebContentsDelegate {
   onNavigate?(callback: (url: string) => void): void;
   onDomReady?(callback: () => void): void;
   onNavigateFailed?(callback: (errorCode: number, errorDescription: string, url: string) => void): void;
+  onWillNavigate?(callback: (url: string) => void): void;
+  getURL?(): string;
+  getWebTitle?(): string;
+  isLoading?(): boolean;
+  goBack?(): void;
+  goForward?(): void;
 }
 
 /**
@@ -80,6 +86,7 @@ export class WebContents extends EventEmitter {
     delegate.onNavigateFailed?.((errorCode, errorDescription, url) => {
       this.emit('did-fail-load', null, errorCode, url, errorDescription, true);
     });
+    delegate.onWillNavigate?.((url) => this.emit('will-navigate', url));
   }
 
   public send(channel: string, ...args: unknown[]): void {
@@ -116,5 +123,30 @@ export class WebContents extends EventEmitter {
   /** Electron-compatible session object for cache and storage management. */
   public get session(): Session {
     return this._session;
+  }
+
+  /** Returns the URL of the currently loaded page. */
+  public getURL(): string {
+    return this._delegate.getURL?.() ?? '';
+  }
+
+  /** Returns the title of the currently loaded page. */
+  public getTitle(): string {
+    return this._delegate.getWebTitle?.() ?? '';
+  }
+
+  /** Returns true if the page is currently loading. */
+  public isLoading(): boolean {
+    return this._delegate.isLoading?.() ?? false;
+  }
+
+  /** Navigates back in the browser history. */
+  public goBack(): void {
+    this._delegate.goBack?.();
+  }
+
+  /** Navigates forward in the browser history. */
+  public goForward(): void {
+    this._delegate.goForward?.();
   }
 }

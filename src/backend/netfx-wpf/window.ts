@@ -92,7 +92,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   /** Registered by BrowserWindow; called when the WPF window is closed externally. */
   public onClosed?: () => void;
   /** Registered by BrowserWindow; called when the user requests close (X button). Return true to cancel. */
-  public onCloseRequest?: () => boolean;
+  public onCloseRequest?: () => Promise<boolean> | boolean;
   /** Registered by BrowserWindow; called when the window gains focus. */
   public onFocus?: () => void;
   /** Registered by BrowserWindow; called when the window loses focus. */
@@ -101,7 +101,16 @@ export class NetFxWpfWindow implements IWindowProvider {
   public onResize?: (width: number, height: number) => void;
   /** Registered by BrowserWindow; called when the page title changes. */
   public onTitleUpdated?: (title: string) => void;
+  public onMinimize?: () => void;
+  public onMaximize?: () => void;
+  public onUnmaximize?: () => void;
+  public onRestore?: () => void;
+  public onEnterFullScreen?: () => void;
+  public onLeaveFullScreen?: () => void;
+  public onShow?: () => void;
+  public onHide?: () => void;
   private isClosed = false;
+  private _isVisible = false;
   private _isFullScreen = false;
   private _isKiosk = false;
   private _isResizable = true;
@@ -366,9 +375,9 @@ export class NetFxWpfWindow implements IWindowProvider {
       // Programmatic close (provider.close() sets isClosed before calling WPF Close()).
       // Let it proceed without consulting the JS layer — BrowserWindow already handled it.
       if (this.isClosed) return;
-      if (this.onCloseRequest?.()) {
-        e.Cancel = true; // syncEvent: this property set reaches C# before FireSyncEventAndWait returns
-      }
+      // Always cancel: handle the close request asynchronously, then destroy if not prevented.
+      e.Cancel = true;
+      void this._handleCloseRequestAsync();
     });
     (this.browserWindow as unknown as { add_Closed: (cb: () => void) => void }).add_Closed(() => {
       this._onWindowClosed();
@@ -390,7 +399,9 @@ export class NetFxWpfWindow implements IWindowProvider {
 
   public show(): void {
     if (this.app) {
+      this._isVisible = true;
       (this.browserWindow as unknown as { Show: () => void }).Show();
+      this.onShow?.();
       return;
     }
 
@@ -417,6 +428,8 @@ export class NetFxWpfWindow implements IWindowProvider {
       }
 
       (this.browserWindow as unknown as { Show: () => void }).Show();
+      this._isVisible = true;
+      this.onShow?.();
 
       setImmediate(() => {
         this._initWebView2WithProtocols().catch(e => {
@@ -630,6 +643,15 @@ export class NetFxWpfWindow implements IWindowProvider {
   // -------------------------------------------------------------------------
   // Internal helpers
   // -------------------------------------------------------------------------
+
+  /** Async close-request handler: calls onCloseRequest and destroys window if not prevented. */
+  private async _handleCloseRequestAsync(): Promise<void> {
+    const prevented = await (this.onCloseRequest?.() ?? false);
+    if (!prevented) {
+      this.isClosed = true;
+      try { (this.browserWindow as any).Close(); } catch { /* ignore */ }
+    }
+  }
 
   /** Called when the WPF window has been closed (via poll or direct close()). */
   private _onWindowClosed(): void {
@@ -912,6 +934,44 @@ export class NetFxWpfWindow implements IWindowProvider {
     return this._isResizable;
   }
 
+  public hide(): void {
+    if (!this.browserWindow) return;
+    this._isVisible = false;
+    (this.browserWindow as unknown as { Hide: () => void }).Hide();
+    this.onHide?.();
+  }
+
+  public isVisible(): boolean {
+    return this._isVisible && !this.isClosed;
+  }
+
+  public isDestroyed(): boolean {
+    return this.isClosed;
+  }
+
+  public isMinimized(): boolean {
+    if (!this.browserWindow) return false;
+    try {
+      const state = (this.browserWindow as any).WindowState;
+      const Minimized = (dotnet as any).System.Windows.WindowState.Minimized;
+      return state === Minimized;
+    } catch { return false; }
+  }
+
+  public isMaximized(): boolean {
+    if (!this.browserWindow) return false;
+    try {
+      const state = (this.browserWindow as any).WindowState;
+      const Maximized = (dotnet as any).System.Windows.WindowState.Maximized;
+      return state === Maximized;
+    } catch { return false; }
+  }
+
+  public isFocused(): boolean {
+    if (!this.browserWindow) return false;
+    try { return (this.browserWindow as any).IsActive as boolean; } catch { return false; }
+  }
+
   public setAlwaysOnTop(flag: boolean): void {
     if (!this.browserWindow) return;
     (this.browserWindow as unknown as { Topmost: boolean }).Topmost = flag;
@@ -953,11 +1013,11 @@ export class NetFxWpfWindow implements IWindowProvider {
 
   // ── Dialogs ────────────────────────────────────────────────────────────────
 
-  public showOpenDialog(options: OpenDialogOptions): string[] | undefined {
+  public showOpenDialog(options: OpenDialogOptions): Promise<string[] | undefined> {
     return showOpenDialog(options);
   }
 
-  public showSaveDialog(options: SaveDialogOptions): string | undefined {
+  public showSaveDialog(options: SaveDialogOptions): Promise<string | undefined> {
     return showSaveDialog(options);
   }
 
@@ -966,7 +1026,7 @@ export class NetFxWpfWindow implements IWindowProvider {
     title?: string;
     message: string;
     buttons?: string[];
-  }): number {
+  }): Promise<number> {
     return showMessageBox(options);
   }
 

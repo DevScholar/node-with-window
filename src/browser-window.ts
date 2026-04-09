@@ -97,6 +97,14 @@ export class BrowserWindow extends EventEmitter {
     this.provider.onBlur = () => this.emit('blur');
     this.provider.onResize = (width, height) => this.emit('resize', width, height);
     this.provider.onTitleUpdated = (title) => this.emit('page-title-updated', {}, title, false);
+    this.provider.onMinimize = () => this.emit('minimize');
+    this.provider.onMaximize = () => this.emit('maximize');
+    this.provider.onUnmaximize = () => this.emit('unmaximize');
+    this.provider.onRestore = () => this.emit('restore');
+    this.provider.onEnterFullScreen = () => this.emit('enter-full-screen');
+    this.provider.onLeaveFullScreen = () => this.emit('leave-full-screen');
+    this.provider.onShow = () => this.emit('show');
+    this.provider.onHide = () => this.emit('hide');
 
     this.webContents = new WebContents({
       sendToRenderer: (channel, ...args) => {
@@ -117,6 +125,12 @@ export class BrowserWindow extends EventEmitter {
       onNavigate: cb => this.provider.onNavigate(cb),
       onDomReady: cb => this.provider.onDomReady(cb),
       onNavigateFailed: cb => this.provider.onNavigateFailed(cb),
+      onWillNavigate: cb => this.provider.onWillNavigate?.(cb),
+      getURL: () => this.provider.getURL?.() ?? '',
+      getWebTitle: () => (this.provider as any).getWebTitle?.() ?? '',
+      isLoading: () => this.provider.isLoading?.() ?? false,
+      goBack: () => this.provider.goBack?.(),
+      goForward: () => this.provider.goForward?.(),
     });
 
     this._createdPromise = this._init(options);
@@ -148,11 +162,17 @@ export class BrowserWindow extends EventEmitter {
    * Called when the window is about to close (X button or close() call).
    * Emits the cancelable 'close' event. Returns true if the close was prevented.
    */
-  private _handleCloseRequest(): boolean {
+  private async _handleCloseRequest(): Promise<boolean> {
     if (this.listenerCount('close') === 0) return false;
     let prevented = false;
     const event = { preventDefault: () => { prevented = true; } };
-    this.emit('close', event);
+    const listeners = this.rawListeners('close');
+    for (const listener of listeners) {
+      const result = (listener as Function)(event);
+      if (result && typeof (result as any).then === 'function') {
+        await (result as Promise<unknown>);
+      }
+    }
     return prevented;
   }
 
@@ -255,6 +275,30 @@ export class BrowserWindow extends EventEmitter {
     this._showNow();
   }
 
+  public hide(): void {
+    this.provider.hide();
+  }
+
+  public isVisible(): boolean {
+    return this.provider.isVisible();
+  }
+
+  public isDestroyed(): boolean {
+    return this.provider.isDestroyed();
+  }
+
+  public isMinimized(): boolean {
+    return this.provider.isMinimized();
+  }
+
+  public isMaximized(): boolean {
+    return this.provider.isMaximized();
+  }
+
+  public isFocused(): boolean {
+    return this.provider.isFocused();
+  }
+
   private _showNow(): void {
     // Apply the application menu when the caller never called setMenu().
     if (!this._menuSet) {
@@ -269,7 +313,11 @@ export class BrowserWindow extends EventEmitter {
   }
 
   public close(): void {
-    if (this._handleCloseRequest()) return; // cancelled by 'close' listener
+    void this._closeAsync();
+  }
+
+  private async _closeAsync(): Promise<void> {
+    if (await this._handleCloseRequest()) return; // cancelled by 'close' listener
     this.provider.close();
     this._handleClosed();
   }
@@ -293,11 +341,11 @@ export class BrowserWindow extends EventEmitter {
     this.provider.popupMenu?.(items, x, y);
   }
 
-  public showOpenDialog(options: OpenDialogOptions): string[] | undefined {
+  public showOpenDialog(options: OpenDialogOptions): Promise<string[] | undefined> {
     return this.provider.showOpenDialog(options);
   }
 
-  public showSaveDialog(options: SaveDialogOptions): string | undefined {
+  public showSaveDialog(options: SaveDialogOptions): Promise<string | undefined> {
     return this.provider.showSaveDialog(options);
   }
 
@@ -306,7 +354,7 @@ export class BrowserWindow extends EventEmitter {
     title?: string;
     message: string;
     buttons?: string[];
-  }): number {
+  }): Promise<number> {
     return this.provider.showMessageBox(options);
   }
 

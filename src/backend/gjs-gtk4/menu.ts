@@ -53,7 +53,10 @@ export function buildGioMenu(
     const action = new Gio.SimpleAction({ name: actionId });
 
     if (clickFn) {
-      action.connect('activate', () => { clickFn(); });
+      // Use an async callback so GJS does NOT block in processNestedCommands().
+      // Menu actions that call showMessageBox()/showOpenDialog() need the GLib
+      // main loop to be running — a sync callback would deadlock.
+      action.connect('activate', async () => { clickFn(); });
     }
     if (item.enabled === false) {
       action.set_enabled(false);

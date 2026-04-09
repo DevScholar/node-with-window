@@ -189,16 +189,22 @@ export interface IWindowProvider {
   loadURL(url: string): Promise<void>;
   loadFile(filePath: string): Promise<void>;
   show(): void;
+  hide(): void;
+  isVisible(): boolean;
+  isDestroyed(): boolean;
+  isMinimized(): boolean;
+  isMaximized(): boolean;
+  isFocused(): boolean;
   close(): void;
   setMenu(menu: MenuItemOptions[]): void;
-  showOpenDialog(options: OpenDialogOptions): string[] | undefined;
-  showSaveDialog(options: SaveDialogOptions): string | undefined;
+  showOpenDialog(options: OpenDialogOptions): Promise<string[] | undefined>;
+  showSaveDialog(options: SaveDialogOptions): Promise<string | undefined>;
   showMessageBox(options: {
     type?: string;
     title?: string;
     message: string;
     buttons?: string[];
-  }): number;
+  }): Promise<number>;
 
   /**
    * Called by BrowserWindow immediately after createWindow() succeeds.
@@ -213,7 +219,7 @@ export interface IWindowProvider {
    * Return true to cancel the close, false to allow it.
    * BrowserWindow sets this to emit the cancelable 'close' event.
    */
-  onCloseRequest?: () => boolean;
+  onCloseRequest?: () => Promise<boolean> | boolean;
 
   /** Called when the window gains focus (Activated / notify::is-active). */
   onFocus?: () => void;
@@ -223,6 +229,22 @@ export interface IWindowProvider {
   onResize?: (width: number, height: number) => void;
   /** Called when the page title changes (DocumentTitleChanged / notify::title). */
   onTitleUpdated?: (title: string) => void;
+  /** Called when the window is minimized (iconified). */
+  onMinimize?: () => void;
+  /** Called when the window is maximized. */
+  onMaximize?: () => void;
+  /** Called when the window is restored from maximized state. */
+  onUnmaximize?: () => void;
+  /** Called when the window is restored from minimized state. */
+  onRestore?: () => void;
+  /** Called when the window enters full-screen. */
+  onEnterFullScreen?: () => void;
+  /** Called when the window leaves full-screen. */
+  onLeaveFullScreen?: () => void;
+  /** Called when the window becomes visible (show()). */
+  onShow?: () => void;
+  /** Called when the window becomes hidden (hide()). */
+  onHide?: () => void;
 
   // ── Methods required by all backends ──────────────────────────────────────
   sendToRenderer(channel: string, ...args: unknown[]): void;
@@ -270,6 +292,18 @@ export interface IWindowProvider {
   getOpacity?(): number;
   /** Windows-only. */
   cleanupUserData?(): void;
+
+  // ── Optional navigation / webContents methods ────────────────────────────
+  /** Navigate back in history. */
+  goBack?(): void;
+  /** Navigate forward in history. */
+  goForward?(): void;
+  /** Returns the current URL loaded in the WebView. */
+  getURL?(): string;
+  /** Returns true if the WebView is currently loading a page. */
+  isLoading?(): boolean;
+  /** Register a callback fired before a main-frame navigation (will-navigate). */
+  onWillNavigate?(callback: (url: string) => void): void;
 
   // ── Optional methods (not all backends support these) ────────────────────
   /** Show a context menu at the given screen position, or at cursor if omitted. */
