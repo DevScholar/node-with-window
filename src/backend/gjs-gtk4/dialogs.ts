@@ -18,9 +18,12 @@ export async function showOpenDialog(win: any, options: OpenDialogOptions): Prom
       const isMulti = options.properties?.includes('multiSelections');
       const isDir   = options.properties?.includes('openDirectory');
 
-      // Async callback: GJS pushes result to eventQueue, Node.js resolves via Poll.
-      // No while(!done) drainCallbacks() — Node.js event loop stays free.
-      const callback = async (source: any, asyncResult: any) => {
+      // Sync callback: GJS blocks in processNestedCommands() during the callback.
+      // Node.js calls _finish() via nested IPC while asyncResult (Gio.Task) is
+      // still valid — avoids the "Object Gio.Task has been already finalized"
+      // error that occurs when async callbacks defer processing past the task's
+      // lifetime.
+      const callback = (source: any, asyncResult: any) => {
         let result: string[] | undefined;
         try {
           if (isDir) {
@@ -76,7 +79,7 @@ export async function showSaveDialog(win: any, options: SaveDialogOptions): Prom
         try { dialog.initial_folder = _Gio.File.new_for_path(process.cwd()); } catch { /* ignore */ }
       }
 
-      dialog.save(win, null, async (source: any, asyncResult: any) => {
+      dialog.save(win, null, (source: any, asyncResult: any) => {
         let result: string | undefined;
         try {
           const file = source.save_finish(asyncResult);
@@ -113,7 +116,7 @@ export async function showMessageBox(
         // Last button is conventionally Cancel; pressing Escape triggers it.
         try { dialog.cancel_button = buttons.length - 1; } catch { /* ignore */ }
 
-        dialog.choose(win, null, async (source: any, asyncResult: any) => {
+        dialog.choose(win, null, (source: any, asyncResult: any) => {
           let result = 0;
           try {
             result = source.choose_finish(asyncResult);
@@ -152,7 +155,7 @@ export async function showMessageBox(
         dialog.add_button(buttons[i], i);
       }
 
-      dialog.connect('response', async (_d: any, response: number) => {
+      dialog.connect('response', (_d: any, response: number) => {
         const result = response >= 0 ? response : 0;
         _d.close();
         resolve(result);

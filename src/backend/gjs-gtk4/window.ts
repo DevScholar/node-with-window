@@ -270,10 +270,15 @@ export class GjsGtk4Window implements IWindowProvider {
     addNwwCallbackPusher(this._nwwPushFn);
 
     // ── Signal: window closed by user ──────────────────────────────────────
-    // Tag the callback with __nwwCloseRequest so marshal.ts encodes it as
-    // closeRequest:true. GJS then synchronously returns true to GTK (preventing
+    // Tag the callback with __syncReturn=true so marshal.ts encodes it with
+    // syncReturn:true. GJS then synchronously returns true to GTK (preventing
     // auto-close) AND pushes the event to eventQueue. Node.js receives it via
-    // the normal Poll path — no postDrainHook timing dependency.
+    // the normal Poll path — the async handler can then show dialogs, wait for
+    // user input, and call this.win.destroy() manually if the user confirms.
+    //
+    // Without syncReturn, GTK would see the async callback's default null
+    // return and destroy the window BEFORE Node.js even processes the event,
+    // causing dialogs to fail and close handlers to run on a destroyed window.
     const closeRequestHandler = async () => {
       const prevented = await (this.onCloseRequest?.() ?? false);
       if (!prevented) {
@@ -281,7 +286,7 @@ export class GjsGtk4Window implements IWindowProvider {
         if (this.win) try { this.win.destroy(); } catch { /* ignore */ }
       }
     };
-    (closeRequestHandler as any).__nwwCloseRequest = true;
+    (closeRequestHandler as any).__syncReturn = true;
     this.win.connect('close-request', closeRequestHandler);
 
     // ── Signal: focus / blur ───────────────────────────────────────────────
