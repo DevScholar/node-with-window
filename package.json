@@ -1,6 +1,6 @@
 {
   "name": "@devscholar/node-with-window",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "description": "lightweight Electron substitute for Node.js/Deno/Bun",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -51,8 +51,8 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "@devscholar/node-ps1-dotnet": "file:../node-ps1-dotnet",
-    "@devscholar/node-with-gjs": "file:../node-with-gjs"
+    "@devscholar/node-ps1-dotnet": "0.0.16",
+    "@devscholar/node-with-gjs": "0.0.11"
   },
   "optionalDependencies": {}
 }
