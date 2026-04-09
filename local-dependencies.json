@@ -1,0 +1,6 @@
+{
+  "packages": {
+    "@devscholar/node-ps1-dotnet": "file:../node-ps1-dotnet",
+    "@devscholar/node-with-gjs": "file:../node-with-gjs"
+  }
+}
