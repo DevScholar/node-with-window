@@ -272,18 +272,25 @@ export class GjsGtk4Window implements IWindowProvider {
     // ── Signal: window closed by user ──────────────────────────────────────
     // Tag the callback with __syncReturn=true so marshal.ts encodes it with
     // syncReturn:true. GJS then synchronously returns true to GTK (preventing
-    // auto-close) AND pushes the event to eventQueue. Node.js receives it via
-    // the normal Poll path — the async handler can then show dialogs, wait for
-    // user input, and call this.win.destroy() manually if the user confirms.
+    // auto-close) AND writes the event directly to the output pipe.  Node.js
+    // receives it via the ipc-worker thread — the async handler can then show
+    // dialogs, wait for user input, and call this.win.destroy() if confirmed.
     //
     // Without syncReturn, GTK would see the async callback's default null
     // return and destroy the window BEFORE Node.js even processes the event,
     // causing dialogs to fail and close handlers to run on a destroyed window.
+    let closeInProgress = false;
     const closeRequestHandler = async () => {
-      const prevented = await (this.onCloseRequest?.() ?? false);
-      if (!prevented) {
-        this._onWindowClosed();
-        if (this.win) try { this.win.destroy(); } catch { /* ignore */ }
+      if (closeInProgress) return;  // already handling a close-request
+      closeInProgress = true;
+      try {
+        const prevented = await (this.onCloseRequest?.() ?? false);
+        if (!prevented) {
+          this._onWindowClosed();
+          if (this.win) try { this.win.destroy(); } catch { /* ignore */ }
+        }
+      } finally {
+        closeInProgress = false;
       }
     };
     (closeRequestHandler as any).__syncReturn = true;
