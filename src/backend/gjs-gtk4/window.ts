@@ -5,6 +5,7 @@ import { startEventDrain } from '@devscholar/node-with-gjs';
 import {
   _Gtk, _Gdk, _WebKit, _Gio, _GLib, _gtkApp, _appRunning, _pendingWindowCreations, ensureGtkApp,
 } from './gtk-app.js';
+import type GLib from '@girs/glib-2.0';
 import {
   IWindowProvider,
   BrowserWindowOptions,
@@ -262,7 +263,7 @@ export class GjsGtk4Window implements IWindowProvider {
         closeInProgress = false;
       }
     };
-    (closeRequestHandler as any).__syncReturn = true;
+    (closeRequestHandler as unknown as { __syncReturn?: boolean }).__syncReturn = true;
     this.win.connect('close-request', closeRequestHandler);
 
     this.win.connect('notify::is-active', () => {
@@ -274,7 +275,7 @@ export class GjsGtk4Window implements IWindowProvider {
 
     this.win.connect('notify::maximized', () => {
       try {
-        const isMax: boolean = Boolean(this.win!.is_maximized) ?? false;
+        const isMax: boolean = Boolean(this.win!.is_maximized);
         if (isMax !== this._isMaximized) {
           this._isMaximized = isMax;
           if (isMax) this.onMaximize?.();
@@ -297,7 +298,7 @@ export class GjsGtk4Window implements IWindowProvider {
     try {
       this.win.connect('notify::suspended', () => {
         try {
-          const isSuspended: boolean = (this.win as any).suspended ?? false;
+          const isSuspended: boolean = (this.win as unknown as { suspended?: boolean }).suspended ?? false;
           if (isSuspended !== this._isMinimized) {
             this._isMinimized = isSuspended;
             if (isSuspended) this.onMinimize?.();
@@ -547,13 +548,13 @@ export class GjsGtk4Window implements IWindowProvider {
       const bytes = result.status === 204
         ? new Uint8Array(0)
         : new TextEncoder().encode(result.body);
-      const glibBytes = new (_GLib.Bytes as any)(bytes);
+      const glibBytes = new (_GLib.Bytes as unknown as new (b: Uint8Array) => GLib.Bytes)(bytes);
       const stream    = _Gio.MemoryInputStream.new_from_bytes(glibBytes);
 
       req.finish(stream, bytes.length, result.mimeType);
     } catch (e) {
       console.error('[gjs-gtk4] nww scheme handler error:', e);
-      try { req.finish_error(e as any); } catch { /* ignore */ }
+      try { req.finish_error(e as unknown as GLib.Error); } catch { /* ignore */ }
     }
   }
 
@@ -563,7 +564,7 @@ export class GjsGtk4Window implements IWindowProvider {
     const handler = protocol.getHandler(scheme);
 
     if (!handler) {
-      try { request.finish_error(new Error(`No handler for scheme: ${scheme}`) as any); } catch { /* ignore */ }
+      try { request.finish_error(new Error(`No handler for scheme: ${scheme}`) as unknown as GLib.Error); } catch { /* ignore */ }
       return;
     }
 
@@ -572,7 +573,7 @@ export class GjsGtk4Window implements IWindowProvider {
       result = await handler({ url: uri, method });
     } catch (e) {
       console.error(`[gjs-gtk4] Protocol handler error for ${scheme}:`, e);
-      try { request.finish_error(e as any); } catch { /* ignore */ }
+      try { request.finish_error(e as unknown as GLib.Error); } catch { /* ignore */ }
       return;
     }
 
@@ -585,13 +586,13 @@ export class GjsGtk4Window implements IWindowProvider {
         bytes = new Uint8Array((body as Buffer).buffer, (body as Buffer).byteOffset, (body as Buffer).byteLength);
       }
 
-      const glibBytes = new (_GLib.Bytes as any)(bytes);
+      const glibBytes = new (_GLib.Bytes as unknown as new (b: Uint8Array) => GLib.Bytes)(bytes);
       const stream    = _Gio.MemoryInputStream.new_from_bytes(glibBytes) as Gio.InputStream;
       const mimeType  = result.mimeType ?? 'text/html; charset=utf-8';
       const status    = result.statusCode ?? 200;
 
       if (status !== 200) {
-        const resp = new _WebKit.URISchemeResponse(stream as any) as WebKit.URISchemeResponse;
+        const resp = new _WebKit.URISchemeResponse(stream as unknown as WebKit.URISchemeResponse.ConstructorProps) as WebKit.URISchemeResponse;
         resp.set_status(status, null);
         resp.set_content_type(mimeType);
         request.finish_with_response(resp);
@@ -600,7 +601,7 @@ export class GjsGtk4Window implements IWindowProvider {
       }
     } catch (e) {
       console.error(`[gjs-gtk4] Protocol finish error for ${scheme}:`, e);
-      try { request.finish_error(e as any); } catch { /* ignore */ }
+      try { request.finish_error(e as unknown as GLib.Error); } catch { /* ignore */ }
     }
   }
 
@@ -671,13 +672,13 @@ export class GjsGtk4Window implements IWindowProvider {
     } else if (type === 'send') {
       ipcMain.emit(channel, event, ...args);
     } else if (type === 'invoke') {
-      const handler = (ipcMain as any).handlers.get(channel) as
+      const handler = (ipcMain as unknown as { handlers: Map<string, (event: unknown, ...args: unknown[]) => unknown> }).handlers.get(channel) as
         | ((event: unknown, ...args: unknown[]) => unknown)
         | undefined;
       if (handler) {
         try {
           const result = handler(event, ...args);
-          if (result && typeof (result as any).then === 'function') {
+          if (result && typeof (result as unknown as { then?: unknown }).then === 'function') {
             (result as Promise<unknown>)
               .then(r => this.sendIpcReply(id, r, null))
               .catch(err => this.sendIpcReply(id, null, (err as Error).message || String(err)));

@@ -82,6 +82,8 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
         if (m.type === 'exec') {
             var eid = m.id;
             try {
+                // eslint-disable-next-line no-eval -- executeJavaScript bridge: renderer eval is the
+                // only mechanism to run arbitrary code in the WebView2 context.
                 var r = eval(m.code);
                 if (r && typeof r.then === 'function') {
                     r.then(function(v) {

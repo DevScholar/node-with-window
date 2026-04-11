@@ -1,5 +1,5 @@
 import { BrowserWindowOptions } from '../../interfaces.js';
-import type { DotnetProxy } from './dotnet/types.js';
+import type { DotnetProxy, DotNetObject } from './dotnet/types.js';
 
 /**
  * Manages Win32 P/Invoke window chrome for a single WPF window:
@@ -20,7 +20,7 @@ export class Win32Chrome {
   private _pendingMaxSize: [number, number] | null = null;
 
   constructor(
-    private readonly getBrowserWindow: () => unknown,
+    private readonly getBrowserWindow: () => DotNetObject,
     private readonly getDotnet: () => DotnetProxy,
     options: BrowserWindowOptions,
   ) {
@@ -45,13 +45,13 @@ export class Win32Chrome {
     if (!this._isMovable)    dotnetInst.winHelper(bw, 'SetMovable',     false);
     if (this._skipTaskbar)   dotnetInst.winHelper(bw, 'SetSkipTaskbar', true);
     if (this._pendingMinSize) {
-      (bw as any).MinWidth  = this._pendingMinSize[0];
-      (bw as any).MinHeight = this._pendingMinSize[1];
+      bw.MinWidth  = this._pendingMinSize[0];
+      bw.MinHeight = this._pendingMinSize[1];
       this._pendingMinSize = null;
     }
     if (this._pendingMaxSize) {
-      (bw as any).MaxWidth  = this._pendingMaxSize[0] > 0 ? this._pendingMaxSize[0] : Infinity;
-      (bw as any).MaxHeight = this._pendingMaxSize[1] > 0 ? this._pendingMaxSize[1] : Infinity;
+      bw.MaxWidth  = this._pendingMaxSize[0] > 0 ? this._pendingMaxSize[0] : Infinity;
+      bw.MaxHeight = this._pendingMaxSize[1] > 0 ? this._pendingMaxSize[1] : Infinity;
       this._pendingMaxSize = null;
     }
   }
@@ -104,8 +104,8 @@ export class Win32Chrome {
       this._pendingMinSize = [width, height];
       return;
     }
-    (bw as any).MinWidth  = width;
-    (bw as any).MinHeight = height;
+    (bw as DotNetObject).MinWidth  = width;
+    (bw as DotNetObject).MinHeight = height;
   }
 
   public setMaximumSize(width: number, height: number): void {
@@ -114,8 +114,8 @@ export class Win32Chrome {
       this._pendingMaxSize = [width, height];
       return;
     }
-    (bw as any).MaxWidth  = width  > 0 ? width  : Infinity;
-    (bw as any).MaxHeight = height > 0 ? height : Infinity;
+    (bw as DotNetObject).MaxWidth  = width  > 0 ? width  : Infinity;
+    (bw as DotNetObject).MaxHeight = height > 0 ? height : Infinity;
   }
 
   // ── HWND helpers ───────────────────────────────────────────────────────────

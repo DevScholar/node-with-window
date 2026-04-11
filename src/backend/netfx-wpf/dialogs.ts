@@ -1,5 +1,5 @@
 import { OpenDialogOptions, SaveDialogOptions } from '../../interfaces.js';
-import type { DotnetProxy } from './dotnet/types.js';
+import type { DotnetProxy, DotNetObject } from './dotnet/types.js';
 
 let dotnet: DotnetProxy;
 
@@ -9,9 +9,9 @@ export function setDotNetInstance(instance: DotnetProxy): void {
 
 export function showOpenDialog(options: OpenDialogOptions): Promise<string[] | undefined> {
   try {
-    const dotnetNs = dotnet as DotnetProxy & Record<string, any>;
+    const dotnetNs = dotnet as DotnetProxy & Record<string, DotNetObject>;
     const OpenFileDlgType = dotnetNs['Microsoft.Win32.OpenFileDialog'];
-    const dlg = new OpenFileDlgType();
+    const dlg: DotNetObject = new OpenFileDlgType();
 
     if (options.title) dlg.Title = options.title;
     if (options.filters && options.filters.length > 0) {
@@ -39,9 +39,9 @@ export function showOpenDialog(options: OpenDialogOptions): Promise<string[] | u
 
 export function showSaveDialog(options: SaveDialogOptions): Promise<string | undefined> {
   try {
-    const dotnetNs = dotnet as DotnetProxy & Record<string, any>;
+    const dotnetNs = dotnet as DotnetProxy & Record<string, DotNetObject>;
     const SaveFileDlgType = dotnetNs['Microsoft.Win32.SaveFileDialog'];
-    const dlg = new SaveFileDlgType();
+    const dlg: DotNetObject = new SaveFileDlgType();
 
     if (options.title) dlg.Title = options.title;
     if (options.defaultPath) dlg.FileName = options.defaultPath;
@@ -101,7 +101,7 @@ export function showMessageBox(options: {
             : buttonMap['OKCancel']
       : buttonMap['OK'];
 
-    const result = (Windows as any).MessageBox.Show(
+    const result = (Windows as unknown as DotNetObject).MessageBox.Show(
       options.message,
       options.title || 'Message',
       buttonType,

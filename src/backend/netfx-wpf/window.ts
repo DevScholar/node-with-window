@@ -19,7 +19,7 @@ import { Win32Chrome } from './win32-chrome.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 import { buildWpfMenu } from './menu.js';
 import { app } from '../../app.js';
-import type { DotnetProxy } from './dotnet/types.js';
+import type { DotnetProxy, DotNetObject } from './dotnet/types.js';
 
 /**
  * This library bridges Node.js with platform-specific GUI frameworks.
@@ -79,10 +79,10 @@ let _wpfStarted = false;
 export class NetFxWpfWindow implements IWindowProvider {
   public options: BrowserWindowOptions;
   public webPreferences: WebPreferences;
-  public browserWindow: any;
-  public webView: any;
-  public coreWebView2: any;
-  public app: any;
+  public browserWindow!: DotNetObject;
+  public webView!: DotNetObject;
+  public coreWebView2!: DotNetObject;
+  public app!: DotNetObject | boolean;
   public isWebViewReady = false;
   public navigationQueue: Array<() => void> = [];
   public pendingFilePath: string | null = null;
@@ -176,7 +176,7 @@ export class NetFxWpfWindow implements IWindowProvider {
     const WebView2WpfAssembly = System.Reflection.Assembly.LoadFrom(wpfDllPath);
 
     const WebView2Type = (
-      WebView2WpfAssembly as unknown as { GetType: (name: string) => { new (): unknown } }
+      WebView2WpfAssembly as unknown as { GetType: (name: string) => { new (): DotNetObject } }
     ).GetType('Microsoft.Web.WebView2.Wpf.WebView2');
     this.webView = new WebView2Type();
 
@@ -279,7 +279,7 @@ export class NetFxWpfWindow implements IWindowProvider {
         InitializationException?: { Message?: string };
       };
       if (evt.IsSuccess) {
-        this.coreWebView2 = (this.webView as unknown as { CoreWebView2: unknown }).CoreWebView2;
+        this.coreWebView2 = (this.webView as unknown as { CoreWebView2: DotNetObject }).CoreWebView2;
         if (this._webViewInitTimer !== null) {
           clearTimeout(this._webViewInitTimer);
           this._webViewInitTimer = null;
@@ -371,24 +371,21 @@ export class NetFxWpfWindow implements IWindowProvider {
    * - add_Closed: fires after the window has been destroyed.
    */
   private _registerWindowCloseHandlers(): void {
-    (this.browserWindow as any).add_Closing((_s: unknown, e: any) => {
-      // Programmatic close (provider.close() sets isClosed before calling WPF Close()).
-      // Let it proceed without consulting the JS layer — BrowserWindow already handled it.
+    (this.browserWindow as DotNetObject).add_Closing((_s: unknown, e: DotNetObject) => {
       if (this.isClosed) return;
-      // Always cancel: handle the close request asynchronously, then destroy if not prevented.
       e.Cancel = true;
       void this._handleCloseRequestAsync();
     });
     (this.browserWindow as unknown as { add_Closed: (cb: () => void) => void }).add_Closed(() => {
       this._onWindowClosed();
     });
-    (this.browserWindow as any).add_Activated((_s: unknown, _e: unknown) => {
+    (this.browserWindow as DotNetObject).add_Activated((_s: unknown, _e: unknown) => {
       this.onFocus?.();
     });
-    (this.browserWindow as any).add_Deactivated((_s: unknown, _e: unknown) => {
+    (this.browserWindow as DotNetObject).add_Deactivated((_s: unknown, _e: unknown) => {
       this.onBlur?.();
     });
-    (this.browserWindow as any).add_SizeChanged((_s: unknown, e: any) => {
+    (this.browserWindow as DotNetObject).add_SizeChanged((_s: unknown, e: DotNetObject) => {
       try {
         const w = Math.round(e.NewSize.Width as number);
         const h = Math.round(e.NewSize.Height as number);
@@ -419,7 +416,7 @@ export class NetFxWpfWindow implements IWindowProvider {
 
       // Set WPF Owner before Show() if a parent window is provided.
       if (this.options.parent) {
-        const parentHwnd = (this.options.parent as any).getHwnd?.() as string | undefined;
+        const parentHwnd = (this.options.parent as unknown as { getHwnd?: () => string }).getHwnd?.() as string | undefined;
         if (parentHwnd && parentHwnd !== '0') {
           dotnet.setOwnerByHwnd(this.browserWindow, parentHwnd);
         }
@@ -444,7 +441,7 @@ export class NetFxWpfWindow implements IWindowProvider {
 
       // Disable parent for modal windows.
       if (this.options.modal && this.options.parent) {
-        (this.options.parent as any).setEnabled?.(false);
+        (this.options.parent as unknown as { setEnabled?: (f: boolean) => void }).setEnabled?.(false);
       }
       return;
     }
@@ -505,55 +502,44 @@ export class NetFxWpfWindow implements IWindowProvider {
    * navigation-queue drain.
    */
   private async _initWebView2WithProtocols(): Promise<void> {
-    const CoreAssembly = this._coreAssembly as any;
+    const CoreAssembly = this._coreAssembly as DotNetObject;
 
     const EnvType    = CoreAssembly.GetType('Microsoft.Web.WebView2.Core.CoreWebView2Environment');
     const OptsType   = CoreAssembly.GetType('Microsoft.Web.WebView2.Core.CoreWebView2EnvironmentOptions');
     const SchemeType = CoreAssembly.GetType('Microsoft.Web.WebView2.Core.CoreWebView2CustomSchemeRegistration');
 
-    // nww:// is always registered first so node integration is always available.
-    const nwwReg = new SchemeType('nww');
-    (nwwReg as any).TreatAsSecure = true;
-    (nwwReg as any).HasAuthorityComponent = true;
-    // AllowedOrigins must be mutated in-place (the property is get-only in most
-    // WebView2 SDK versions — assigning a new list is silently ignored).
+    const nwwReg: DotNetObject = new SchemeType('nww');
+    nwwReg.TreatAsSecure = true;
+    nwwReg.HasAuthorityComponent = true;
     dotnet.setSchemeAllowedOrigins(nwwReg, ['*']);
 
     const schemeRegs: unknown[] = [nwwReg];
     for (const [scheme, priv] of protocol.getRegisteredSchemes()) {
-      const reg = new SchemeType(scheme);
-      (reg as any).TreatAsSecure = priv.secure ?? false;
-      (reg as any).HasAuthorityComponent = priv.standard ?? false;
+      const reg: DotNetObject = new SchemeType(scheme);
+      reg.TreatAsSecure = priv.secure ?? false;
+      reg.HasAuthorityComponent = priv.standard ?? false;
       schemeRegs.push(reg);
     }
 
-    const opts = new OptsType(null, null, null, false, schemeRegs);
-    // nodeIntegration exposes full Node.js to the renderer, so CORS between
-    // file:// pages and nww:// requests would otherwise block the bridge.
-    // file:// pages send Origin: null; Chromium does not match null against
-    // AllowedOrigins:['*'] or any ACAO response header — the enforcement
-    // happens below WebResourceRequested at the scheme-registration level.
-    // Disabling web security is the only escape hatch that keeps file:// navigation.
+    const opts: DotNetObject = new OptsType(null, null, null, false, schemeRegs);
     const disableWebSecurity =
       this.webPreferences.webSecurity === false ||
       this.webPreferences.nodeIntegration === true;
     if (disableWebSecurity) {
-      (opts as any).AdditionalBrowserArguments = '--disable-web-security';
+      opts.AdditionalBrowserArguments = '--disable-web-security';
     }
 
     try {
       const env = await dotnet.awaitTask(
         EnvType.CreateAsync(null, this.userDataPath, opts),
       );
-      await dotnet.awaitTask((this.webView as any).EnsureCoreWebView2Async(env));
+      await dotnet.awaitTask(this.webView.EnsureCoreWebView2Async(env));
     } catch (e) {
       console.error('[node-with-window] EnsureCoreWebView2Async failed:', e);
       return;
     }
 
-    // CoreWebView2InitializationCompleted has now fired and _ipcBridge.setup() has run.
-    // Register resource filters for nww:// and every user-registered scheme.
-    const coreWV2 = (this.webView as any).CoreWebView2;
+    const coreWV2 = this.webView.CoreWebView2 as DotNetObject;
     const ALL = 0; // CoreWebView2WebResourceContext.All
     coreWV2.AddWebResourceRequestedFilter('nww://*', ALL);
     for (const [scheme] of protocol.getRegisteredSchemes()) {
@@ -572,8 +558,8 @@ export class NetFxWpfWindow implements IWindowProvider {
     // callHandlerSync uses Atomics.wait+SharedArrayBuffer (no IPC pipe), so it
     // is safe at syncEventDepth=1.  Tradeoff: STA thread blocks for the duration
     // of the handler (~ms); ShowDialog + concurrent nww:// is acceptable in practice.
-    (coreWV2 as any).add_WebResourceRequested((_s: unknown, e: unknown) => {
-      const ev = e as any;
+    (coreWV2 as DotNetObject).add_WebResourceRequested((_s: unknown, e: unknown) => {
+      const ev = e as DotNetObject;
       const uri: string  = ev.Request.Uri;
       const meth: string = ev.Request.Method;
       const colonIdx = uri.indexOf('://');
@@ -646,7 +632,7 @@ export class NetFxWpfWindow implements IWindowProvider {
     const prevented = await (this.onCloseRequest?.() ?? false);
     if (!prevented) {
       this.isClosed = true;
-      try { (this.browserWindow as any).Close(); } catch { /* ignore */ }
+      try { this.browserWindow.Close(); } catch { /* ignore */ }
     }
   }
 
@@ -662,7 +648,7 @@ export class NetFxWpfWindow implements IWindowProvider {
 
     // Re-enable the parent if this was a modal window.
     if (this.options.modal && this.options.parent) {
-      (this.options.parent as any).setEnabled?.(true);
+      (this.options.parent as unknown as { setEnabled?: (f: boolean) => void }).setEnabled?.(true);
     }
 
     this._ipcBridge.cleanup();
@@ -677,7 +663,7 @@ export class NetFxWpfWindow implements IWindowProvider {
     if (this.userDataPath && fs.existsSync(this.userDataPath)) {
       try {
         fs.rmSync(this.userDataPath, { recursive: true, force: true });
-      } catch {}
+      } catch { /* temp session cleanup is best-effort */ }
     }
   }
 
@@ -692,25 +678,24 @@ export class NetFxWpfWindow implements IWindowProvider {
   /** Show a context menu at screen position (x, y) or at cursor if not specified. */
   public popupMenu(items: MenuItemOptions[], x?: number, y?: number): void {
     if (!this.browserWindow) return;
-    const dotnetNs = dotnet as DotnetProxy & Record<string, any>;
+    const dotnetNs = dotnet as DotnetProxy & Record<string, DotNetObject>;
     const ContextMenuType = dotnetNs['System.Windows.Controls.ContextMenu'];
     const MenuItemType    = dotnetNs['System.Windows.Controls.MenuItem'];
     const SeparatorType   = dotnetNs['System.Windows.Controls.Separator'];
     if (!ContextMenuType) return;
 
-    const cm = new ContextMenuType();
+    const cm: DotNetObject = new ContextMenuType();
 
-    const buildItems = (parent: unknown, list: MenuItemOptions[]) => {
+    const buildItems = (parent: DotNetObject, list: MenuItemOptions[]) => {
       for (const item of list) {
         if (item.type === 'separator') {
-          (parent as any).Items.Add(new SeparatorType());
+          parent.Items.Add(new SeparatorType());
         } else {
-          const mi = new MenuItemType();
-          (mi as any).Header = item.label || '';
-          if (item.enabled === false) (mi as any).IsEnabled = false;
-          if (item.toolTip) (mi as any).ToolTip = item.toolTip;
+          const mi: DotNetObject = new MenuItemType();
+          mi.Header = item.label || '';
+          if (item.enabled === false) mi.IsEnabled = false;
+          if (item.toolTip) mi.ToolTip = item.toolTip;
 
-          // Icon (best-effort)
           if (item.icon) {
             try {
               const iconAbs = path.isAbsolute(item.icon)
@@ -721,19 +706,19 @@ export class NetFxWpfWindow implements IWindowProvider {
               if (BitmapImageType && ImageType && UriType) {
                 const uri = new UriType('file:///' + iconAbs.replace(/\\/g, '/'));
                 const bmp = new BitmapImageType(uri);
-                const img = new ImageType();
-                (img as any).Source = bmp;
-                (img as any).Width  = 16;
-                (img as any).Height = 16;
-                (mi as any).Icon = img;
+                const img: DotNetObject = new ImageType();
+                img.Source = bmp;
+                img.Width  = 16;
+                img.Height = 16;
+                mi.Icon = img;
               }
             } catch { /* best-effort */ }
           }
 
           const clickFn = item.click ?? (item.role ? this._wpfRoleClick(item.role) : undefined);
-          if (clickFn) (mi as any).add_Click(() => { clickFn(); });
+          if (clickFn) mi.add_Click(() => { clickFn(); });
           if (item.submenu) buildItems(mi, item.submenu);
-          (parent as any).Items.Add(mi);
+          parent.Items.Add(mi);
         }
       }
     };
@@ -743,14 +728,14 @@ export class NetFxWpfWindow implements IWindowProvider {
     if (x !== undefined && y !== undefined) {
       try {
         const PlacementModeType = dotnetNs['System.Windows.Controls.Primitives.PlacementMode'];
-        const absolutePoint = (PlacementModeType as any).AbsolutePoint;
-        (cm as any).Placement        = absolutePoint;
-        (cm as any).HorizontalOffset = x;
-        (cm as any).VerticalOffset   = y;
+        const absolutePoint = (PlacementModeType as DotNetObject).AbsolutePoint;
+        cm.Placement        = absolutePoint;
+        cm.HorizontalOffset = x;
+        cm.VerticalOffset   = y;
       } catch { /* placement is best-effort */ }
     }
 
-    (cm as any).IsOpen = true;
+    cm.IsOpen = true;
   }
 
   /** Role→action mapping used by popupMenu (mirrors buildWpfMenu's roleClick). */
@@ -762,9 +747,9 @@ export class NetFxWpfWindow implements IWindowProvider {
       case 'forceReload':      return () => this.reload();
       case 'toggleDevTools':   return () => this.openDevTools();
       case 'togglefullscreen': return () => this.setFullScreen(!this.isFullScreen());
-      case 'resetZoom':        return () => { if (this.webView) (this.webView as any).ZoomFactor = 1.0; };
-      case 'zoomIn':           return () => { if (this.webView) (this.webView as any).ZoomFactor = Math.min(((this.webView as any).ZoomFactor as number) + 0.1, 5.0); };
-      case 'zoomOut':          return () => { if (this.webView) (this.webView as any).ZoomFactor = Math.max(((this.webView as any).ZoomFactor as number) - 0.1, 0.25); };
+      case 'resetZoom':        return () => { if (this.webView) this.webView.ZoomFactor = 1.0; };
+      case 'zoomIn':           return () => { if (this.webView) this.webView.ZoomFactor = Math.min((this.webView.ZoomFactor as number) + 0.1, 5.0); };
+      case 'zoomOut':          return () => { if (this.webView) this.webView.ZoomFactor = Math.max((this.webView.ZoomFactor as number) - 0.1, 0.25); };
       case 'undo':      return () => this.executeJavaScript("document.execCommand('undo')");
       case 'redo':      return () => this.executeJavaScript("document.execCommand('redo')");
       case 'cut':       return () => this.executeJavaScript("document.execCommand('cut')");
@@ -947,7 +932,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   public isMinimized(): boolean {
     if (!this.browserWindow) return false;
     try {
-      const state = (this.browserWindow as any).WindowState;
+      const state = this.browserWindow.WindowState;
       const Minimized = dotnet.System.Windows.WindowState.Minimized;
       return state === Minimized;
     } catch { return false; }
@@ -956,7 +941,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   public isMaximized(): boolean {
     if (!this.browserWindow) return false;
     try {
-      const state = (this.browserWindow as any).WindowState;
+      const state = this.browserWindow.WindowState;
       const Maximized = dotnet.System.Windows.WindowState.Maximized;
       return state === Maximized;
     } catch { return false; }
@@ -964,7 +949,7 @@ export class NetFxWpfWindow implements IWindowProvider {
 
   public isFocused(): boolean {
     if (!this.browserWindow) return false;
-    try { return (this.browserWindow as any).IsActive as boolean; } catch { return false; }
+    try { return this.browserWindow.IsActive as boolean; } catch { return false; }
   }
 
   public setAlwaysOnTop(flag: boolean): void {

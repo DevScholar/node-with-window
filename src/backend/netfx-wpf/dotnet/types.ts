@@ -2,6 +2,8 @@ import type { DotnetRef, ConstructableDotnetRef } from '@devscholar/node-ps1-dot
 
 export type { DotnetRef, ConstructableDotnetRef };
 
+export type DotNetObject = DotnetRef;
+
 type SystemNamespace = {
     Uri: ConstructableDotnetRef;
     IntPtr: DotnetRef;
@@ -53,30 +55,30 @@ type SystemNamespace = {
 };
 
 export interface DotnetProxy extends DotnetRef {
-    (namespace: string): any;
+    (namespace: string): DotnetRef;
     System: SystemNamespace;
     load(nameOrPath: string): DotnetRef;
     frameworkMoniker: string;
     runtimeVersion: string;
-    awaitTask(task: any): Promise<any>;
+    awaitTask(task: DotNetObject): Promise<DotNetObject>;
     addType(source: string, references?: string[]): DotnetRef;
-    startApplication(app: any, window: any): void;
-    addListener(event: string, fn: Function): void;
+    startApplication(app: DotNetObject, window: DotNetObject): void;
+    addListener(event: string, fn: (...args: unknown[]) => void): void;
     pollEvent(): boolean;
-    getHwnd(win: any): string;
-    minimize(win: any): void;
-    setFullScreen(win: any, flag: boolean, needFrameless: boolean, alwaysOnTop: boolean): void;
-    applyWindowChrome(win: any): void;
-    applyHiddenTitleBar(win: any): void;
-    setWindowIcon(win: any, iconPath: string): void;
-    setOwnerByHwnd(win: any, ownerHwnd: string): void;
-    setWindowEnabled(win: any, enabled: boolean): void;
-    setWebViewBackground(wv: any, a: number, r: number, g: number, b: number): void;
-    capturePreview(wv: any): string;
+    getHwnd(win: DotNetObject): string;
+    minimize(win: DotNetObject): void;
+    setFullScreen(win: DotNetObject, flag: boolean, needFrameless: boolean, alwaysOnTop: boolean): void;
+    applyWindowChrome(win: DotNetObject): void;
+    applyHiddenTitleBar(win: DotNetObject): void;
+    setWindowIcon(win: DotNetObject, iconPath: string): void;
+    setOwnerByHwnd(win: DotNetObject, ownerHwnd: string): void;
+    setWindowEnabled(win: DotNetObject, enabled: boolean): void;
+    setWebViewBackground(wv: DotNetObject, a: number, r: number, g: number, b: number): void;
+    capturePreview(wv: DotNetObject): string;
     trashItem(filePath: string): void;
-    winHelper(win: any, op: string, flag?: boolean): void;
-    registerWindowAccelerators(win: any, shortcuts: Array<{ vk: number; modifiers: number; callbackId: string }>): void;
-    addScriptAndNavigate(coreWebView2: any, script: string, url: string): void;
-    addScriptAndNavigateToString(coreWebView2: any, script: string, html: string): void;
-    setSchemeAllowedOrigins(reg: any, origins: string[]): void;
+    winHelper(win: DotNetObject, op: string, flag?: boolean): void;
+    registerWindowAccelerators(win: DotNetObject, shortcuts: Array<{ vk: number; modifiers: number; callbackId: string }>): void;
+    addScriptAndNavigate(coreWebView2: DotNetObject, script: string, url: string): void;
+    addScriptAndNavigateToString(coreWebView2: DotNetObject, script: string, html: string): void;
+    setSchemeAllowedOrigins(reg: DotNetObject, origins: string[]): void;
 }

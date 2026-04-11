@@ -40,7 +40,7 @@ export class Menu {
   popup(options?: { window?: unknown; x?: number; y?: number }): void {
     const win = options?.window;
     if (!win) return;
-    const provider = (win as any).provider as { popupMenu?: (...a: unknown[]) => void } | undefined;
+    const provider = (win as unknown as { provider?: { popupMenu?: (...a: unknown[]) => void } }).provider;
     if (typeof provider?.popupMenu === 'function') {
       provider.popupMenu(this._items, options?.x, options?.y);
     }

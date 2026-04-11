@@ -212,7 +212,7 @@ class App extends EventEmitter {
     const lockDir = path.join(os.tmpdir(), 'nww-locks');
     try {
       fs.mkdirSync(lockDir, { recursive: true });
-    } catch {}
+    } catch { /* directory may already exist */ }
 
     const safeName = this.getName().replace(/[^a-z0-9_-]/gi, '_');
     const lockPath = path.join(lockDir, `${safeName}.lock`);
@@ -238,7 +238,7 @@ class App extends EventEmitter {
       process.on('exit', () => {
         try {
           if (this._lockFile) fs.unlinkSync(this._lockFile);
-        } catch {}
+        } catch { /* lock file cleanup is best-effort */ }
       });
     }
     return true;

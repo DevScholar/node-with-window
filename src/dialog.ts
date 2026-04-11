@@ -54,26 +54,24 @@ export const dialog = {
   },
 
   showOpenDialogSync(
-    winOrOpts: BrowserWindow | OpenDialogOptions,
-    options?: OpenDialogOptions
+    _winOrOpts: BrowserWindow | OpenDialogOptions,
+    _options?: OpenDialogOptions
   ): string[] | undefined {
-    // Note: sync variants are deprecated; use showOpenDialog (async) instead.
-    // These now return undefined because dialogs are truly async.
     console.warn('[node-with-window] showOpenDialogSync: not supported with async dialogs, use showOpenDialog');
     return undefined;
   },
 
   showSaveDialogSync(
-    winOrOpts: BrowserWindow | SaveDialogOptions,
-    options?: SaveDialogOptions
+    _winOrOpts: BrowserWindow | SaveDialogOptions,
+    _options?: SaveDialogOptions
   ): string | undefined {
     console.warn('[node-with-window] showSaveDialogSync: not supported with async dialogs, use showSaveDialog');
     return undefined;
   },
 
   showMessageBoxSync(
-    winOrOpts: BrowserWindow | MessageBoxOptions,
-    options?: MessageBoxOptions
+    _winOrOpts: BrowserWindow | MessageBoxOptions,
+    _options?: MessageBoxOptions
   ): number {
     console.warn('[node-with-window] showMessageBoxSync: not supported with async dialogs, use showMessageBox');
     return 0;

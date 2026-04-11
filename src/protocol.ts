@@ -129,9 +129,13 @@ const enc     = new TextEncoder();
 
 // Reconstruct handler functions from their source strings.
 // Each entry in workerData.handlers is [scheme, functionSourceString].
+// eslint-disable-next-line no-eval -- Protocol handlers are serialized as source strings and must be
+// deserialized in the worker thread; Function() would lose closure scope equally.
+// Only trusted handler code (registered via protocol.registerSchemesAsPrivileged) reaches here.
 const handlers = Object.create(null);
 for (const scheme of Object.keys(workerData.handlers)) {
   try {
+    // eslint-disable-next-line no-eval
     handlers[scheme] = eval('(' + workerData.handlers[scheme] + ')');
   } catch (e) {
     handlers[scheme] = null;

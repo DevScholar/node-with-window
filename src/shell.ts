@@ -60,7 +60,7 @@ export const shell = {
         // Dynamic import avoids pulling in the .NET bridge on non-Windows platforms.
         import('./backend/netfx-wpf/dotnet/index.js').then(mod => {
           try {
-            (mod.default as any).trashItem(filePath);
+            (mod.default as unknown as { trashItem: (p: string) => void }).trashItem(filePath);
             resolve();
           } catch (e) {
             reject(e);

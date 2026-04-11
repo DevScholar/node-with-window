@@ -39,9 +39,9 @@ export async function showOpenDialog(win: Gtk.ApplicationWindow | null, options:
         resolve(result);
       };
 
-      if (isDir) dialog.select_folder(win, null, callback as any);
-      else if (isMulti) dialog.open_multiple(win, null, callback as any);
-      else dialog.open(win, null, callback as any);
+      if (isDir) dialog.select_folder(win, null, callback as unknown as (...args: unknown[]) => void);
+      else if (isMulti) dialog.open_multiple(win, null, callback as unknown as (...args: unknown[]) => void);
+      else dialog.open(win, null, callback as unknown as (...args: unknown[]) => void);
     } catch (e) {
       console.warn('[gjs-gtk4] showOpenDialog failed:', e);
       resolve(undefined);
@@ -83,7 +83,7 @@ export async function showSaveDialog(win: Gtk.ApplicationWindow | null, options:
           result = file ? file.get_path()! : undefined;
         } catch { /* user cancelled */ }
         resolve(result);
-      }) as any);
+      }) as unknown as (...args: unknown[]) => void);
     } catch (e) {
       console.warn('[gjs-gtk4] showSaveDialog failed:', e);
       resolve(undefined);
@@ -118,7 +118,7 @@ export async function showMessageBox(
             result = buttons.length - 1;
           }
           resolve(result);
-        }) as any);
+        }) as unknown as (...args: unknown[]) => void);
       });
     } catch (e) {
       console.warn('[gjs-gtk4] AlertDialog failed, falling back to MessageDialog:', e);
@@ -141,7 +141,7 @@ export async function showMessageBox(
         message_type: typeMap[options.type || 'none'] ?? 0,
         text: options.title || 'Message',
         secondary_text: options.message || '',
-      } as any) as Gtk.MessageDialog;
+      } as unknown as Gtk.MessageDialog.ConstructorProps) as Gtk.MessageDialog;
 
       for (let i = 0; i < buttons.length; i++) {
         dialog.add_button(buttons[i], i);

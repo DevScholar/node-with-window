@@ -127,7 +127,7 @@ export class BrowserWindow extends EventEmitter {
       onNavigateFailed: cb => this.provider.onNavigateFailed(cb),
       onWillNavigate: cb => this.provider.onWillNavigate?.(cb),
       getURL: () => this.provider.getURL?.() ?? '',
-      getWebTitle: () => (this.provider as any).getWebTitle?.() ?? '',
+      getWebTitle: () => (this.provider as unknown as { getWebTitle?: () => string }).getWebTitle?.() ?? '',
       isLoading: () => this.provider.isLoading?.() ?? false,
       goBack: () => this.provider.goBack?.(),
       goForward: () => this.provider.goForward?.(),
@@ -144,7 +144,7 @@ export class BrowserWindow extends EventEmitter {
     }
   }
 
-  private async _init(options?: BrowserWindowOptions): Promise<void> {
+  private async _init(_options?: BrowserWindowOptions): Promise<void> {
     try {
       await ensureBackendInitialized(this._backendName);
       await this.provider.createWindow();
@@ -168,8 +168,8 @@ export class BrowserWindow extends EventEmitter {
     const event = { preventDefault: () => { prevented = true; } };
     const listeners = this.rawListeners('close');
     for (const listener of listeners) {
-      const result = (listener as Function)(event);
-      if (result && typeof (result as any).then === 'function') {
+      const result = (listener as (event: { preventDefault: () => void }) => unknown)(event);
+      if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
         await (result as Promise<unknown>);
       }
     }

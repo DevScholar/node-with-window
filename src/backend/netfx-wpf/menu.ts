@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import { MenuItemOptions } from '../../interfaces.js';
 import { callbackRegistry } from '@devscholar/node-ps1-dotnet';
-import type { DotnetProxy } from './dotnet/types.js';
+import type { DotnetProxy, DotNetObject } from './dotnet/types.js';
 
 let dotnet: DotnetProxy;
 
@@ -11,14 +11,14 @@ export function setDotNetInstance(instance: DotnetProxy): void {
 
 export function setMenu(
   window: { browserWindow: unknown; pendingMenu?: MenuItemOptions[] },
-  menu: unknown[]
+  menu: MenuItemOptions[]
 ): void {
-  (window as any).pendingMenu = menu;
+  window.pendingMenu = menu;
 }
 
 interface WindowRef {
-  browserWindow: unknown;
-  webView: unknown;
+  browserWindow: DotNetObject;
+  webView: DotNetObject;
   pendingMenu?: unknown[] | null;
   onClosed?: () => void;
   close(): void;
@@ -86,7 +86,7 @@ function formatAcceleratorDisplay(accel: string): string {
 // ---------------------------------------------------------------------------
 
 export function buildWpfMenu(window: WindowRef): void {
-  const dotnetNs = dotnet as DotnetProxy & Record<string, any>;
+  const dotnetNs = dotnet as DotnetProxy & Record<string, DotNetObject>;
   const DockPanelType = dotnetNs['System.Windows.Controls.DockPanel'];
   const MenuType      = dotnetNs['System.Windows.Controls.Menu'];
   const MenuItemType  = dotnetNs['System.Windows.Controls.MenuItem'];
@@ -106,14 +106,14 @@ export function buildWpfMenu(window: WindowRef): void {
       case 'forceReload':      return () => window.reload();
       case 'toggleDevTools':   return () => window.openDevTools();
       case 'togglefullscreen': return () => window.setFullScreen(!window.isFullScreen());
-      case 'resetZoom':        return () => { (window.webView as any).ZoomFactor = 1.0; };
+      case 'resetZoom':        return () => { (window.webView as DotNetObject).ZoomFactor = 1.0; };
       case 'zoomIn':           return () => {
-        const z = (window.webView as any).ZoomFactor as number;
-        (window.webView as any).ZoomFactor = Math.min(z + 0.1, 5.0);
+        const z = (window.webView as DotNetObject).ZoomFactor as number;
+        (window.webView as DotNetObject).ZoomFactor = Math.min(z + 0.1, 5.0);
       };
       case 'zoomOut':          return () => {
-        const z = (window.webView as any).ZoomFactor as number;
-        (window.webView as any).ZoomFactor = Math.max(z - 0.1, 0.25);
+        const z = (window.webView as DotNetObject).ZoomFactor as number;
+        (window.webView as DotNetObject).ZoomFactor = Math.max(z - 0.1, 0.25);
       };
       case 'undo':      return () => window.executeJavaScript?.("document.execCommand('undo')");
       case 'redo':      return () => window.executeJavaScript?.("document.execCommand('redo')");
@@ -128,19 +128,17 @@ export function buildWpfMenu(window: WindowRef): void {
   // Collect accelerator entries to register with the window after building.
   const accelEntries: Array<{ vk: number; modifiers: number; callbackId: string }> = [];
 
-  const buildItems = (parent: unknown, items: MenuItemOptions[]) => {
+  const buildItems = (parent: DotNetObject, items: MenuItemOptions[]) => {
     for (const item of items) {
       if (item.type === 'separator') {
-        (parent as any).Items.Add(new SeparatorType());
+        parent.Items.Add(new SeparatorType());
       } else {
-        const mi = new MenuItemType();
-        (mi as any).Header = item.label || '';
-        if (item.enabled === false) (mi as any).IsEnabled = false;
+        const mi: DotNetObject = new MenuItemType();
+        mi.Header = item.label || '';
+        if (item.enabled === false) mi.IsEnabled = false;
 
-        // ToolTip
-        if (item.toolTip) (mi as any).ToolTip = item.toolTip;
+        if (item.toolTip) mi.ToolTip = item.toolTip;
 
-        // Icon (best-effort — WPF MenuItem.Icon expects a UIElement)
         if (item.icon) {
           try {
             const iconAbs = path.isAbsolute(item.icon)
@@ -151,27 +149,25 @@ export function buildWpfMenu(window: WindowRef): void {
             if (BitmapImageType && ImageType && UriType) {
               const uri  = new UriType('file:///' + iconAbs.replace(/\\/g, '/'));
               const bmp  = new BitmapImageType(uri);
-              const img  = new ImageType();
-              (img as any).Source = bmp;
-              (img as any).Width  = 16;
-              (img as any).Height = 16;
-              (mi as any).Icon = img;
+              const img: DotNetObject = new ImageType();
+              img.Source = bmp;
+              img.Width  = 16;
+              img.Height = 16;
+              mi.Icon = img;
             }
           } catch { /* icon loading is best-effort */ }
         }
 
-        // Accelerator display text (InputGestureText)
         if (item.accelerator) {
-          (mi as any).InputGestureText = formatAcceleratorDisplay(item.accelerator);
+          mi.InputGestureText = formatAcceleratorDisplay(item.accelerator);
         }
 
         const clickFn = item.click ?? (item.role ? roleClick(item.role) : undefined);
         if (clickFn) {
           const callback = () => { clickFn(); };
-          _callbackRefs.push(callback); // Keep alive
-          (mi as any).add_Click(callback);
+          _callbackRefs.push(callback);
+          mi.add_Click(callback);
 
-          // Register accelerator for keyboard shortcut enforcement
           if (item.accelerator) {
             const parsed = parseAccelerator(item.accelerator);
             if (parsed) {
@@ -184,28 +180,27 @@ export function buildWpfMenu(window: WindowRef): void {
         }
 
         if (item.submenu) buildItems(mi, item.submenu);
-        (parent as any).Items.Add(mi);
+        parent.Items.Add(mi);
       }
     }
   };
 
   buildItems(menuBar, window.pendingMenu as MenuItemOptions[]);
 
-  // Register keyboard accelerators via C# PreviewKeyDown hook
   if (accelEntries.length > 0) {
     try {
-      (dotnet as DotnetProxy).registerWindowAccelerators(window.browserWindow, accelEntries);
+      dotnet.registerWindowAccelerators(window.browserWindow, accelEntries);
     } catch { /* accelerators are best-effort */ }
   }
 
-  const panel = new DockPanelType();
-  (panel as any).LastChildFill = true;
+  const panel: DotNetObject = new DockPanelType();
+  panel.LastChildFill = true;
   DockPanelType.SetDock(menuBar, 1);
-  const currentGrid = (window.browserWindow as any).Content;
-  if (currentGrid) (currentGrid as any).Children.Remove(window.webView);
-  (panel as any).Children.Add(menuBar);
-  (panel as any).Children.Add(window.webView);
-  (window.browserWindow as any).Content = panel;
+  const currentGrid = window.browserWindow.Content as DotNetObject | null;
+  if (currentGrid) currentGrid.Children.Remove(window.webView);
+  panel.Children.Add(menuBar);
+  panel.Children.Add(window.webView);
+  window.browserWindow.Content = panel;
 
   // Cleanup menu callbacks when window closes
   const originalOnClosed = window.onClosed;

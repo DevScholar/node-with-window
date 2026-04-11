@@ -5,7 +5,7 @@ import { ipcMain } from '../../ipc-main.js';
 import { generateBridgeScript } from './bridge.js';
 import { addNwwCallbackPusher, removeNwwCallbackPusher } from '../../node-integration.js';
 import { addAsyncEvent } from '@devscholar/node-ps1-dotnet/internal';
-import type { DotnetProxy } from './dotnet/types.js';
+import type { DotnetProxy, DotNetObject } from './dotnet/types.js';
 
 /**
  * Owns the WebView2 IPC channel for one window: bridge script injection,
@@ -45,10 +45,7 @@ export class WpfIpcBridge {
   public setup(pendingAbsFilePath: string | null): void {
     const coreWebView2 = this.getCoreWebView2();
     const dotnetInst = this.getDotnet();
-    const handlers = (ipcMain as any).handlers as Map<
-      string,
-      (event: unknown, ...args: unknown[]) => unknown
-    >;
+    const handlers = (ipcMain as unknown as { handlers: Map<string, (event: unknown, ...args: unknown[]) => unknown> }).handlers;
 
     // ── Bridge + preload script ────────────────────────────────────────────────
     let bridgeScript = generateBridgeScript(this.webPreferences);
@@ -115,7 +112,7 @@ export class WpfIpcBridge {
       const title = (coreWebView2 as unknown as { DocumentTitle: string }).DocumentTitle;
       if (title) {
         (this.getBrowserWindow() as unknown as { Title: string }).Title = title;
-        (this.getWindowSender() as any)?.onTitleUpdated?.(title);
+        (this.getWindowSender() as DotNetObject)?.onTitleUpdated?.(title);
       }
     });
 
