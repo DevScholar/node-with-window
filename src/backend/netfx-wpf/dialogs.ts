@@ -1,15 +1,16 @@
 import { OpenDialogOptions, SaveDialogOptions } from '../../interfaces.js';
+import type { DotnetProxy } from './dotnet/types.js';
 
-let dotnet: unknown;
+let dotnet: DotnetProxy;
 
-export function setDotNetInstance(instance: unknown): void {
+export function setDotNetInstance(instance: DotnetProxy): void {
   dotnet = instance;
 }
 
 export function showOpenDialog(options: OpenDialogOptions): Promise<string[] | undefined> {
   try {
-    const dotnetAny = dotnet as any;
-    const OpenFileDlgType = dotnetAny['Microsoft.Win32.OpenFileDialog'];
+    const dotnetNs = dotnet as DotnetProxy & Record<string, any>;
+    const OpenFileDlgType = dotnetNs['Microsoft.Win32.OpenFileDialog'];
     const dlg = new OpenFileDlgType();
 
     if (options.title) dlg.Title = options.title;
@@ -38,8 +39,8 @@ export function showOpenDialog(options: OpenDialogOptions): Promise<string[] | u
 
 export function showSaveDialog(options: SaveDialogOptions): Promise<string | undefined> {
   try {
-    const dotnetAny = dotnet as any;
-    const SaveFileDlgType = dotnetAny['Microsoft.Win32.SaveFileDialog'];
+    const dotnetNs = dotnet as DotnetProxy & Record<string, any>;
+    const SaveFileDlgType = dotnetNs['Microsoft.Win32.SaveFileDialog'];
     const dlg = new SaveFileDlgType();
 
     if (options.title) dlg.Title = options.title;
@@ -72,17 +73,7 @@ export function showMessageBox(options: {
   buttons?: string[];
 }): Promise<number> {
   try {
-    const System = (
-      dotnet as unknown as {
-        System: {
-          Windows: {
-            MessageBox: {
-              Show: (msg: string, title: string, button: number, icon: number) => number;
-            };
-          };
-        };
-      }
-    ).System;
+    const System = dotnet.System;
     const Windows = System.Windows;
 
     const iconMap: Record<string, number> = {
@@ -110,7 +101,7 @@ export function showMessageBox(options: {
             : buttonMap['OKCancel']
       : buttonMap['OK'];
 
-    const result = Windows.MessageBox.Show(
+    const result = (Windows as any).MessageBox.Show(
       options.message,
       options.title || 'Message',
       buttonType,

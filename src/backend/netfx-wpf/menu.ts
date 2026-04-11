@@ -1,10 +1,11 @@
 import * as path from 'node:path';
 import { MenuItemOptions } from '../../interfaces.js';
 import { callbackRegistry } from '@devscholar/node-ps1-dotnet';
+import type { DotnetProxy } from './dotnet/types.js';
 
-let dotnet: unknown;
+let dotnet: DotnetProxy;
 
-export function setDotNetInstance(instance: unknown): void {
+export function setDotNetInstance(instance: DotnetProxy): void {
   dotnet = instance;
 }
 
@@ -85,11 +86,11 @@ function formatAcceleratorDisplay(accel: string): string {
 // ---------------------------------------------------------------------------
 
 export function buildWpfMenu(window: WindowRef): void {
-  const dotnetAny = dotnet as any;
-  const DockPanelType = dotnetAny['System.Windows.Controls.DockPanel'];
-  const MenuType      = dotnetAny['System.Windows.Controls.Menu'];
-  const MenuItemType  = dotnetAny['System.Windows.Controls.MenuItem'];
-  const SeparatorType = dotnetAny['System.Windows.Controls.Separator'];
+  const dotnetNs = dotnet as DotnetProxy & Record<string, any>;
+  const DockPanelType = dotnetNs['System.Windows.Controls.DockPanel'];
+  const MenuType      = dotnetNs['System.Windows.Controls.Menu'];
+  const MenuItemType  = dotnetNs['System.Windows.Controls.MenuItem'];
+  const SeparatorType = dotnetNs['System.Windows.Controls.Separator'];
 
   if (!window.pendingMenu) return;
 
@@ -144,9 +145,9 @@ export function buildWpfMenu(window: WindowRef): void {
           try {
             const iconAbs = path.isAbsolute(item.icon)
               ? item.icon : path.resolve(process.cwd(), item.icon);
-            const BitmapImageType = dotnetAny['System.Windows.Media.Imaging.BitmapImage'];
-            const ImageType       = dotnetAny['System.Windows.Controls.Image'];
-            const UriType         = dotnetAny['System.Uri'];
+            const BitmapImageType = dotnetNs['System.Windows.Media.Imaging.BitmapImage'];
+            const ImageType       = dotnetNs['System.Windows.Controls.Image'];
+            const UriType         = dotnetNs['System.Uri'];
             if (BitmapImageType && ImageType && UriType) {
               const uri  = new UriType('file:///' + iconAbs.replace(/\\/g, '/'));
               const bmp  = new BitmapImageType(uri);
@@ -193,7 +194,7 @@ export function buildWpfMenu(window: WindowRef): void {
   // Register keyboard accelerators via C# PreviewKeyDown hook
   if (accelEntries.length > 0) {
     try {
-      (dotnetAny as any).registerWindowAccelerators(window.browserWindow, accelEntries);
+      (dotnet as DotnetProxy).registerWindowAccelerators(window.browserWindow, accelEntries);
     } catch { /* accelerators are best-effort */ }
   }
 

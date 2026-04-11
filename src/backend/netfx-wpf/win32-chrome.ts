@@ -1,4 +1,5 @@
 import { BrowserWindowOptions } from '../../interfaces.js';
+import type { DotnetProxy } from './dotnet/types.js';
 
 /**
  * Manages Win32 P/Invoke window chrome for a single WPF window:
@@ -20,7 +21,7 @@ export class Win32Chrome {
 
   constructor(
     private readonly getBrowserWindow: () => unknown,
-    private readonly getDotnet: () => any,
+    private readonly getDotnet: () => DotnetProxy,
     options: BrowserWindowOptions,
   ) {
     this._isMinimizable = options.minimizable  ?? true;
@@ -37,12 +38,12 @@ export class Win32Chrome {
   public apply(): void {
     const bw = this.getBrowserWindow();
     if (!bw) return;
-    const dotnetAny = this.getDotnet();
-    if (!this._isMinimizable) dotnetAny.winHelper(bw, 'SetMinimizable', false);
-    if (!this._isMaximizable) dotnetAny.winHelper(bw, 'SetMaximizable', false);
-    if (!this._isClosable)   dotnetAny.winHelper(bw, 'SetClosable',    false);
-    if (!this._isMovable)    dotnetAny.winHelper(bw, 'SetMovable',     false);
-    if (this._skipTaskbar)   dotnetAny.winHelper(bw, 'SetSkipTaskbar', true);
+    const dotnetInst = this.getDotnet();
+    if (!this._isMinimizable) dotnetInst.winHelper(bw, 'SetMinimizable', false);
+    if (!this._isMaximizable) dotnetInst.winHelper(bw, 'SetMaximizable', false);
+    if (!this._isClosable)   dotnetInst.winHelper(bw, 'SetClosable',    false);
+    if (!this._isMovable)    dotnetInst.winHelper(bw, 'SetMovable',     false);
+    if (this._skipTaskbar)   dotnetInst.winHelper(bw, 'SetSkipTaskbar', true);
     if (this._pendingMinSize) {
       (bw as any).MinWidth  = this._pendingMinSize[0];
       (bw as any).MinHeight = this._pendingMinSize[1];

@@ -7,6 +7,7 @@ import dotnetBase from '@devscholar/node-ps1-dotnet';
 import { startApplication, addType } from '@devscholar/node-ps1-dotnet/internal';
 import { getWin32HelperSource } from '../Win32Helper.js';
 import * as win32 from '../win32-helpers.js';
+import type { DotnetProxy } from './types.js';
 export { callbackRegistry, createProxy, createProxyWithInlineProps } from '@devscholar/node-ps1-dotnet';
 
 // Compile the residual Win32Helper.cs (SetMovable, RegisterAccelerators, WebView2Helper).
@@ -31,7 +32,7 @@ function webView2Helper(): any {
 }
 
 // The dotnet proxy exposed to window.ts / dialogs.ts / menu.ts via setDotNetInstance.
-const dotnetProxy = new Proxy(function() {} as any, {
+const dotnetProxy = new Proxy(function() {} as unknown as DotnetProxy, {
     get: (_target: any, prop: string) => {
         if (prop === 'default') return dotnetProxy;
         if (prop === 'then') return undefined;

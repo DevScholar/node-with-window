@@ -24,22 +24,24 @@ import {
 import { buildGioMenu } from './menu.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 import { protocol } from '../../protocol.js';
+import type Gtk from '@girs/gtk-4.0';
+import type Gdk from '@girs/gdk-4.0';
+import type Gio from '@girs/gio-2.0';
+import type WebKit from '@girs/webkit-6.0';
 
 export class GjsGtk4Window implements IWindowProvider {
   public options: BrowserWindowOptions;
   public webPreferences: WebPreferences;
 
-  private win: any = null;
-  private webView: any = null;
-  private ucm: any = null;
-  private _webContext: any = null;
+  private win: Gtk.ApplicationWindow | null = null;
+  private webView: WebKit.WebView | null = null;
+  private ucm: WebKit.UserContentManager | null = null;
+  private _webContext: WebKit.WebContext | null = null;
   private _nwwPushFn: ((id: string, args: unknown[]) => void) | null = null;
-  private _contentBox: any = null;
-  private _menuBar: any = null;
+  private _contentBox: Gtk.Box | null = null;
+  private _menuBar: Gtk.PopoverMenuBar | null = null;
   private _menuActionNames: string[] = [];
-  /** Strong refs to Gio.SimpleAction proxies — prevents V8 GC from releasing
-   *  the GJS-side objects and their signal callbacks. */
-  private _menuActions: any[] = [];
+  private _menuActions: Gio.SimpleAction[] = [];
 
   private _pendingMenu: MenuItemOptions[] | null = null;
   private _pendingFilePath: string | null = null;
@@ -84,8 +86,6 @@ export class GjsGtk4Window implements IWindowProvider {
     this._isResizable = this.options.resizable ?? true;
   }
 
-  // ── Lifecycle ──────────────────────────────────────────────────────────────
-
   public async createWindow(): Promise<void> {
     ensureGtkApp();
 
@@ -104,7 +104,6 @@ export class GjsGtk4Window implements IWindowProvider {
       } else {
         _pendingWindowCreations.push(doCreate);
         if (_pendingWindowCreations.length === 1) {
-          // First window: start the GTK application (non-blocking via node-with-gjs)
           startEventDrain();
           _gtkApp.run([]);
         }
@@ -115,25 +114,20 @@ export class GjsGtk4Window implements IWindowProvider {
   private _createWindowInGtk(): void {
     if (!_WebKit) throw new Error('[gjs-gtk4] WebKit namespace not available');
 
-    // ── UserContentManager for IPC ─────────────────────────────────────────
-    this.ucm = new _WebKit.UserContentManager();
+    this.ucm = new _WebKit.UserContentManager() as WebKit.UserContentManager;
     try {
-      // WebKit 6.0: 2 args; WebKit2 4.1: 1 arg
       this.ucm.register_script_message_handler('ipc', null);
     } catch {
       this.ucm.register_script_message_handler('ipc');
     }
 
-    // Async callback so GJS does NOT block in processNestedCommands().
-    // Without async, invoke handlers that call showOpenDialog()/showMessageBox()
-    // would deadlock because the dialog needs the GLib main loop to be running.
-    this.ucm.connect('script-message-received::ipc', async (_ucm: any, jsResult: any) => {
+    this.ucm.connect('script-message-received::ipc', async (_ucm: WebKit.UserContentManager, jsResult: any) => {
       try {
         let json: string;
         try {
-          json = jsResult.get_js_value().to_string();  // WebKit2 4.1
+          json = jsResult.get_js_value().to_string();
         } catch {
-          json = jsResult.to_string();                  // WebKit 6.0
+          json = jsResult.to_string();
         }
         this._handleIpcMessage(json);
       } catch (e) {
@@ -141,24 +135,19 @@ export class GjsGtk4Window implements IWindowProvider {
       }
     });
 
-    // ── WebView ────────────────────────────────────────────────────────────
-    // Always create a WebContext so we can register the nww:// scheme for
-    // node integration (require, sendSync) and any user custom schemes.
     try {
-      this._webContext = new _WebKit.WebContext();
+      this._webContext = new _WebKit.WebContext() as WebKit.WebContext;
     } catch {
-      this._webContext = _WebKit.WebContext.get_default();
+      this._webContext = _WebKit.WebContext.get_default() as WebKit.WebContext;
     }
 
-    // nww:// — internal scheme for node integration (always registered).
-    this._webContext.register_uri_scheme('nww', (req: any) => {
+    this._webContext.register_uri_scheme('nww', (req: WebKit.URISchemeRequest) => {
       void this._handleNwwSchemeRequest(req);
     });
 
-    // User custom schemes.
     const registeredSchemes = protocol.getRegisteredSchemes();
     for (const [scheme] of registeredSchemes) {
-      this._webContext.register_uri_scheme(scheme, (req: any) => {
+      this._webContext.register_uri_scheme(scheme, (req: WebKit.URISchemeRequest) => {
         void this._handleUriSchemeRequest(scheme, req);
       });
     }
@@ -166,14 +155,13 @@ export class GjsGtk4Window implements IWindowProvider {
     this.webView = new _WebKit.WebView({
       user_content_manager: this.ucm,
       web_context: this._webContext,
-    });
+    }) as WebKit.WebView;
 
     try {
       const settings = this.webView.get_settings();
       settings.enable_developer_extras = true;
     } catch { /* best-effort */ }
 
-    // ── Bridge script (injected at DOCUMENT_START on every page load) ──────
     let bridgeScript = generateBridgeScript(this.webPreferences);
     if (this.webPreferences.preload) {
       const absPreload = path.isAbsolute(this.webPreferences.preload)
@@ -198,14 +186,13 @@ export class GjsGtk4Window implements IWindowProvider {
     const userScript = new _WebKit.UserScript(
       bridgeScript,
       InjectedFrames.ALL_FRAMES,
-      InjectionTime.DOCUMENT_START,
+      InjectionTime.START,
       null,
       null
-    );
+    ) as WebKit.UserScript;
     this.ucm.add_script(userScript);
 
-    // ── Window ─────────────────────────────────────────────────────────────
-    this.win = new _Gtk.ApplicationWindow({ application: _gtkApp });
+    this.win = new _Gtk.ApplicationWindow({ application: _gtkApp }) as Gtk.ApplicationWindow;
     this.win.set_title(this.options.title || 'node-with-window');
     this.win.set_default_size(this.options.width || 800, this.options.height || 600);
 
@@ -214,7 +201,6 @@ export class GjsGtk4Window implements IWindowProvider {
       this.win.set_size_request(this.options.minWidth || -1, this.options.minHeight || -1);
     }
 
-    // ── Frame / decorations ────────────────────────────────────────────────
     const needFrameless = this.options.frame === false
       || this.options.transparent
       || this.options.titleBarStyle === 'hidden'
@@ -223,65 +209,48 @@ export class GjsGtk4Window implements IWindowProvider {
       this.win.set_decorated(false);
     }
 
-    // ── Transparent window ─────────────────────────────────────────────────
     if (this.options.transparent) {
-      // 1. Transparent WebKit background so compositor sees through the page
       try {
-        const rgba = new _Gdk.RGBA();
+        const rgba = new _Gdk.RGBA() as Gdk.RGBA;
         rgba.red = 0; rgba.green = 0; rgba.blue = 0; rgba.alpha = 0;
         this.webView.set_background_color(rgba);
       } catch (e) { console.warn('[gjs-gtk4] set_background_color failed:', e); }
 
-      // 2. Transparent GTK window background via CSS (so the window chrome
-      //    itself doesn't paint an opaque rectangle behind the webview)
       try {
-        const provider = new _Gtk.CssProvider();
+        const provider = new _Gtk.CssProvider() as Gtk.CssProvider;
         const css = '.nww-transparent { background-color: transparent; background: transparent; }';
         try { provider.load_from_string(css); }
         catch { provider.load_from_data(css, -1); }
         this.win.add_css_class('nww-transparent');
         _Gtk.StyleContext.add_provider_for_display(
-          _Gdk.Display.get_default(), provider, 600);
+          _Gdk.Display.get_default()!, provider, 600);
       } catch (e) { console.warn('[gjs-gtk4] Transparent CSS failed:', e); }
     } else if (this.options.backgroundColor) {
       try {
-        const rgba = new _Gdk.RGBA();
+        const rgba = new _Gdk.RGBA() as Gdk.RGBA;
         rgba.parse(this.options.backgroundColor);
         this.webView.set_background_color(rgba);
       } catch { /* best-effort */ }
     }
 
-    // ── Layout: vertical box (menu bar on top, webview below) ──────────────
-    this._contentBox = new _Gtk.Box({ orientation: _Gtk.Orientation.VERTICAL, spacing: 0 });
+    this._contentBox = new _Gtk.Box({ orientation: _Gtk.Orientation.VERTICAL, spacing: 0 }) as Gtk.Box;
     this.win.set_child(this._contentBox);
 
     this.webView.set_hexpand(true);
     this.webView.set_vexpand(true);
     this._contentBox.append(this.webView);
 
-    // ── Apply pending menu ─────────────────────────────────────────────────
     if (this._pendingMenu !== null) {
       this._applyMenu(this._pendingMenu);
       this._pendingMenu = null;
     }
 
-    // ── Register nww callback pusher ───────────────────────────────────────
     this._nwwPushFn = (id: string, args: unknown[]) => this._pushNwwCallback(id, args);
     addNwwCallbackPusher(this._nwwPushFn);
 
-    // ── Signal: window closed by user ──────────────────────────────────────
-    // Tag the callback with __syncReturn=true so marshal.ts encodes it with
-    // syncReturn:true. GJS then synchronously returns true to GTK (preventing
-    // auto-close) AND writes the event directly to the output pipe.  Node.js
-    // receives it via the ipc-worker thread — the async handler can then show
-    // dialogs, wait for user input, and call this.win.destroy() if confirmed.
-    //
-    // Without syncReturn, GTK would see the async callback's default null
-    // return and destroy the window BEFORE Node.js even processes the event,
-    // causing dialogs to fail and close handlers to run on a destroyed window.
     let closeInProgress = false;
     const closeRequestHandler = async () => {
-      if (closeInProgress) return;  // already handling a close-request
+      if (closeInProgress) return;
       closeInProgress = true;
       try {
         const prevented = await (this.onCloseRequest?.() ?? false);
@@ -296,18 +265,16 @@ export class GjsGtk4Window implements IWindowProvider {
     (closeRequestHandler as any).__syncReturn = true;
     this.win.connect('close-request', closeRequestHandler);
 
-    // ── Signal: focus / blur ───────────────────────────────────────────────
     this.win.connect('notify::is-active', () => {
       try {
-        if (this.win.is_active) this.onFocus?.();
-        else                    this.onBlur?.();
+        if (this.win!.is_active) this.onFocus?.();
+        else                     this.onBlur?.();
       } catch { /* best-effort */ }
     });
 
-    // ── Signal: maximize / unmaximize ──────────────────────────────────────
     this.win.connect('notify::maximized', () => {
       try {
-        const isMax: boolean = this.win.is_maximized ?? false;
+        const isMax: boolean = Boolean(this.win!.is_maximized) ?? false;
         if (isMax !== this._isMaximized) {
           this._isMaximized = isMax;
           if (isMax) this.onMaximize?.();
@@ -316,10 +283,9 @@ export class GjsGtk4Window implements IWindowProvider {
       } catch { /* best-effort */ }
     });
 
-    // ── Signal: fullscreen ─────────────────────────────────────────────────
     this.win.connect('notify::fullscreened', () => {
       try {
-        const isFull: boolean = this.win.fullscreened ?? false;
+        const isFull: boolean = this.win!.fullscreened ?? false;
         if (isFull !== this._isFullScreen) {
           this._isFullScreen = isFull;
           if (isFull) this.onEnterFullScreen?.();
@@ -328,7 +294,6 @@ export class GjsGtk4Window implements IWindowProvider {
       } catch { /* best-effort */ }
     });
 
-    // ── Signal: minimize / restore (GTK 4.12+ notify::suspended) ──────────
     try {
       this.win.connect('notify::suspended', () => {
         try {
@@ -342,30 +307,25 @@ export class GjsGtk4Window implements IWindowProvider {
       });
     } catch { /* notify::suspended not available on this GTK version */ }
 
-    // ── Signal: resize ─────────────────────────────────────────────────────
-    // GTK4 removed 'size-allocate' from the public widget signal API.
-    // 'notify::default-width' fires when the window's layout size changes.
     try {
       this.win.connect('notify::default-width', () => {
         try {
-          const w = this.win.get_width() as number;
-          const h = this.win.get_height() as number;
+          const w = this.win!.get_width() as number;
+          const h = this.win!.get_height() as number;
           this.onResize?.(Math.round(w), Math.round(h));
         } catch { /* best-effort */ }
       });
     } catch { /* best-effort */ }
 
-    // ── Signal: page load progress ────────────────────────────────────────
-    // LoadEvent enum: STARTED=0, REDIRECTED=1, COMMITTED=2, FINISHED=3
-    this.webView.connect('load-changed', (_wv: any, loadEvent: any) => {
-      if (loadEvent === 2) {  // COMMITTED — DOM is being parsed (dom-ready / did-navigate)
+    this.webView.connect('load-changed', (_wv: WebKit.WebView, loadEvent: any) => {
+      if (loadEvent === 2) {
         try {
-          const url: string = this.webView.get_uri?.() ?? '';
+          const url: string = this.webView!.get_uri?.() ?? '';
           this._domReadyCallback?.();
           this._navigateCallback?.(url);
         } catch { /* best-effort */ }
       }
-      if (loadEvent === 3) {  // FINISHED
+      if (loadEvent === 3) {
         this.isWebViewReady = true;
         this._navCompletedCallback?.();
         while (this.navigationQueue.length > 0) {
@@ -375,20 +335,17 @@ export class GjsGtk4Window implements IWindowProvider {
       }
     });
 
-    // ── Signal: navigation failed ─────────────────────────────────────────
-    this.webView.connect('load-failed', (_wv: any, _loadEvent: any, uri: string, error: any) => {
+    this.webView.connect('load-failed', (_wv: WebKit.WebView, _loadEvent: any, uri: string, error: any) => {
       try {
         const code: number = error?.code ?? -1;
         const msg: string  = error?.message ?? 'Navigation failed';
         this._navigateFailedCallback?.(code, msg, uri ?? '');
       } catch { /* best-effort */ }
-      return false; // allow WebKit to show its own error page
+      return false;
     });
 
-    // ── Signal: will-navigate (decide-policy) ─────────────────────────────
-    this.webView.connect('decide-policy', (_wv: any, decision: any, decisionType: any) => {
+    this.webView.connect('decide-policy', (_wv: WebKit.WebView, decision: any, decisionType: any) => {
       try {
-        // decisionType 0 = NAVIGATION_ACTION (main frame link/form navigation)
         if (decisionType === 0 && this._willNavigateCallback) {
           const navAction = decision.get_navigation_action?.();
           const request = navAction?.get_request?.();
@@ -402,19 +359,16 @@ export class GjsGtk4Window implements IWindowProvider {
       return false;
     });
 
-    // ── Document title → GTK window title sync ────────────────────────────
-    // Mirrors WPF's DocumentTitleChanged handler in ipc-bridge.ts.
     this.webView.connect('notify::title', () => {
       try {
-        const pageTitle: string = this.webView.get_title?.() ?? '';
+        const pageTitle: string = this.webView!.get_title?.() ?? '';
         if (pageTitle) {
-          this.win.set_title(pageTitle);
+          this.win!.set_title(pageTitle);
           this.onTitleUpdated?.(pageTitle);
         }
       } catch { /* best-effort */ }
     });
 
-    // ── Initial navigation ─────────────────────────────────────────────────
     if (this._pendingFilePath) {
       this.webView.load_uri(pathToFileURL(this._pendingFilePath).href);
       this._pendingFilePath = null;
@@ -453,7 +407,7 @@ export class GjsGtk4Window implements IWindowProvider {
 
   public isMaximized(): boolean {
     if (this.win) {
-      try { return this.win.is_maximized as boolean; } catch { /* ignore */ }
+      try { return Boolean(this.win.is_maximized); } catch { /* ignore */ }
     }
     return this._isMaximized;
   }
@@ -465,7 +419,6 @@ export class GjsGtk4Window implements IWindowProvider {
     return false;
   }
 
-  /** Release JS-side resources (nww pusher, pending execs) without touching the GTK widget. */
   private _cleanup(): void {
     if (this._nwwPushFn) {
       removeNwwCallbackPusher(this._nwwPushFn);
@@ -490,10 +443,7 @@ export class GjsGtk4Window implements IWindowProvider {
     if (this.win) {
       try { this.win.destroy(); } catch { /* ignore */ }
     }
-    // Do NOT call onClosed — BrowserWindow owns the programmatic-close path.
   }
-
-  // ── Navigation ─────────────────────────────────────────────────────────────
 
   public async loadURL(url: string): Promise<void> {
     if (!this.webView) {
@@ -562,17 +512,11 @@ export class GjsGtk4Window implements IWindowProvider {
     try { return this.webView.is_loading as boolean; } catch { return false; }
   }
 
-  // ── IPC ────────────────────────────────────────────────────────────────────
-
   private _evaluateJs(code: string): void {
     if (!this.webView) return;
-    // 6 args: script, length, world_name, source_uri, cancellable, callback
     this.webView.evaluate_javascript(code, -1, null, null, null, null);
   }
 
-  // ── nww:// scheme handler ──────────────────────────────────────────────────
-
-  /** Push a node-integration callback to the renderer via evaluate_javascript. */
   private _pushNwwCallback(id: string, args: unknown[]): void {
     const payload = JSON.stringify({ type: 'nwwCallback', id, args });
     this._evaluateJs(
@@ -580,23 +524,19 @@ export class GjsGtk4Window implements IWindowProvider {
     );
   }
 
-  /**
-   * Read the POST body from a WebKitURISchemeRequest.
-   * get_http_body() is available in WebKit 2.40+; returns null on older builds.
-   */
-  private _readNwwBody(req: any): string | null {
+  private _readNwwBody(req: WebKit.URISchemeRequest): string | null {
     try {
       const stream = req.get_http_body?.();
       if (!stream) return null;
       const gBytes = stream.read_bytes(10 * 1024 * 1024, null);
-      const data: Uint8Array = gBytes.get_data();
+      const data: Uint8Array = gBytes.get_data() ?? new Uint8Array(0);
       return new TextDecoder().decode(data);
     } catch {
       return null;
     }
   }
 
-  private _handleNwwSchemeRequest(req: any): void {
+  private _handleNwwSchemeRequest(req: WebKit.URISchemeRequest): void {
     try {
       const uri: string    = req.get_uri();
       const method: string = req.get_http_method?.() ?? 'GET';
@@ -610,26 +550,20 @@ export class GjsGtk4Window implements IWindowProvider {
       const glibBytes = new (_GLib.Bytes as any)(bytes);
       const stream    = _Gio.MemoryInputStream.new_from_bytes(glibBytes);
 
-      // Use req.finish() directly — the URISchemeResponse constructor in some
-      // WebKit versions doesn't properly store the input stream, causing
-      // g_input_stream_read_async assertion failures.  Status code is always
-      // 200 but the nww bridge checks the JSON body, not HTTP status.
       req.finish(stream, bytes.length, result.mimeType);
     } catch (e) {
       console.error('[gjs-gtk4] nww scheme handler error:', e);
-      try { req.finish_error(e instanceof Error ? e : new Error(String(e))); } catch { /* ignore */ }
+      try { req.finish_error(e as any); } catch { /* ignore */ }
     }
   }
 
-  // ── Protocol scheme handler ────────────────────────────────────────────────
-
-  private async _handleUriSchemeRequest(scheme: string, request: any): Promise<void> {
+  private async _handleUriSchemeRequest(scheme: string, request: WebKit.URISchemeRequest): Promise<void> {
     const uri: string    = request.get_uri();
     const method: string = request.get_http_method();
     const handler = protocol.getHandler(scheme);
 
     if (!handler) {
-      try { request.finish_error(new Error(`No handler for scheme: ${scheme}`)); } catch { /* ignore */ }
+      try { request.finish_error(new Error(`No handler for scheme: ${scheme}`) as any); } catch { /* ignore */ }
       return;
     }
 
@@ -638,7 +572,7 @@ export class GjsGtk4Window implements IWindowProvider {
       result = await handler({ url: uri, method });
     } catch (e) {
       console.error(`[gjs-gtk4] Protocol handler error for ${scheme}:`, e);
-      try { request.finish_error(e instanceof Error ? e : new Error(String(e))); } catch { /* ignore */ }
+      try { request.finish_error(e as any); } catch { /* ignore */ }
       return;
     }
 
@@ -652,12 +586,12 @@ export class GjsGtk4Window implements IWindowProvider {
       }
 
       const glibBytes = new (_GLib.Bytes as any)(bytes);
-      const stream    = _Gio.MemoryInputStream.new_from_bytes(glibBytes);
+      const stream    = _Gio.MemoryInputStream.new_from_bytes(glibBytes) as Gio.InputStream;
       const mimeType  = result.mimeType ?? 'text/html; charset=utf-8';
       const status    = result.statusCode ?? 200;
 
       if (status !== 200) {
-        const resp = new _WebKit.URISchemeResponse(stream);
+        const resp = new _WebKit.URISchemeResponse(stream as any) as WebKit.URISchemeResponse;
         resp.set_status(status, null);
         resp.set_content_type(mimeType);
         request.finish_with_response(resp);
@@ -666,7 +600,7 @@ export class GjsGtk4Window implements IWindowProvider {
       }
     } catch (e) {
       console.error(`[gjs-gtk4] Protocol finish error for ${scheme}:`, e);
-      try { request.finish_error(e instanceof Error ? e : new Error(String(e))); } catch { /* ignore */ }
+      try { request.finish_error(e as any); } catch { /* ignore */ }
     }
   }
 
@@ -701,8 +635,6 @@ export class GjsGtk4Window implements IWindowProvider {
         reject:  (e) => { clearTimeout(timer); reject(e); },
       });
 
-      // Wrap code in an IIFE that sends the result back via the IPC channel.
-      // The handler in _handleIpcMessage resolves / rejects the promise above.
       const eid = JSON.stringify(id);
       const wrapped =
         `(function(){` +
@@ -762,8 +694,6 @@ export class GjsGtk4Window implements IWindowProvider {
     }
   }
 
-  // ── DevTools ───────────────────────────────────────────────────────────────
-
   public openDevTools(): void {
     if (!this.webView) return;
     try {
@@ -771,8 +701,6 @@ export class GjsGtk4Window implements IWindowProvider {
       if (inspector) inspector.show();
     } catch { /* best-effort */ }
   }
-
-  // ── Menu ───────────────────────────────────────────────────────────────────
 
   public setMenu(menu: MenuItemOptions[]): void {
     if (!this.win) {
@@ -785,13 +713,11 @@ export class GjsGtk4Window implements IWindowProvider {
   private _applyMenu(items: MenuItemOptions[]): void {
     if (!this.win || !this._contentBox) return;
 
-    // Remove existing menu bar
     if (this._menuBar) {
       try { this._contentBox.remove(this._menuBar); } catch { /* ignore */ }
       this._menuBar = null;
     }
 
-    // Remove old window actions and release references
     for (const name of this._menuActionNames) {
       try { this.win.remove_action(name); } catch { /* ignore */ }
     }
@@ -800,17 +726,17 @@ export class GjsGtk4Window implements IWindowProvider {
 
     if (!items || items.length === 0) return;
 
-    const actions: Array<{ name: string; action: any }> = [];
+    const actions: Array<{ name: string; action: Gio.SimpleAction }> = [];
     const gioMenu = buildGioMenu(items, _Gio, actions, (role) => this._roleAction(role));
 
     for (const { name, action } of actions) {
       this.win.add_action(action);
       this._menuActionNames.push(name);
-      this._menuActions.push(action);  // prevent V8 GC → keeps callbacks alive
+      this._menuActions.push(action);
     }
 
     try {
-      this._menuBar = new _Gtk.PopoverMenuBar({ menu_model: gioMenu });
+      this._menuBar = new _Gtk.PopoverMenuBar({ menu_model: gioMenu }) as Gtk.PopoverMenuBar;
       this._contentBox.prepend(this._menuBar);
     } catch (e) {
       console.error('[gjs-gtk4] Failed to create PopoverMenuBar:', e);
@@ -842,8 +768,6 @@ export class GjsGtk4Window implements IWindowProvider {
     }
   }
 
-  // ── Window management ──────────────────────────────────────────────────────
-
   public focus(): void {
     if (this.win) this.win.present();
   }
@@ -865,7 +789,6 @@ export class GjsGtk4Window implements IWindowProvider {
     if (!this.win) return;
     if (flag) this.win.fullscreen();
     else      this.win.unfullscreen();
-    // _isFullScreen is updated by notify::fullscreened signal; update here as fallback
     this._isFullScreen = flag;
   }
 
@@ -918,11 +841,9 @@ export class GjsGtk4Window implements IWindowProvider {
   }
 
   public setAlwaysOnTop(_flag: boolean): void {
-    // GTK4: compositor-controlled; no portable always-on-top API via GI
   }
 
   public center(): void {
-    // GTK4: window placement is managed by the compositor
     console.warn('[gjs-gtk4] setPosition/center: not supported on GTK4 (compositor-managed)');
   }
 
@@ -947,13 +868,12 @@ export class GjsGtk4Window implements IWindowProvider {
   }
 
   public setMaximumSize(_width: number, _height: number): void {
-    // GTK4 removed maximum window size constraint
   }
 
   public setBackgroundColor(color: string): void {
     if (!this.webView) return;
     try {
-      const rgba = new _Gdk.RGBA();
+      const rgba = new _Gdk.RGBA() as Gdk.RGBA;
       rgba.parse(color);
       this.webView.set_background_color(rgba);
     } catch { /* best-effort */ }
@@ -962,7 +882,7 @@ export class GjsGtk4Window implements IWindowProvider {
   public flashFrame(_flag: boolean): void { /* no-op on GTK */ }
 
   public getHwnd(): string {
-    return '0';  // Windows-only
+    return '0';
   }
 
   public setEnabled(flag: boolean): void {
@@ -972,8 +892,6 @@ export class GjsGtk4Window implements IWindowProvider {
   public async capturePage(): Promise<NativeImage> {
     return new NativeImage(Buffer.alloc(0));
   }
-
-  // ── Dialogs ────────────────────────────────────────────────────────────────
 
   public showOpenDialog(options: OpenDialogOptions): Promise<string[] | undefined> {
     return showOpenDialog(this.win, options);

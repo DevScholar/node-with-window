@@ -2,13 +2,15 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { OpenDialogOptions, SaveDialogOptions } from '../../interfaces.js';
 import { _Gtk, _Gio } from './gtk-app.js';
+import type Gtk from '@girs/gtk-4.0';
+import type Gio from '@girs/gio-2.0';
 
-export async function showOpenDialog(win: any, options: OpenDialogOptions): Promise<string[] | undefined> {
+export async function showOpenDialog(win: Gtk.ApplicationWindow | null, options: OpenDialogOptions): Promise<string[] | undefined> {
   if (!win) return undefined;
 
   return new Promise<string[] | undefined>((resolve) => {
     try {
-      const dialog = new _Gtk.FileDialog();
+      const dialog = new _Gtk.FileDialog() as Gtk.FileDialog;
       if (options.title) dialog.title = options.title;
       const openFolder = options.defaultPath
         ? _Gio.File.new_for_path(options.defaultPath)
@@ -18,33 +20,28 @@ export async function showOpenDialog(win: any, options: OpenDialogOptions): Prom
       const isMulti = options.properties?.includes('multiSelections');
       const isDir   = options.properties?.includes('openDirectory');
 
-      // Sync callback: GJS blocks in processNestedCommands() during the callback.
-      // Node.js calls _finish() via nested IPC while asyncResult (Gio.Task) is
-      // still valid — avoids the "Object Gio.Task has been already finalized"
-      // error that occurs when async callbacks defer processing past the task's
-      // lifetime.
-      const callback = (source: any, asyncResult: any) => {
+      const callback = (source: Gtk.FileDialog, asyncResult: Gio.AsyncResult) => {
         let result: string[] | undefined;
         try {
           if (isDir) {
             const folder = source.select_folder_finish(asyncResult);
-            result = folder ? [folder.get_path()] : undefined;
+            result = folder ? [folder.get_path()!] : undefined;
           } else if (isMulti) {
             const list = source.open_multiple_finish(asyncResult);
             const count = list.get_n_items();
             result = [];
-            for (let i = 0; i < count; i++) result.push(list.get_item(i).get_path());
+            for (let i = 0; i < count; i++) result.push((list.get_item(i) as Gio.File).get_path()!);
           } else {
             const file = source.open_finish(asyncResult);
-            result = file ? [file.get_path()] : undefined;
+            result = file ? [file.get_path()!] : undefined;
           }
         } catch { /* user cancelled */ }
         resolve(result);
       };
 
-      if (isDir) dialog.select_folder(win, null, callback);
-      else if (isMulti) dialog.open_multiple(win, null, callback);
-      else dialog.open(win, null, callback);
+      if (isDir) dialog.select_folder(win, null, callback as any);
+      else if (isMulti) dialog.open_multiple(win, null, callback as any);
+      else dialog.open(win, null, callback as any);
     } catch (e) {
       console.warn('[gjs-gtk4] showOpenDialog failed:', e);
       resolve(undefined);
@@ -52,12 +49,12 @@ export async function showOpenDialog(win: any, options: OpenDialogOptions): Prom
   });
 }
 
-export async function showSaveDialog(win: any, options: SaveDialogOptions): Promise<string | undefined> {
+export async function showSaveDialog(win: Gtk.ApplicationWindow | null, options: SaveDialogOptions): Promise<string | undefined> {
   if (!win) return undefined;
 
   return new Promise<string | undefined>((resolve) => {
     try {
-      const dialog = new _Gtk.FileDialog();
+      const dialog = new _Gtk.FileDialog() as Gtk.FileDialog;
       if (options.title) dialog.title = options.title;
       const dp = options.defaultPath;
       if (dp) {
@@ -79,14 +76,14 @@ export async function showSaveDialog(win: any, options: SaveDialogOptions): Prom
         try { dialog.initial_folder = _Gio.File.new_for_path(process.cwd()); } catch { /* ignore */ }
       }
 
-      dialog.save(win, null, (source: any, asyncResult: any) => {
+      dialog.save(win, null, ((source: Gtk.FileDialog, asyncResult: Gio.AsyncResult) => {
         let result: string | undefined;
         try {
           const file = source.save_finish(asyncResult);
-          result = file ? file.get_path() : undefined;
+          result = file ? file.get_path()! : undefined;
         } catch { /* user cancelled */ }
         resolve(result);
-      });
+      }) as any);
     } catch (e) {
       console.warn('[gjs-gtk4] showSaveDialog failed:', e);
       resolve(undefined);
@@ -95,15 +92,13 @@ export async function showSaveDialog(win: any, options: SaveDialogOptions): Prom
 }
 
 export async function showMessageBox(
-  win: any,
+  win: Gtk.ApplicationWindow | null,
   options: { type?: string; title?: string; message: string; buttons?: string[] },
 ): Promise<number> {
   if (!win) return 0;
 
   const buttons = options.buttons || ['OK'];
 
-  // Prefer AlertDialog (GTK 4.10+) — MessageDialog is deprecated since 4.10
-  // and its response-id mapping is unreliable on newer GTK versions.
   if (_Gtk.AlertDialog) {
     try {
       return await new Promise<number>((resolve) => {
@@ -112,35 +107,32 @@ export async function showMessageBox(
           detail: options.title ? options.message : '',
           buttons,
           modal: true,
-        });
-        // Last button is conventionally Cancel; pressing Escape triggers it.
+        } as Gtk.AlertDialog.ConstructorProps) as Gtk.AlertDialog;
         try { dialog.cancel_button = buttons.length - 1; } catch { /* ignore */ }
 
-        dialog.choose(win, null, (source: any, asyncResult: any) => {
+        dialog.choose(win, null, ((source: Gtk.AlertDialog, asyncResult: Gio.AsyncResult) => {
           let result = 0;
           try {
             result = source.choose_finish(asyncResult);
           } catch {
-            // Dismissed via Escape or titlebar X → treat as last button (Cancel).
             result = buttons.length - 1;
           }
           resolve(result);
-        });
+        }) as any);
       });
     } catch (e) {
       console.warn('[gjs-gtk4] AlertDialog failed, falling back to MessageDialog:', e);
     }
   }
 
-  // Fallback for GTK < 4.10: Gtk.MessageDialog
   return new Promise<number>((resolve) => {
     try {
       const typeMap: Record<string, number> = {
-        none:     0,  // Gtk.MessageType.OTHER
-        info:     1,  // Gtk.MessageType.INFO
-        warning:  2,  // Gtk.MessageType.WARNING
-        question: 3,  // Gtk.MessageType.QUESTION
-        error:    4,  // Gtk.MessageType.ERROR
+        none:     0,
+        info:     1,
+        warning:  2,
+        question: 3,
+        error:    4,
       };
 
       const dialog = new _Gtk.MessageDialog({
@@ -149,13 +141,13 @@ export async function showMessageBox(
         message_type: typeMap[options.type || 'none'] ?? 0,
         text: options.title || 'Message',
         secondary_text: options.message || '',
-      });
+      } as any) as Gtk.MessageDialog;
 
       for (let i = 0; i < buttons.length; i++) {
         dialog.add_button(buttons[i], i);
       }
 
-      dialog.connect('response', (_d: any, response: number) => {
+      dialog.connect('response', (_d: Gtk.MessageDialog, response: number) => {
         const result = response >= 0 ? response : 0;
         _d.close();
         resolve(result);

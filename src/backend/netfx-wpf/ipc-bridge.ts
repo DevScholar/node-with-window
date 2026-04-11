@@ -5,6 +5,7 @@ import { ipcMain } from '../../ipc-main.js';
 import { generateBridgeScript } from './bridge.js';
 import { addNwwCallbackPusher, removeNwwCallbackPusher } from '../../node-integration.js';
 import { addAsyncEvent } from '@devscholar/node-ps1-dotnet/internal';
+import type { DotnetProxy } from './dotnet/types.js';
 
 /**
  * Owns the WebView2 IPC channel for one window: bridge script injection,
@@ -28,7 +29,7 @@ export class WpfIpcBridge {
   constructor(
     private readonly getCoreWebView2: () => unknown,
     private readonly getBrowserWindow: () => unknown,
-    private readonly getDotnet: () => any,
+    private readonly getDotnet: () => DotnetProxy,
     private readonly webPreferences: WebPreferences,
     /** The IWindowProvider instance — passed as event.sender to ipcMain handlers. */
     private readonly getWindowSender: () => unknown,
@@ -43,7 +44,7 @@ export class WpfIpcBridge {
    */
   public setup(pendingAbsFilePath: string | null): void {
     const coreWebView2 = this.getCoreWebView2();
-    const dotnetAny = this.getDotnet();
+    const dotnetInst = this.getDotnet();
     const handlers = (ipcMain as any).handlers as Map<
       string,
       (event: unknown, ...args: unknown[]) => unknown
@@ -91,7 +92,7 @@ export class WpfIpcBridge {
       // time for the Task to finish while also deferring past the syncEvent).
       setImmediate(() => {
         (this.getWebView() as unknown as { Source: unknown }).Source =
-          new dotnetAny.System.Uri(fileUri);
+          new dotnetInst.System.Uri(fileUri);
       });
     } else {
       (

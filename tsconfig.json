@@ -8,7 +8,7 @@
     "strict": true,
     "noImplicitAny": true,
     "skipLibCheck": true,
-    "types": ["node"],
+    "types": ["node", "@girs/gjs"],
     "outDir": "dist",
     "rootDir": "src",
     "declaration": true,
@@ -18,5 +18,5 @@
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "types/**/*"]
 }

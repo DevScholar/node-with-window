@@ -9,8 +9,9 @@ import {
 import { setMenu, buildWpfMenu, setDotNetInstance as setMenuDotNetInstance } from './menu.js';
 import { registerBackend } from '../../backends.js';
 import type { BrowserWindowOptions } from '../../interfaces.js';
+import type { DotnetProxy } from './dotnet/types.js';
 
-let dotnetInstance: unknown = null;
+let dotnetInstance: DotnetProxy | null = null;
 
 export {
   NetFxWpfWindow,
@@ -23,14 +24,14 @@ export {
   buildWpfMenu,
 };
 
-export function setDotNetInstance(instance: unknown): void {
+export function setDotNetInstance(instance: DotnetProxy): void {
   dotnetInstance = instance;
   setWindowDotNetInstance(instance);
   setDialogDotNetInstance(instance);
   setMenuDotNetInstance(instance);
 }
 
-export function getDotNetInstance(): unknown {
+export function getDotNetInstance(): DotnetProxy | null {
   return dotnetInstance;
 }
 

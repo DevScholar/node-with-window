@@ -19,6 +19,7 @@ import { Win32Chrome } from './win32-chrome.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 import { buildWpfMenu } from './menu.js';
 import { app } from '../../app.js';
+import type { DotnetProxy } from './dotnet/types.js';
 
 /**
  * This library bridges Node.js with platform-specific GUI frameworks.
@@ -37,12 +38,12 @@ import { app } from '../../app.js';
  * using synchronous JSON-line messages.
  */
 
-let dotnet: unknown;
+let dotnet: DotnetProxy;
 
 /**
  * Sets the .NET runtime instance that's used for all WPF/WebView2 operations.
  */
-export function setDotNetInstance(instance: unknown): void {
+export function setDotNetInstance(instance: DotnetProxy): void {
   dotnet = instance;
 }
 
@@ -78,10 +79,10 @@ let _wpfStarted = false;
 export class NetFxWpfWindow implements IWindowProvider {
   public options: BrowserWindowOptions;
   public webPreferences: WebPreferences;
-  public browserWindow: unknown;
-  public webView: unknown;
-  public coreWebView2: unknown;
-  public app: unknown;
+  public browserWindow: any;
+  public webView: any;
+  public coreWebView2: any;
+  public app: any;
   public isWebViewReady = false;
   public navigationQueue: Array<() => void> = [];
   public pendingFilePath: string | null = null;
@@ -163,8 +164,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   }
 
   public async createWindow(): Promise<void> {
-    const dotnetAny = dotnet as any;
-    const System = dotnetAny.System;
+    const System = dotnet.System;
     const Windows = System.Windows;
     const Controls = Windows.Controls;
 
@@ -198,7 +198,7 @@ export class NetFxWpfWindow implements IWindowProvider {
         ? this.options.icon
         : path.resolve(process.cwd(), this.options.icon);
       if (fs.existsSync(absIcon)) {
-        dotnetAny.setWindowIcon(this.browserWindow, absIcon);
+        dotnet.setWindowIcon(this.browserWindow, absIcon);
       }
     }
 
@@ -249,23 +249,23 @@ export class NetFxWpfWindow implements IWindowProvider {
         Windows.ResizeMode.NoResize;
       (this.browserWindow as unknown as { Background: unknown }).Background =
         Windows.Media.Brushes.Transparent;
-      dotnetAny.applyWindowChrome(this.browserWindow);
-      dotnetAny.setWebViewBackground(this.webView, 0, 0, 0, 0);
+      dotnet.applyWindowChrome(this.browserWindow);
+      dotnet.setWebViewBackground(this.webView, 0, 0, 0, 0);
     } else if (this.options.frame !== false &&
         (this.options.titleBarStyle === 'hidden' || this.options.titleBarStyle === 'hiddenInset')) {
       // titleBarStyle:'hidden'/'hiddenInset' — remove the native title bar while keeping
       // the resize border (4 px on all sides).
-      dotnetAny.applyHiddenTitleBar(this.browserWindow);
+      dotnet.applyHiddenTitleBar(this.browserWindow);
       if (this.options.backgroundColor) {
         const parsed = parseBackgroundColor(this.options.backgroundColor);
         if (parsed) {
-          dotnetAny.setWebViewBackground(this.webView, parsed.a, parsed.r, parsed.g, parsed.b);
+          dotnet.setWebViewBackground(this.webView, parsed.a, parsed.r, parsed.g, parsed.b);
         }
       }
     } else if (this.options.backgroundColor) {
       const parsed = parseBackgroundColor(this.options.backgroundColor);
       if (parsed) {
-        dotnetAny.setWebViewBackground(this.webView, parsed.a, parsed.r, parsed.g, parsed.b);
+        dotnet.setWebViewBackground(this.webView, parsed.a, parsed.r, parsed.g, parsed.b);
       }
     }
 
@@ -405,8 +405,6 @@ export class NetFxWpfWindow implements IWindowProvider {
       return;
     }
 
-    const dotnetAny = dotnet as any;
-
     // ── Secondary-window path ────────────────────────────────────────────────
     // WPF message loop is already running (another window called Application.Run).
     // Just wire the close handler and call Show() — no new Application or timer.
@@ -423,7 +421,7 @@ export class NetFxWpfWindow implements IWindowProvider {
       if (this.options.parent) {
         const parentHwnd = (this.options.parent as any).getHwnd?.() as string | undefined;
         if (parentHwnd && parentHwnd !== '0') {
-          dotnetAny.setOwnerByHwnd(this.browserWindow, parentHwnd);
+          dotnet.setOwnerByHwnd(this.browserWindow, parentHwnd);
         }
       }
 
@@ -454,7 +452,7 @@ export class NetFxWpfWindow implements IWindowProvider {
     // ── Primary-window path ──────────────────────────────────────────────────
     _wpfStarted = true;
 
-    const System = dotnetAny.System;
+    const System = dotnet.System;
     const Windows = System.Windows;
 
     if (this.pendingMenu) {
@@ -479,7 +477,7 @@ export class NetFxWpfWindow implements IWindowProvider {
 
     // StartApplication pre-sends {type:'ok'} immediately, then calls Application.Run()
     // on the .NET side — the Node.js event loop is never blocked.
-    dotnetAny.startApplication(this.app, this.browserWindow);
+    dotnet.startApplication(this.app, this.browserWindow);
 
     // Always initialize WebView2 via the protocol path so nww:// is registered.
     setTimeout(() => {
@@ -507,7 +505,6 @@ export class NetFxWpfWindow implements IWindowProvider {
    * navigation-queue drain.
    */
   private async _initWebView2WithProtocols(): Promise<void> {
-    const dotnetAny = dotnet as any;
     const CoreAssembly = this._coreAssembly as any;
 
     const EnvType    = CoreAssembly.GetType('Microsoft.Web.WebView2.Core.CoreWebView2Environment');
@@ -520,7 +517,7 @@ export class NetFxWpfWindow implements IWindowProvider {
     (nwwReg as any).HasAuthorityComponent = true;
     // AllowedOrigins must be mutated in-place (the property is get-only in most
     // WebView2 SDK versions — assigning a new list is silently ignored).
-    dotnetAny.setSchemeAllowedOrigins(nwwReg, ['*']);
+    dotnet.setSchemeAllowedOrigins(nwwReg, ['*']);
 
     const schemeRegs: unknown[] = [nwwReg];
     for (const [scheme, priv] of protocol.getRegisteredSchemes()) {
@@ -545,10 +542,10 @@ export class NetFxWpfWindow implements IWindowProvider {
     }
 
     try {
-      const env = await dotnetAny.awaitTask(
+      const env = await dotnet.awaitTask(
         EnvType.CreateAsync(null, this.userDataPath, opts),
       );
-      await dotnetAny.awaitTask((this.webView as any).EnsureCoreWebView2Async(env));
+      await dotnet.awaitTask((this.webView as any).EnsureCoreWebView2Async(env));
     } catch (e) {
       console.error('[node-with-window] EnsureCoreWebView2Async failed:', e);
       return;
@@ -598,7 +595,7 @@ export class NetFxWpfWindow implements IWindowProvider {
         const contentStream = ev.Request.Content;
         if (contentStream != null) {
           try {
-            const reader = new dotnetAny.System.IO.StreamReader(contentStream);
+            const reader = new dotnet.System.IO.StreamReader(contentStream);
             body = reader.ReadToEnd() as string;
             reader.Dispose();
           } catch { /* no body */ }
@@ -695,10 +692,10 @@ export class NetFxWpfWindow implements IWindowProvider {
   /** Show a context menu at screen position (x, y) or at cursor if not specified. */
   public popupMenu(items: MenuItemOptions[], x?: number, y?: number): void {
     if (!this.browserWindow) return;
-    const dotnetAny = dotnet as any;
-    const ContextMenuType = dotnetAny['System.Windows.Controls.ContextMenu'];
-    const MenuItemType    = dotnetAny['System.Windows.Controls.MenuItem'];
-    const SeparatorType   = dotnetAny['System.Windows.Controls.Separator'];
+    const dotnetNs = dotnet as DotnetProxy & Record<string, any>;
+    const ContextMenuType = dotnetNs['System.Windows.Controls.ContextMenu'];
+    const MenuItemType    = dotnetNs['System.Windows.Controls.MenuItem'];
+    const SeparatorType   = dotnetNs['System.Windows.Controls.Separator'];
     if (!ContextMenuType) return;
 
     const cm = new ContextMenuType();
@@ -718,9 +715,9 @@ export class NetFxWpfWindow implements IWindowProvider {
             try {
               const iconAbs = path.isAbsolute(item.icon)
                 ? item.icon : path.resolve(process.cwd(), item.icon);
-              const BitmapImageType = dotnetAny['System.Windows.Media.Imaging.BitmapImage'];
-              const ImageType       = dotnetAny['System.Windows.Controls.Image'];
-              const UriType         = dotnetAny['System.Uri'];
+              const BitmapImageType = dotnetNs['System.Windows.Media.Imaging.BitmapImage'];
+              const ImageType       = dotnetNs['System.Windows.Controls.Image'];
+              const UriType         = dotnetNs['System.Uri'];
               if (BitmapImageType && ImageType && UriType) {
                 const uri = new UriType('file:///' + iconAbs.replace(/\\/g, '/'));
                 const bmp = new BitmapImageType(uri);
@@ -745,7 +742,7 @@ export class NetFxWpfWindow implements IWindowProvider {
 
     if (x !== undefined && y !== undefined) {
       try {
-        const PlacementModeType = dotnetAny['System.Windows.Controls.Primitives.PlacementMode'];
+        const PlacementModeType = dotnetNs['System.Windows.Controls.Primitives.PlacementMode'];
         const absolutePoint = (PlacementModeType as any).AbsolutePoint;
         (cm as any).Placement        = absolutePoint;
         (cm as any).HorizontalOffset = x;
@@ -760,7 +757,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   private _wpfRoleClick(role: string): (() => void) | undefined {
     switch (role) {
       case 'close':            return () => this.close();
-      case 'minimize':         return () => { (dotnet as any).minimize(this.browserWindow); };
+      case 'minimize':         return () => { dotnet.minimize(this.browserWindow); };
       case 'reload':
       case 'forceReload':      return () => this.reload();
       case 'toggleDevTools':   return () => this.openDevTools();
@@ -783,7 +780,7 @@ export class NetFxWpfWindow implements IWindowProvider {
       this.navigationQueue.push(() => this.loadURL(urlStr));
       return;
     }
-    const System = (dotnet as any).System;
+    const System = dotnet.System;
     (this.webView as unknown as { Source: unknown }).Source = new System.Uri(urlStr);
   }
 
@@ -796,7 +793,7 @@ export class NetFxWpfWindow implements IWindowProvider {
       return;
     }
     const fileUri = 'file:///' + absolutePath.replace(/\\/g, '/');
-    const System = (dotnet as any).System;
+    const System = dotnet.System;
     (this.webView as unknown as { Source: unknown }).Source = new System.Uri(fileUri);
   }
 
@@ -826,21 +823,19 @@ export class NetFxWpfWindow implements IWindowProvider {
 
   public minimize(): void {
     if (!this.browserWindow) return;
-    (dotnet as any).minimize(this.browserWindow);
+    dotnet.minimize(this.browserWindow);
   }
 
   public maximize(): void {
     if (!this.browserWindow) return;
-    (this.browserWindow as unknown as { WindowState: unknown }).WindowState = (
-      dotnet as any
-    ).System.Windows.WindowState.Maximized;
+    (this.browserWindow as unknown as { WindowState: unknown }).WindowState =
+      dotnet.System.Windows.WindowState.Maximized;
   }
 
   public unmaximize(): void {
     if (!this.browserWindow) return;
-    (this.browserWindow as unknown as { WindowState: unknown }).WindowState = (
-      dotnet as any
-    ).System.Windows.WindowState.Normal;
+    (this.browserWindow as unknown as { WindowState: unknown }).WindowState =
+      dotnet.System.Windows.WindowState.Normal;
   }
 
   public setFullScreen(flag: boolean): void {
@@ -848,7 +843,7 @@ export class NetFxWpfWindow implements IWindowProvider {
     this._isFullScreen = flag;
     const needFrameless = this.options.frame === false || this.options.transparent === true
       || this.options.titleBarStyle === 'hidden' || this.options.titleBarStyle === 'hiddenInset';
-    (dotnet as any).setFullScreen(
+    dotnet.setFullScreen(
       this.browserWindow, flag, needFrameless, this.options.alwaysOnTop ?? false
     );
   }
@@ -871,7 +866,7 @@ export class NetFxWpfWindow implements IWindowProvider {
     if (!this.webView) return;
     const parsed = parseBackgroundColor(color);
     if (parsed) {
-      (dotnet as any).setWebViewBackground(this.webView, parsed.a, parsed.r, parsed.g, parsed.b);
+      dotnet.setWebViewBackground(this.webView, parsed.a, parsed.r, parsed.g, parsed.b);
     }
   }
 
@@ -924,7 +919,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   public setResizable(resizable: boolean): void {
     this._isResizable = resizable;
     if (!this.browserWindow) return;
-    const Windows = (dotnet as any).System.Windows;
+    const Windows = dotnet.System.Windows;
     (this.browserWindow as unknown as { ResizeMode: unknown }).ResizeMode = resizable
       ? Windows.ResizeMode.CanResize
       : Windows.ResizeMode.NoResize;
@@ -953,7 +948,7 @@ export class NetFxWpfWindow implements IWindowProvider {
     if (!this.browserWindow) return false;
     try {
       const state = (this.browserWindow as any).WindowState;
-      const Minimized = (dotnet as any).System.Windows.WindowState.Minimized;
+      const Minimized = dotnet.System.Windows.WindowState.Minimized;
       return state === Minimized;
     } catch { return false; }
   }
@@ -962,7 +957,7 @@ export class NetFxWpfWindow implements IWindowProvider {
     if (!this.browserWindow) return false;
     try {
       const state = (this.browserWindow as any).WindowState;
-      const Maximized = (dotnet as any).System.Windows.WindowState.Maximized;
+      const Maximized = dotnet.System.Windows.WindowState.Maximized;
       return state === Maximized;
     } catch { return false; }
   }
@@ -980,7 +975,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   /** Center the window on the primary screen. */
   public center(): void {
     if (!this.browserWindow) return;
-    const sp = (dotnet as any).System.Windows.SystemParameters;
+    const sp = dotnet.System.Windows.SystemParameters;
     const win = this.browserWindow as unknown as {
       Left: number; Top: number; Width: number; Height: number;
     };
@@ -1033,7 +1028,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   /** Captures the WebView2 rendering as a PNG and returns a NativeImage. */
   public async capturePage(): Promise<NativeImage> {
     if (!this.webView) return new NativeImage(Buffer.alloc(0));
-    const base64 = (dotnet as any).capturePreview(this.webView) as string;
+    const base64 = dotnet.capturePreview(this.webView) as string;
     if (!base64) return new NativeImage(Buffer.alloc(0));
     return new NativeImage(Buffer.from(base64, 'base64'));
   }

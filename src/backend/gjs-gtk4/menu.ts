@@ -1,29 +1,22 @@
 import { MenuItemOptions } from '../../interfaces.js';
+import type Gio from '@girs/gio-2.0';
 
-/**
- * Build a Gio.Menu model from a flat/nested MenuItemOptions array.
- *
- * @param resolveRole  Optional callback that maps a role string to a click
- *                     function.  Callers (e.g. GjsGtk4Window) supply this so
- *                     built-in roles (undo, reload, close, …) work without a
- *                     click handler on the item itself.
- */
 export function buildGioMenu(
   items: MenuItemOptions[],
-  Gio: any,
-  actions: Array<{ name: string; action: any }>,
+  GioNs: typeof Gio,
+  actions: Array<{ name: string; action: Gio.SimpleAction }>,
   resolveRole?: (role: string) => (() => void) | undefined,
   prefix = 'nww_a'
-): any {
-  const menu = new Gio.Menu();
-  let section = new Gio.Menu();
+): Gio.Menu {
+  const menu = new GioNs.Menu();
+  let section = new GioNs.Menu();
   let sectionItemCount = 0;
 
   const flushSection = () => {
     if (sectionItemCount > 0) {
       menu.append_section(null, section);
     }
-    section = new Gio.Menu();
+    section = new GioNs.Menu();
     sectionItemCount = 0;
   };
 
@@ -36,7 +29,7 @@ export function buildGioMenu(
     if (item.submenu && item.submenu.length > 0) {
       const submenu = buildGioMenu(
         item.submenu,
-        Gio,
+        GioNs,
         actions,
         resolveRole,
         `${prefix}_s${actions.length}`
@@ -46,16 +39,12 @@ export function buildGioMenu(
       continue;
     }
 
-    // Resolve click function: explicit click > role > nothing
     const clickFn = item.click ?? (item.role && resolveRole ? resolveRole(item.role) : undefined);
 
     const actionId = `${prefix}_${actions.length}`;
-    const action = new Gio.SimpleAction({ name: actionId });
+    const action = new GioNs.SimpleAction({ name: actionId });
 
     if (clickFn) {
-      // Use an async callback so GJS does NOT block in processNestedCommands().
-      // Menu actions that call showMessageBox()/showOpenDialog() need the GLib
-      // main loop to be running — a sync callback would deadlock.
       action.connect('activate', async () => { clickFn(); });
     }
     if (item.enabled === false) {
