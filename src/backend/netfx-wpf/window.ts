@@ -10,14 +10,14 @@ import {
   MenuItemOptions,
 } from '../../interfaces.js';
 import { NativeImage } from '../../native-image.js';
-import { protocol, ensureProtocolWorker, callHandlerSync } from '../../protocol.js';
-import { handleNwwRequest } from '../../node-integration.js';
 import { findWebView2Runtime } from './webview2-runtime.js';
 import { parseBackgroundColor } from './color.js';
 import { WpfIpcBridge } from './ipc-bridge.js';
 import { Win32Chrome } from './win32-chrome.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 import { buildWpfMenu } from './menu.js';
+import { initWebView2WithProtocols } from './webview-setup.js';
+import { popupContextMenu } from './popup-menu.js';
 import { app } from '../../app.js';
 import type { DotnetProxy, DotNetObject } from './dotnet/types.js';
 
@@ -427,7 +427,7 @@ export class NetFxWpfWindow implements IWindowProvider {
       this.onShow?.();
 
       setImmediate(() => {
-        this._initWebView2WithProtocols().catch(e => {
+        initWebView2WithProtocols(this._coreAssembly as DotNetObject, this.webView, this.webPreferences, this.userDataPath, dotnet).catch(e => {
           console.error('[node-with-window] Protocol WebView2 init error (secondary window):', e);
         });
       });
@@ -478,7 +478,7 @@ export class NetFxWpfWindow implements IWindowProvider {
 
     // Always initialize WebView2 via the protocol path so nww:// is registered.
     setTimeout(() => {
-      this._initWebView2WithProtocols().catch(e => {
+      initWebView2WithProtocols(this._coreAssembly as DotNetObject, this.webView, this.webPreferences, this.userDataPath, dotnet).catch(e => {
         console.error('[node-with-window] Protocol WebView2 init error:', e);
       });
     }, 100);
@@ -492,120 +492,6 @@ export class NetFxWpfWindow implements IWindowProvider {
     // Apply P/Invoke chrome options. HWND is valid once Application.Run() has been
     // called and the window handle has been created (synchronous after startApplication).
     this._windowChrome.apply();
-  }
-
-  /**
-   * Initialize WebView2 using CoreWebView2Environment.CreateAsync() so that nww://
-   * (node integration) and any user custom schemes are registered before the webview
-   * environment is created.  CoreWebView2InitializationCompleted fires after
-   * EnsureCoreWebView2Async resolves and triggers the existing _ipcBridge.setup() +
-   * navigation-queue drain.
-   */
-  private async _initWebView2WithProtocols(): Promise<void> {
-    const CoreAssembly = this._coreAssembly as DotNetObject;
-
-    const EnvType    = CoreAssembly.GetType('Microsoft.Web.WebView2.Core.CoreWebView2Environment');
-    const OptsType   = CoreAssembly.GetType('Microsoft.Web.WebView2.Core.CoreWebView2EnvironmentOptions');
-    const SchemeType = CoreAssembly.GetType('Microsoft.Web.WebView2.Core.CoreWebView2CustomSchemeRegistration');
-
-    const nwwReg: DotNetObject = new SchemeType('nww');
-    nwwReg.TreatAsSecure = true;
-    nwwReg.HasAuthorityComponent = true;
-    dotnet.setSchemeAllowedOrigins(nwwReg, ['*']);
-
-    const schemeRegs: unknown[] = [nwwReg];
-    for (const [scheme, priv] of protocol.getRegisteredSchemes()) {
-      const reg: DotNetObject = new SchemeType(scheme);
-      reg.TreatAsSecure = priv.secure ?? false;
-      reg.HasAuthorityComponent = priv.standard ?? false;
-      schemeRegs.push(reg);
-    }
-
-    const opts: DotNetObject = new OptsType(null, null, null, false, schemeRegs);
-    const disableWebSecurity =
-      this.webPreferences.webSecurity === false ||
-      this.webPreferences.nodeIntegration === true;
-    if (disableWebSecurity) {
-      opts.AdditionalBrowserArguments = '--disable-web-security';
-    }
-
-    try {
-      const env = await dotnet.awaitTask(
-        EnvType.CreateAsync(null, this.userDataPath, opts),
-      );
-      await dotnet.awaitTask(this.webView.EnsureCoreWebView2Async(env));
-    } catch (e) {
-      console.error('[node-with-window] EnsureCoreWebView2Async failed:', e);
-      return;
-    }
-
-    const coreWV2 = this.webView.CoreWebView2 as DotNetObject;
-    const ALL = 0; // CoreWebView2WebResourceContext.All
-    coreWV2.AddWebResourceRequestedFilter('nww://*', ALL);
-    for (const [scheme] of protocol.getRegisteredSchemes()) {
-      coreWV2.AddWebResourceRequestedFilter(`${scheme}://*`, ALL);
-    }
-
-    // Spawn protocol worker for user-registered handlers (if any).
-    if (protocol.getRegisteredSchemes().size > 0) {
-      ensureProtocolWorker(protocol.getAllHandlers());
-    }
-
-    // ── WebResourceRequested → nww:// and custom protocol handling ──────────────
-    // FireSyncEventAndWait already extracts Request.Uri/Method into inlineProps
-    // and creates WebResourceResponse from the callback return value — same as
-    // addDeferredEvent+CompleteDeferral did, without the C# DeferralStore hole.
-    // callHandlerSync uses Atomics.wait+SharedArrayBuffer (no IPC pipe), so it
-    // is safe at syncEventDepth=1.  Tradeoff: STA thread blocks for the duration
-    // of the handler (~ms); ShowDialog + concurrent nww:// is acceptable in practice.
-    (coreWV2 as DotNetObject).add_WebResourceRequested((_s: unknown, e: unknown) => {
-      const ev = e as DotNetObject;
-      const uri: string  = ev.Request.Uri;
-      const meth: string = ev.Request.Method;
-      const colonIdx = uri.indexOf('://');
-      const scheme   = colonIdx >= 0 ? uri.slice(0, colonIdx) : '';
-
-      // nww:// is handled directly on the main thread (no worker thread needed).
-      if (scheme === 'nww') {
-        // CORS preflight: return 204 with CORS headers immediately.
-        if (meth === 'OPTIONS') {
-          return {
-            html:         '',
-            statusCode:   204,
-            reasonPhrase: 'No Content',
-            headers:      'Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type',
-            base64:       false,
-          };
-        }
-        let body: string | null = null;
-        const contentStream = ev.Request.Content;
-        if (contentStream != null) {
-          try {
-            const reader = new dotnet.System.IO.StreamReader(contentStream);
-            body = reader.ReadToEnd() as string;
-            reader.Dispose();
-          } catch { /* no body */ }
-        }
-        const nwwResult = handleNwwRequest(uri, meth, body);
-        return {
-          html:         nwwResult.body,
-          statusCode:   nwwResult.status,
-          reasonPhrase: nwwResult.status === 200 ? 'OK' : 'Error',
-          headers:      `Content-Type: ${nwwResult.mimeType}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type`,
-          base64:       false,
-        };
-      }
-
-      const result = callHandlerSync(scheme, uri, meth);
-      const contentType = result.mimeType ?? (result.isBase64 ? 'application/octet-stream' : 'text/html; charset=utf-8');
-      return {
-        html:         result.body,
-        statusCode:   result.statusCode,
-        reasonPhrase: result.statusCode === 200 ? 'OK' : 'Error',
-        headers:      `Content-Type: ${contentType}`,
-        base64:       result.isBase64,
-      };
-    });
   }
 
   public close(): void {
@@ -677,87 +563,7 @@ export class NetFxWpfWindow implements IWindowProvider {
 
   /** Show a context menu at screen position (x, y) or at cursor if not specified. */
   public popupMenu(items: MenuItemOptions[], x?: number, y?: number): void {
-    if (!this.browserWindow) return;
-    const dotnetNs = dotnet as DotnetProxy & Record<string, DotNetObject>;
-    const ContextMenuType = dotnetNs['System.Windows.Controls.ContextMenu'];
-    const MenuItemType    = dotnetNs['System.Windows.Controls.MenuItem'];
-    const SeparatorType   = dotnetNs['System.Windows.Controls.Separator'];
-    if (!ContextMenuType) return;
-
-    const cm: DotNetObject = new ContextMenuType();
-
-    const buildItems = (parent: DotNetObject, list: MenuItemOptions[]) => {
-      for (const item of list) {
-        if (item.type === 'separator') {
-          parent.Items.Add(new SeparatorType());
-        } else {
-          const mi: DotNetObject = new MenuItemType();
-          mi.Header = item.label || '';
-          if (item.enabled === false) mi.IsEnabled = false;
-          if (item.toolTip) mi.ToolTip = item.toolTip;
-
-          if (item.icon) {
-            try {
-              const iconAbs = path.isAbsolute(item.icon)
-                ? item.icon : path.resolve(process.cwd(), item.icon);
-              const BitmapImageType = dotnetNs['System.Windows.Media.Imaging.BitmapImage'];
-              const ImageType       = dotnetNs['System.Windows.Controls.Image'];
-              const UriType         = dotnetNs['System.Uri'];
-              if (BitmapImageType && ImageType && UriType) {
-                const uri = new UriType('file:///' + iconAbs.replace(/\\/g, '/'));
-                const bmp = new BitmapImageType(uri);
-                const img: DotNetObject = new ImageType();
-                img.Source = bmp;
-                img.Width  = 16;
-                img.Height = 16;
-                mi.Icon = img;
-              }
-            } catch { /* best-effort */ }
-          }
-
-          const clickFn = item.click ?? (item.role ? this._wpfRoleClick(item.role) : undefined);
-          if (clickFn) mi.add_Click(() => { clickFn(); });
-          if (item.submenu) buildItems(mi, item.submenu);
-          parent.Items.Add(mi);
-        }
-      }
-    };
-
-    buildItems(cm, items);
-
-    if (x !== undefined && y !== undefined) {
-      try {
-        const PlacementModeType = dotnetNs['System.Windows.Controls.Primitives.PlacementMode'];
-        const absolutePoint = (PlacementModeType as DotNetObject).AbsolutePoint;
-        cm.Placement        = absolutePoint;
-        cm.HorizontalOffset = x;
-        cm.VerticalOffset   = y;
-      } catch { /* placement is best-effort */ }
-    }
-
-    cm.IsOpen = true;
-  }
-
-  /** Role→action mapping used by popupMenu (mirrors buildWpfMenu's roleClick). */
-  private _wpfRoleClick(role: string): (() => void) | undefined {
-    switch (role) {
-      case 'close':            return () => this.close();
-      case 'minimize':         return () => { dotnet.minimize(this.browserWindow); };
-      case 'reload':
-      case 'forceReload':      return () => this.reload();
-      case 'toggleDevTools':   return () => this.openDevTools();
-      case 'togglefullscreen': return () => this.setFullScreen(!this.isFullScreen());
-      case 'resetZoom':        return () => { if (this.webView) this.webView.ZoomFactor = 1.0; };
-      case 'zoomIn':           return () => { if (this.webView) this.webView.ZoomFactor = Math.min((this.webView.ZoomFactor as number) + 0.1, 5.0); };
-      case 'zoomOut':          return () => { if (this.webView) this.webView.ZoomFactor = Math.max((this.webView.ZoomFactor as number) - 0.1, 0.25); };
-      case 'undo':      return () => this.executeJavaScript("document.execCommand('undo')");
-      case 'redo':      return () => this.executeJavaScript("document.execCommand('redo')");
-      case 'cut':       return () => this.executeJavaScript("document.execCommand('cut')");
-      case 'copy':      return () => this.executeJavaScript("document.execCommand('copy')");
-      case 'paste':     return () => this.executeJavaScript("document.execCommand('paste')");
-      case 'selectAll': return () => this.executeJavaScript("document.execCommand('selectAll')");
-      default:          return undefined;
-    }
+    popupContextMenu(this, dotnet, items, x, y);
   }
 
   public async loadURL(urlStr: string): Promise<void> {

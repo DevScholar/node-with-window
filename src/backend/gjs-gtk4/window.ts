@@ -3,9 +3,8 @@ import * as fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { startEventDrain } from '@devscholar/node-with-gjs';
 import {
-  _Gtk, _Gdk, _WebKit, _Gio, _GLib, _gtkApp, _appRunning, _pendingWindowCreations, ensureGtkApp,
+  _Gtk, _Gdk, _WebKit, _Gio, _gtkApp, _appRunning, _pendingWindowCreations, ensureGtkApp,
 } from './gtk-app.js';
-import type GLib from '@girs/glib-2.0';
 import {
   IWindowProvider,
   BrowserWindowOptions,
@@ -18,13 +17,13 @@ import { NativeImage } from '../../native-image.js';
 import { ipcMain } from '../../ipc-main.js';
 import { generateBridgeScript } from './bridge.js';
 import {
-  handleNwwRequest,
   addNwwCallbackPusher,
   removeNwwCallbackPusher,
 } from '../../node-integration.js';
 import { buildGioMenu } from './menu.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 import { protocol } from '../../protocol.js';
+import { handleNwwScheme, handleUriScheme } from './scheme-handler.js';
 import type Gtk from '@girs/gtk-4.0';
 import type Gdk from '@girs/gdk-4.0';
 import type Gio from '@girs/gio-2.0';
@@ -112,7 +111,18 @@ export class GjsGtk4Window implements IWindowProvider {
     });
   }
 
+  // ── Window creation ────────────────────────────────────────────────────────
+
   private _createWindowInGtk(): void {
+    this._setupWebContext();
+    this._setupWebView();
+    this._setupGtkWindow();
+    this._connectWindowSignals();
+    this._connectWebViewSignals();
+  }
+
+  /** Create UCM, WebContext, and register URI scheme handlers. */
+  private _setupWebContext(): void {
     if (!_WebKit) throw new Error('[gjs-gtk4] WebKit namespace not available');
 
     this.ucm = new _WebKit.UserContentManager() as WebKit.UserContentManager;
@@ -143,19 +153,21 @@ export class GjsGtk4Window implements IWindowProvider {
     }
 
     this._webContext.register_uri_scheme('nww', (req: WebKit.URISchemeRequest) => {
-      void this._handleNwwSchemeRequest(req);
+      handleNwwScheme(req);
     });
 
-    const registeredSchemes = protocol.getRegisteredSchemes();
-    for (const [scheme] of registeredSchemes) {
+    for (const [scheme] of protocol.getRegisteredSchemes()) {
       this._webContext.register_uri_scheme(scheme, (req: WebKit.URISchemeRequest) => {
-        void this._handleUriSchemeRequest(scheme, req);
+        void handleUriScheme(scheme, req);
       });
     }
+  }
 
+  /** Create the WebView, configure settings, and inject the bridge + preload script. */
+  private _setupWebView(): void {
     this.webView = new _WebKit.WebView({
-      user_content_manager: this.ucm,
-      web_context: this._webContext,
+      user_content_manager: this.ucm ?? undefined,
+      web_context: this._webContext ?? undefined,
     }) as WebKit.WebView;
 
     try {
@@ -191,8 +203,11 @@ export class GjsGtk4Window implements IWindowProvider {
       null,
       null
     ) as WebKit.UserScript;
-    this.ucm.add_script(userScript);
+    this.ucm!.add_script(userScript);
+  }
 
+  /** Create the GTK ApplicationWindow, set layout, apply background/transparency options. */
+  private _setupGtkWindow(): void {
     this.win = new _Gtk.ApplicationWindow({ application: _gtkApp }) as Gtk.ApplicationWindow;
     this.win.set_title(this.options.title || 'node-with-window');
     this.win.set_default_size(this.options.width || 800, this.options.height || 600);
@@ -214,7 +229,7 @@ export class GjsGtk4Window implements IWindowProvider {
       try {
         const rgba = new _Gdk.RGBA() as Gdk.RGBA;
         rgba.red = 0; rgba.green = 0; rgba.blue = 0; rgba.alpha = 0;
-        this.webView.set_background_color(rgba);
+        this.webView!.set_background_color(rgba);
       } catch (e) { console.warn('[gjs-gtk4] set_background_color failed:', e); }
 
       try {
@@ -230,16 +245,16 @@ export class GjsGtk4Window implements IWindowProvider {
       try {
         const rgba = new _Gdk.RGBA() as Gdk.RGBA;
         rgba.parse(this.options.backgroundColor);
-        this.webView.set_background_color(rgba);
+        this.webView!.set_background_color(rgba);
       } catch { /* best-effort */ }
     }
 
     this._contentBox = new _Gtk.Box({ orientation: _Gtk.Orientation.VERTICAL, spacing: 0 }) as Gtk.Box;
     this.win.set_child(this._contentBox);
 
-    this.webView.set_hexpand(true);
-    this.webView.set_vexpand(true);
-    this._contentBox.append(this.webView);
+    this.webView!.set_hexpand(true);
+    this.webView!.set_vexpand(true);
+    this._contentBox.append(this.webView!);
 
     if (this._pendingMenu !== null) {
       this._applyMenu(this._pendingMenu);
@@ -248,7 +263,10 @@ export class GjsGtk4Window implements IWindowProvider {
 
     this._nwwPushFn = (id: string, args: unknown[]) => this._pushNwwCallback(id, args);
     addNwwCallbackPusher(this._nwwPushFn);
+  }
 
+  /** Connect GTK window signals: close-request, focus, maximize, fullscreen, minimize, resize. */
+  private _connectWindowSignals(): void {
     let closeInProgress = false;
     const closeRequestHandler = async () => {
       if (closeInProgress) return;
@@ -264,16 +282,16 @@ export class GjsGtk4Window implements IWindowProvider {
       }
     };
     (closeRequestHandler as unknown as { __syncReturn?: boolean }).__syncReturn = true;
-    this.win.connect('close-request', closeRequestHandler);
+    this.win!.connect('close-request', closeRequestHandler);
 
-    this.win.connect('notify::is-active', () => {
+    this.win!.connect('notify::is-active', () => {
       try {
         if (this.win!.is_active) this.onFocus?.();
         else                     this.onBlur?.();
       } catch { /* best-effort */ }
     });
 
-    this.win.connect('notify::maximized', () => {
+    this.win!.connect('notify::maximized', () => {
       try {
         const isMax: boolean = Boolean(this.win!.is_maximized);
         if (isMax !== this._isMaximized) {
@@ -284,7 +302,7 @@ export class GjsGtk4Window implements IWindowProvider {
       } catch { /* best-effort */ }
     });
 
-    this.win.connect('notify::fullscreened', () => {
+    this.win!.connect('notify::fullscreened', () => {
       try {
         const isFull: boolean = this.win!.fullscreened ?? false;
         if (isFull !== this._isFullScreen) {
@@ -296,7 +314,7 @@ export class GjsGtk4Window implements IWindowProvider {
     });
 
     try {
-      this.win.connect('notify::suspended', () => {
+      this.win!.connect('notify::suspended', () => {
         try {
           const isSuspended: boolean = (this.win as unknown as { suspended?: boolean }).suspended ?? false;
           if (isSuspended !== this._isMinimized) {
@@ -309,7 +327,7 @@ export class GjsGtk4Window implements IWindowProvider {
     } catch { /* notify::suspended not available on this GTK version */ }
 
     try {
-      this.win.connect('notify::default-width', () => {
+      this.win!.connect('notify::default-width', () => {
         try {
           const w = this.win!.get_width() as number;
           const h = this.win!.get_height() as number;
@@ -317,8 +335,11 @@ export class GjsGtk4Window implements IWindowProvider {
         } catch { /* best-effort */ }
       });
     } catch { /* best-effort */ }
+  }
 
-    this.webView.connect('load-changed', (_wv: WebKit.WebView, loadEvent: any) => {
+  /** Connect WebView signals: navigation events and title updates. Perform initial navigation. */
+  private _connectWebViewSignals(): void {
+    this.webView!.connect('load-changed', (_wv: WebKit.WebView, loadEvent: any) => {
       if (loadEvent === 2) {
         try {
           const url: string = this.webView!.get_uri?.() ?? '';
@@ -336,7 +357,7 @@ export class GjsGtk4Window implements IWindowProvider {
       }
     });
 
-    this.webView.connect('load-failed', (_wv: WebKit.WebView, _loadEvent: any, uri: string, error: any) => {
+    this.webView!.connect('load-failed', (_wv: WebKit.WebView, _loadEvent: any, uri: string, error: any) => {
       try {
         const code: number = error?.code ?? -1;
         const msg: string  = error?.message ?? 'Navigation failed';
@@ -345,7 +366,7 @@ export class GjsGtk4Window implements IWindowProvider {
       return false;
     });
 
-    this.webView.connect('decide-policy', (_wv: WebKit.WebView, decision: any, decisionType: any) => {
+    this.webView!.connect('decide-policy', (_wv: WebKit.WebView, decision: any, decisionType: any) => {
       try {
         if (decisionType === 0 && this._willNavigateCallback) {
           const navAction = decision.get_navigation_action?.();
@@ -360,7 +381,7 @@ export class GjsGtk4Window implements IWindowProvider {
       return false;
     });
 
-    this.webView.connect('notify::title', () => {
+    this.webView!.connect('notify::title', () => {
       try {
         const pageTitle: string = this.webView!.get_title?.() ?? '';
         if (pageTitle) {
@@ -371,12 +392,14 @@ export class GjsGtk4Window implements IWindowProvider {
     });
 
     if (this._pendingFilePath) {
-      this.webView.load_uri(pathToFileURL(this._pendingFilePath).href);
+      this.webView!.load_uri(pathToFileURL(this._pendingFilePath).href);
       this._pendingFilePath = null;
     } else {
-      this.webView.load_uri('about:blank');
+      this.webView!.load_uri('about:blank');
     }
   }
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   public show(): void {
     if (this.win) {
@@ -446,6 +469,8 @@ export class GjsGtk4Window implements IWindowProvider {
     }
   }
 
+  // ── Navigation ─────────────────────────────────────────────────────────────
+
   public async loadURL(url: string): Promise<void> {
     if (!this.webView) {
       this.navigationQueue.push(() => this.loadURL(url));
@@ -513,6 +538,8 @@ export class GjsGtk4Window implements IWindowProvider {
     try { return this.webView.is_loading as boolean; } catch { return false; }
   }
 
+  // ── IPC & JavaScript execution ─────────────────────────────────────────────
+
   private _evaluateJs(code: string): void {
     if (!this.webView) return;
     this.webView.evaluate_javascript(code, -1, null, null, null, null);
@@ -523,86 +550,6 @@ export class GjsGtk4Window implements IWindowProvider {
     this._evaluateJs(
       `window.__ipcDispatch && window.__ipcDispatch(${JSON.stringify(payload)})`,
     );
-  }
-
-  private _readNwwBody(req: WebKit.URISchemeRequest): string | null {
-    try {
-      const stream = req.get_http_body?.();
-      if (!stream) return null;
-      const gBytes = stream.read_bytes(10 * 1024 * 1024, null);
-      const data: Uint8Array = gBytes.get_data() ?? new Uint8Array(0);
-      return new TextDecoder().decode(data);
-    } catch {
-      return null;
-    }
-  }
-
-  private _handleNwwSchemeRequest(req: WebKit.URISchemeRequest): void {
-    try {
-      const uri: string    = req.get_uri();
-      const method: string = req.get_http_method?.() ?? 'GET';
-      const body           = method === 'POST' ? this._readNwwBody(req) : null;
-
-      const result = handleNwwRequest(uri, method, body);
-
-      const bytes = result.status === 204
-        ? new Uint8Array(0)
-        : new TextEncoder().encode(result.body);
-      const glibBytes = new (_GLib.Bytes as unknown as new (b: Uint8Array) => GLib.Bytes)(bytes);
-      const stream    = _Gio.MemoryInputStream.new_from_bytes(glibBytes);
-
-      req.finish(stream, bytes.length, result.mimeType);
-    } catch (e) {
-      console.error('[gjs-gtk4] nww scheme handler error:', e);
-      try { req.finish_error(e as unknown as GLib.Error); } catch { /* ignore */ }
-    }
-  }
-
-  private async _handleUriSchemeRequest(scheme: string, request: WebKit.URISchemeRequest): Promise<void> {
-    const uri: string    = request.get_uri();
-    const method: string = request.get_http_method();
-    const handler = protocol.getHandler(scheme);
-
-    if (!handler) {
-      try { request.finish_error(new Error(`No handler for scheme: ${scheme}`) as unknown as GLib.Error); } catch { /* ignore */ }
-      return;
-    }
-
-    let result;
-    try {
-      result = await handler({ url: uri, method });
-    } catch (e) {
-      console.error(`[gjs-gtk4] Protocol handler error for ${scheme}:`, e);
-      try { request.finish_error(e as unknown as GLib.Error); } catch { /* ignore */ }
-      return;
-    }
-
-    try {
-      const body = result.data ?? '';
-      let bytes: Uint8Array;
-      if (typeof body === 'string') {
-        bytes = new TextEncoder().encode(body);
-      } else {
-        bytes = new Uint8Array((body as Buffer).buffer, (body as Buffer).byteOffset, (body as Buffer).byteLength);
-      }
-
-      const glibBytes = new (_GLib.Bytes as unknown as new (b: Uint8Array) => GLib.Bytes)(bytes);
-      const stream    = _Gio.MemoryInputStream.new_from_bytes(glibBytes) as Gio.InputStream;
-      const mimeType  = result.mimeType ?? 'text/html; charset=utf-8';
-      const status    = result.statusCode ?? 200;
-
-      if (status !== 200) {
-        const resp = new _WebKit.URISchemeResponse(stream as unknown as WebKit.URISchemeResponse.ConstructorProps) as WebKit.URISchemeResponse;
-        resp.set_status(status, null);
-        resp.set_content_type(mimeType);
-        request.finish_with_response(resp);
-      } else {
-        request.finish(stream, bytes.length, mimeType);
-      }
-    } catch (e) {
-      console.error(`[gjs-gtk4] Protocol finish error for ${scheme}:`, e);
-      try { request.finish_error(e as unknown as GLib.Error); } catch { /* ignore */ }
-    }
   }
 
   public sendToRenderer(channel: string, ...args: unknown[]): void {
@@ -695,6 +642,8 @@ export class GjsGtk4Window implements IWindowProvider {
     }
   }
 
+  // ── DevTools ───────────────────────────────────────────────────────────────
+
   public openDevTools(): void {
     if (!this.webView) return;
     try {
@@ -702,6 +651,8 @@ export class GjsGtk4Window implements IWindowProvider {
       if (inspector) inspector.show();
     } catch { /* best-effort */ }
   }
+
+  // ── Menu ───────────────────────────────────────────────────────────────────
 
   public setMenu(menu: MenuItemOptions[]): void {
     if (!this.win) {
@@ -769,6 +720,8 @@ export class GjsGtk4Window implements IWindowProvider {
     }
   }
 
+  // ── Window state ───────────────────────────────────────────────────────────
+
   public focus(): void {
     if (this.win) this.win.present();
   }
@@ -786,6 +739,7 @@ export class GjsGtk4Window implements IWindowProvider {
   public unmaximize(): void {
     if (this.win) this.win.unmaximize();
   }
+
   public setFullScreen(flag: boolean): void {
     if (!this.win) return;
     if (flag) this.win.fullscreen();
@@ -889,6 +843,8 @@ export class GjsGtk4Window implements IWindowProvider {
   public setEnabled(flag: boolean): void {
     if (this.win) this.win.set_sensitive(flag);
   }
+
+  // ── Dialogs & capture ──────────────────────────────────────────────────────
 
   public async capturePage(): Promise<NativeImage> {
     return new NativeImage(Buffer.alloc(0));
