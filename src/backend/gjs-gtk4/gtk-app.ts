@@ -25,18 +25,8 @@ export function ensureGiLoaded(): void {
   _Gio = _gi.Gio as typeof Gio;
   _GLib = _gi.GLib as typeof GLib;
 
-  try {
-    _gi.versions.WebKit = '6.0';
-    _WebKit = _gi.WebKit as typeof WebKit;
-  } catch {
-    try {
-      _gi.versions.WebKit2 = '4.1';
-      _WebKit = _gi.WebKit2 as typeof WebKit;
-    } catch (e) {
-      console.error('[gjs-gtk4] Could not load WebKit namespace:', e);
-      _WebKit = null as unknown as typeof WebKit;
-    }
-  }
+  _gi.versions.WebKit = '6.0';
+  _WebKit = _gi.WebKit as typeof WebKit;
 }
 
 export function ensureGtkApp(): void {

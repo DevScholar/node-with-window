@@ -1,7 +1,7 @@
 # Electron API Compatibility — `gjs-gtk4` Backend
 
 **Platform:** Linux
-**Stack:** GTK 4 + WebKitGTK 6.0 (falls back to WebKit2 4.1)
+**Stack:** GTK 4 + WebKitGTK 6.0
 **Bridge:** `@devscholar/node-with-gjs` — in-process GJS bindings; GTK event loop drained by Node.js at 16 ms intervals via `startEventDrain()`.
 
 ---
