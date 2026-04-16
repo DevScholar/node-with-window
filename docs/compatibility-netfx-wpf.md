@@ -72,7 +72,7 @@
 | `skipTaskbar` | ✅ | `SetWindowLong` `WS_EX_TOOLWINDOW`/`WS_EX_APPWINDOW` |
 | `parent`, `modal` | ✅ | `parent` sets WPF `WindowInteropHelper.Owner`; `modal` disables the parent until the child closes |
 | `webPreferences` | ✅ | See WebPreferences section |
-| `autoHideMenuBar` | ❌ | Not implemented |
+| `autoHideMenuBar` | ✅ | Menu bar hidden initially (`Visibility.Collapsed`); bare Alt key (`Key.System` + `SystemKey LeftAlt/RightAlt`) toggles visibility via `add_PreviewKeyDown` |
 | `hasShadow` | ❌ | Not implemented |
 | `center` (as option) | ❌ | Use `win.center()` after creation |
 
@@ -103,19 +103,19 @@
 | `win.loadURL(url)` | ✅ | Queued until WebView2 is ready |
 | `win.loadFile(path)` | ✅ | Navigates to `file:///` URI; bridge script registered via `AddScriptToExecuteOnDocumentCreatedAsync` |
 | `win.show()` | ✅ | Starts WPF `Application.Run()` (first window); subsequent windows call `Window.Show()` |
-| `win.hide()` | ❌ | Not implemented |
+| `win.hide()` | ✅ | `Window.Hide()` |
 | `win.close()` | ✅ | Calls `Window.Close()`; temp user-data is cleaned up; process exit managed by close-event chain |
 | `win.destroy()` | ✅ | Alias for `close()` |
 | `win.focus()` | ✅ | `Window.Activate()` |
 | `win.blur()` | ⚠️ | No-op — WPF has no programmatic blur API |
-| `win.isFocused()` | ❌ | Not implemented |
-| `win.isVisible()` | ❌ | Not implemented |
-| `win.isDestroyed()` | ❌ | Not implemented |
+| `win.isFocused()` | ✅ | `Window.IsActive` |
+| `win.isVisible()` | ✅ | Tracked in JS (`_isVisible` flag) |
+| `win.isDestroyed()` | ✅ | Tracked in JS (`isClosed` flag) |
 | `win.minimize()` | ✅ | `WindowState.Minimized` |
 | `win.maximize()` | ✅ | `WindowState.Maximized` |
 | `win.unmaximize()` / `win.restore()` | ✅ | `WindowState.Normal` |
-| `win.isMinimized()` | ❌ | Not implemented |
-| `win.isMaximized()` | ❌ | Not implemented |
+| `win.isMinimized()` | ✅ | Reads `Window.WindowState === Minimized` |
+| `win.isMaximized()` | ✅ | Reads `Window.WindowState === Maximized` |
 | `win.isNormal()` | ❌ | Not implemented |
 | `win.setFullScreen(flag)` | ✅ | `WindowStyle.None` + `Maximized` + `Topmost`; not exclusive fullscreen |
 | `win.isFullScreen()` | ✅ | Tracked in JS (`_isFullScreen` flag) |
@@ -164,16 +164,16 @@
 | `'close'` | ✅ | Pre-close cancelable event; fires on X-button click; `event.preventDefault()` sets `e.Cancel = true` via `add_Closing` sync event |
 | `'focus'` | ✅ | `Window.Activated` |
 | `'blur'` | ✅ | `Window.Deactivated` |
-| `'show'` | ❌ | Not emitted |
-| `'hide'` | ❌ | Not emitted |
+| `'show'` | ✅ | Emitted from `show()` |
+| `'hide'` | ✅ | Emitted from `hide()` |
 | `'resize'` | ✅ | `Window.SizeChanged`; args: `(width, height)` in logical pixels |
-| `'move'` | ❌ | Not emitted |
-| `'maximize'` | ❌ | Not emitted |
-| `'unmaximize'` | ❌ | Not emitted |
-| `'minimize'` | ❌ | Not emitted |
-| `'restore'` | ❌ | Not emitted |
-| `'enter-full-screen'` | ❌ | Not emitted |
-| `'leave-full-screen'` | ❌ | Not emitted |
+| `'move'` | ✅ | `Window.LocationChanged`; args: `(x, y)` in logical pixels |
+| `'maximize'` | ✅ | `Window.StateChanged` → `WindowState.Maximized` (when not in fullscreen) |
+| `'unmaximize'` | ✅ | `Window.StateChanged` → `WindowState.Normal` from Maximized |
+| `'minimize'` | ✅ | `Window.StateChanged` → `WindowState.Minimized` |
+| `'restore'` | ✅ | `Window.StateChanged` → `WindowState.Normal` from Minimized |
+| `'enter-full-screen'` | ✅ | Emitted from `setFullScreen(true)` |
+| `'leave-full-screen'` | ✅ | Emitted from `setFullScreen(false)` |
 | `'page-title-updated'` | ✅ | Emitted on `CoreWebView2.DocumentTitleChanged`; args: `(event, title, explicitSet)` |
 | `'ready-to-show'` | ❌ | Not emitted |
 
@@ -193,11 +193,11 @@
 | Event: `'did-navigate'` | ✅ | Emitted on `NavigationCompleted` (success); arg: `url` |
 | Event: `'dom-ready'` | ✅ | Emitted on `CoreWebView2.DOMContentLoaded` |
 | Event: `'did-fail-load'` | ✅ | Emitted on `NavigationCompleted` (failure); args: `(event, errorCode, url, errorDescription, isMainFrame)` |
-| Event: `'will-navigate'` | ❌ | Not emitted |
-| `webContents.getURL()` | ❌ | Not implemented |
-| `webContents.getTitle()` | ❌ | Not implemented |
-| `webContents.isLoading()` | ❌ | Not implemented |
-| `webContents.goBack/goForward()` | ❌ | Not implemented |
+| Event: `'will-navigate'` | ✅ | `CoreWebView2.NavigationStarting`; arg: `url` |
+| `webContents.getURL()` | ✅ | `CoreWebView2.Source` |
+| `webContents.getTitle()` | ✅ | `CoreWebView2.DocumentTitle` |
+| `webContents.isLoading()` | ✅ | Tracked via `NavigationStarting` / `NavigationCompleted` |
+| `webContents.goBack/goForward()` | ✅ | `CoreWebView2.GoBack()` / `CoreWebView2.GoForward()` |
 | `webContents.print()` / `printToPDF()` | ❌ | Not implemented |
 
 ---
@@ -230,8 +230,8 @@
 | `ipcRenderer.once(channel, listener)` | ✅ | |
 | `ipcRenderer.off(channel, listener)` | ✅ | |
 | `ipcRenderer.removeListener(channel, listener)` | ✅ | Alias for `off()` |
-| `ipcRenderer.removeAllListeners(channel?)` | ❌ | Not implemented |
-| `ipcRenderer.postMessage()` | ❌ | Not implemented |
+| `ipcRenderer.removeAllListeners(channel?)` | ✅ | Removes all listeners for the given channel, or all channels if omitted |
+| `ipcRenderer.postMessage()` | ✅ | Sends the message as the first argument via the `send` IPC path |
 | `ipcRenderer.sendToHost()` | ❌ | Not implemented |
 
 ---
@@ -377,7 +377,7 @@ The following Electron modules have no equivalent in this library:
 
 - **`contextIsolation` is simulated, not enforced.** When `contextIsolation: true` and a preload is present, `ipcRenderer` and `contextBridge` are deleted from `window` after the preload executes. This is not V8 context isolation — malicious page scripts can still access any closures created by the preload.
 
-- **Most window state-change events are not emitted.** `'focus'`, `'blur'`, `'resize'`, and `'page-title-updated'` are emitted. `'move'`, `'maximize'`, `'minimize'`, `'enter-full-screen'` etc. are not wired to WPF events.
+- **Most window state-change events are emitted.** `'focus'`, `'blur'`, `'resize'`, `'show'`, `'hide'`, `'move'`, `'maximize'`, `'unmaximize'`, `'minimize'`, `'restore'`, `'enter-full-screen'`, `'leave-full-screen'`, and `'page-title-updated'` are all emitted. `'ready-to-show'` is not emitted.
 
 - **`dialog` methods block the event loop.** All dialog methods execute synchronously on the Node.js thread. Unlike Electron's async native dialogs, they block until dismissed.
 

@@ -70,7 +70,7 @@
 | `skipTaskbar` | ❌ | GTK4 removed taskbar hint APIs; no effect |
 | `parent`, `modal` | ⚠️ | `modal` disables the parent via `set_sensitive(false)`; no `set_transient_for()` (in-process limitation) |
 | `webPreferences` | ✅ | See WebPreferences section |
-| `autoHideMenuBar` | ❌ | Not implemented |
+| `autoHideMenuBar` | ✅ | Menu bar hidden initially; bare Alt key (keyval 65513/65514) toggles visibility via `EventControllerKey` |
 
 ### `webPreferences`
 
@@ -79,7 +79,7 @@
 | `nodeIntegration` | ✅ | Enables `window.require` (sync XHR) and `window.process` |
 | `contextIsolation` | ⚠️ | When `true` + `preload`: globals `ipcRenderer` and `contextBridge` are deleted from `window` after the preload runs. Not true V8 context isolation. |
 | `preload` | ✅ | Registered via `WebKit.UserContentManager.add_script()` at `DOCUMENT_START` |
-| `partition` | ❌ | Accepted but not applied — WebKitGTK uses a single default profile |
+| `partition` | ✅ | `persist:<name>` → dedicated `WebsiteDataManager` with named directory; `temp:<name>` → ephemeral session (directory cleaned up on window close) |
 | `webSecurity` | ✅ | `false` sets `allow_file_access_from_file_urls` + `allow_universal_access_from_file_urls` on `WebKit.Settings` |
 | `sandbox` | ⚠️ | Accepted, no effect |
 
@@ -99,19 +99,19 @@
 | `win.loadURL(url)` | ✅ | `WebView.load_uri(url)`; queued until GTK is ready |
 | `win.loadFile(path)` | ✅ | `WebView.load_uri('file://' + absolutePath)`; bridge script injected via `UserContentManager` |
 | `win.show()` | ✅ | `Window.present()` |
-| `win.hide()` | ❌ | Not implemented |
+| `win.hide()` | ✅ | `Window.hide()` |
 | `win.close()` | ✅ | `Window.close()`; process exit managed by close-event chain |
 | `win.destroy()` | ✅ | Alias for `close()` |
 | `win.focus()` | ✅ | `Window.present()` |
 | `win.blur()` | ⚠️ | No-op — compositor controls focus |
-| `win.isFocused()` | ❌ | Not implemented |
-| `win.isVisible()` | ❌ | Not implemented |
-| `win.isDestroyed()` | ❌ | Not implemented |
+| `win.isFocused()` | ✅ | `Window.is_active` |
+| `win.isVisible()` | ✅ | Tracked in JS (`_isVisible` flag) |
+| `win.isDestroyed()` | ✅ | Tracked in JS (`isClosed` flag) |
 | `win.minimize()` | ✅ | `Window.minimize()` |
 | `win.maximize()` | ✅ | `Window.maximize()` |
 | `win.unmaximize()` / `win.restore()` | ✅ | `Window.unmaximize()` |
-| `win.isMinimized()` | ❌ | Not implemented |
-| `win.isMaximized()` | ❌ | Not implemented |
+| `win.isMinimized()` | ✅ | Tracked via `notify::suspended` signal |
+| `win.isMaximized()` | ✅ | `Window.is_maximized` |
 | `win.isNormal()` | ❌ | Not implemented |
 | `win.setFullScreen(flag)` | ✅ | `Window.fullscreen()` / `Window.unfullscreen()` |
 | `win.isFullScreen()` | ✅ | Tracked in JS |
@@ -146,11 +146,11 @@
 | `win.setBackgroundColor(color)` | ✅ | `WebView.set_background_color(Gdk.RGBA)` |
 | `win.setMenu(menu)` | ✅ | GTK4 `PopoverMenuBar`; items mapped to `Gio.SimpleAction` |
 | `win.removeMenu()` | ✅ | Removes the `PopoverMenuBar` widget |
-| `win.popupMenu(items, x?, y?)` | ❌ | Not implemented; logs `console.warn` |
+| `win.popupMenu(items, x?, y?)` | ✅ | `Gtk.PopoverMenu` with `Gio.Menu` model; positioned at cursor or explicit window-relative coordinates |
 | `win.showOpenDialog(options)` | ✅ | `Gtk.FileDialog` async + `drainCallbacks()` spin-wait; returns `string[] \| undefined` |
 | `win.showSaveDialog(options)` | ✅ | Same mechanism |
 | `win.showMessageBox(options)` | ✅ | `Gtk.AlertDialog` (GTK ≥ 4.10) or `Gtk.MessageDialog` fallback; `drainCallbacks()` spin-wait; returns button index |
-| `win.capturePage()` | ❌ | Returns an empty `NativeImage`; WebKit snapshot API not yet wired |
+| `win.capturePage()` | ✅ | WebKit `get_snapshot(FULL_DOCUMENT)` → cairo surface → PNG tmpfile → `NativeImage`; best-effort |
 
 ### Window Events
 
@@ -160,16 +160,16 @@
 | `'close'` | ✅ | Pre-close cancelable event; `event.preventDefault()` prevents the window from closing |
 | `'focus'` | ✅ | `notify::is-active` (GTK `is_active` becomes `true`) |
 | `'blur'` | ✅ | `notify::is-active` (GTK `is_active` becomes `false`) |
-| `'show'` | ❌ | Not emitted |
-| `'hide'` | ❌ | Not emitted |
-| `'resize'` | ✅ | `size-allocate`; args: `(width, height)` in logical pixels |
-| `'move'` | ❌ | Not emitted (compositor-managed) |
-| `'maximize'` | ❌ | Not emitted |
-| `'unmaximize'` | ❌ | Not emitted |
-| `'minimize'` | ❌ | Not emitted |
-| `'restore'` | ❌ | Not emitted |
-| `'enter-full-screen'` | ❌ | Not emitted |
-| `'leave-full-screen'` | ❌ | Not emitted |
+| `'show'` | ✅ | Emitted from `show()` |
+| `'hide'` | ✅ | Emitted from `hide()` |
+| `'resize'` | ✅ | `notify::default-width`; args: `(width, height)` in logical pixels |
+| `'move'` | ❌ | Not emitted (compositor-managed; GTK4 has no move event) |
+| `'maximize'` | ✅ | `notify::maximized` → `is_maximized` transitions to `true` |
+| `'unmaximize'` | ✅ | `notify::maximized` → `is_maximized` transitions to `false` |
+| `'minimize'` | ✅ | `notify::suspended` → `suspended` transitions to `true` (GTK ≥ 4.12) |
+| `'restore'` | ✅ | `notify::suspended` → `suspended` transitions to `false` (GTK ≥ 4.12) |
+| `'enter-full-screen'` | ✅ | `notify::fullscreened` → `fullscreened` transitions to `true` |
+| `'leave-full-screen'` | ✅ | `notify::fullscreened` → `fullscreened` transitions to `false` |
 | `'page-title-updated'` | ✅ | Emitted on WebKit `notify::title`; args: `(event, title, explicitSet)` |
 | `'ready-to-show'` | ❌ | Not emitted |
 
@@ -189,11 +189,11 @@
 | Event: `'did-navigate'` | ✅ | Emitted on `load-changed` (`COMMITTED`); arg: `url` |
 | Event: `'dom-ready'` | ✅ | Emitted on `load-changed` (`COMMITTED`); fires together with `did-navigate` |
 | Event: `'did-fail-load'` | ✅ | Emitted on WebKit `load-failed`; args: `(event, errorCode, url, errorDescription, isMainFrame)` |
-| Event: `'will-navigate'` | ❌ | Not emitted |
-| `webContents.getURL()` | ❌ | Not implemented |
-| `webContents.getTitle()` | ❌ | Not implemented |
-| `webContents.isLoading()` | ❌ | Not implemented |
-| `webContents.goBack/goForward()` | ❌ | Not implemented |
+| Event: `'will-navigate'` | ✅ | `decide-policy` (NAVIGATION_ACTION decision type); arg: `url` |
+| `webContents.getURL()` | ✅ | `WebView.get_uri()` |
+| `webContents.getTitle()` | ✅ | `WebView.get_title()` |
+| `webContents.isLoading()` | ✅ | `WebView.is_loading` |
+| `webContents.goBack/goForward()` | ✅ | `WebView.go_back()` / `WebView.go_forward()` |
 | `webContents.print()` / `printToPDF()` | ❌ | Not implemented |
 
 ---
@@ -226,8 +226,8 @@
 | `ipcRenderer.once(channel, listener)` | ✅ | |
 | `ipcRenderer.off(channel, listener)` | ✅ | |
 | `ipcRenderer.removeListener(channel, listener)` | ✅ | Alias for `off()` |
-| `ipcRenderer.removeAllListeners(channel?)` | ❌ | Not implemented |
-| `ipcRenderer.postMessage()` | ❌ | Not implemented |
+| `ipcRenderer.removeAllListeners(channel?)` | ✅ | Removes all listeners for the given channel, or all channels if omitted |
+| `ipcRenderer.postMessage()` | ✅ | Sends the message as the first argument via the `send` IPC path |
 
 ---
 
@@ -276,10 +276,12 @@ All methods execute synchronously underneath (`Gtk.FileDialog` async callbacks d
 | `new Menu()` / `menu.append()` / `menu.insert()` | ✅ | |
 | `Menu.setApplicationMenu(menu \| null)` | ✅ | `null` removes the menu bar from all windows |
 | `Menu.getApplicationMenu()` | ✅ | |
-| `menu.popup({ window, x?, y? })` | ❌ | Not implemented (`popupMenu` is a stub) |
-| `label`, `type`, `click`, `submenu`, `enabled`, `visible`, `checked`, `role` | ✅ | |
+| `menu.popup({ window, x?, y? })` | ✅ | `Gtk.PopoverMenu`; coordinates are best-effort (window-relative on X11, approximate on Wayland) |
+| `label`, `type`, `click`, `submenu`, `enabled`, `visible`, `checked`, `role` | ✅ | `visible: false` skips the item |
 | `accelerator` | ✅ | Keyboard shortcuts enforced via `Gtk.ShortcutController` with `GLOBAL` scope |
-| `toolTip`, `icon`, `id`, `sublabel` | ❌ | |
+| `icon` | ✅ | `Gio.FileIcon` via `Gio.MenuItem.set_icon()`; accepts absolute or relative path; best-effort |
+| `toolTip`, `sublabel` | ❌ | Not supported by `Gio.Menu` / `PopoverMenuBar` |
+| `id` | ❌ | Ignored at render time (no GTK concept of item ID) |
 
 ---
 
@@ -366,14 +368,14 @@ The following Electron modules have no equivalent in this library:
 
 - **`contextIsolation` is simulated, not enforced.** When `contextIsolation: true` and a preload is present, `ipcRenderer` and `contextBridge` are deleted from `window` after the preload runs. This is not V8 context isolation.
 
-- **Most window state-change events are not emitted.** `'focus'`, `'blur'`, `'resize'`, and `'page-title-updated'` are emitted. `'move'`, `'maximize'`, `'minimize'`, `'enter-full-screen'` etc. are not wired to GTK signals.
+- **Most window state-change events are emitted.** `'focus'`, `'blur'`, `'resize'`, `'show'`, `'hide'`, `'maximize'`, `'unmaximize'`, `'enter-full-screen'`, `'leave-full-screen'`, and `'page-title-updated'` are all emitted. `'minimize'` and `'restore'` require GTK ≥ 4.12 (`notify::suspended`). `'move'` is not emitted — GTK4 provides no window-move event.
 
-- **`win.capturePage()` returns an empty image.** The WebKit snapshot API is not yet wired; `NativeImage.isEmpty()` will return `true`.
+- **`win.capturePage()` uses a tmpfile round-trip.** `WebKitWebView.get_snapshot()` writes a cairo PNG surface to `os.tmpdir()`, reads it back, then deletes the file. The image is always RGBA/PNG.
 
-- **`webPreferences.partition` is ignored.** WebKitGTK uses a single default data manager; per-window session isolation is not supported.
+- **`webPreferences.partition` is supported.** `persist:<name>` creates a named `WebsiteDataManager` under `userData/Partitions/`. `temp:` creates an ephemeral session deleted when the window closes.
 
 - **`x`, `y`, `maxWidth`, `maxHeight`, `alwaysOnTop`, `skipTaskbar`, `flashFrame` have no effect.** GTK4 removed the relevant APIs (`window.move()`, maximum size, urgency hints); window placement and stacking are managed entirely by the compositor.
 
-- **`win.popupMenu()` is not implemented.** It logs a warning. The `menu.popup()` method is equally unimplemented for GTK4.
+- **`win.popupMenu()` uses `Gtk.PopoverMenu`.** Screen coordinates are translated to window-relative on X11; on Wayland the popover may appear at an approximate position.
 
 - **Preload scripts** are registered via `WebKit.UserContentManager.add_script()` at `DOCUMENT_START` — they run on every navigation before the page's own scripts, matching Electron's behaviour.

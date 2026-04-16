@@ -125,6 +125,17 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
             for (var i = 0; i < listeners.length; i++) {
                 if (listeners[i].cb === callback) { listeners.splice(i, 1); return; }
             }
+        },
+
+        removeAllListeners: function(channel) {
+            if (channel === undefined) { __ipcListeners = {}; }
+            else { delete __ipcListeners[channel]; }
+            return window.ipcRenderer;
+        },
+
+        postMessage: function(channel, message) {
+            window.webkit.messageHandlers.ipc.postMessage(
+                JSON.stringify({ type: 'send', channel: channel, args: [message] }));
         }
     };
     window.ipcRenderer.removeListener = window.ipcRenderer.off;

@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import { MenuItemOptions } from '../../interfaces.js';
 import type Gio from '@girs/gio-2.0';
 
@@ -26,6 +27,9 @@ export function buildGioMenu(
       continue;
     }
 
+    // visible: false — skip this item entirely
+    if (item.visible === false) continue;
+
     if (item.submenu && item.submenu.length > 0) {
       const submenu = buildGioMenu(
         item.submenu,
@@ -52,7 +56,24 @@ export function buildGioMenu(
     }
 
     actions.push({ name: actionId, action });
-    section.append(item.label || '', `win.${actionId}`);
+
+    // Use MenuItem when we need to attach an icon; otherwise use the simple append() path.
+    if (item.icon) {
+      try {
+        const iconAbs = path.isAbsolute(item.icon)
+          ? item.icon : path.resolve(process.cwd(), item.icon);
+        const gioFile = (GioNs.File as unknown as { new_for_path: (p: string) => Gio.File }).new_for_path(iconAbs);
+        const fileIcon = new (GioNs.FileIcon as unknown as new (opts: { file: Gio.File }) => Gio.FileIcon)({ file: gioFile });
+        const mi = new GioNs.MenuItem(item.label || '', `win.${actionId}`);
+        mi.set_icon(fileIcon);
+        section.append_item(mi);
+      } catch {
+        // Icon loading failed — fall back to plain item
+        section.append(item.label || '', `win.${actionId}`);
+      }
+    } else {
+      section.append(item.label || '', `win.${actionId}`);
+    }
     sectionItemCount++;
   }
 
