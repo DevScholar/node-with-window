@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { startEventDrain } from '@devscholar/node-with-gjs';
 import {
@@ -24,6 +25,7 @@ import { buildGioMenu } from './menu.js';
 import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
 import { protocol } from '../../protocol.js';
 import { handleNwwScheme, handleUriScheme } from './scheme-handler.js';
+import { app } from '../../app.js';
 import type Gtk from '@girs/gtk-4.0';
 import type Gdk from '@girs/gdk-4.0';
 import type Gio from '@girs/gio-2.0';
@@ -55,6 +57,8 @@ export class GjsGtk4Window implements IWindowProvider {
   private _isKiosk = false;
   private _isResizable = true;
   private _zoomLevel = 1.0;
+  private _userDataPath: string | null = null;
+  private _isTempSession = false;
   private _navCompletedCallback: (() => void) | null = null;
   private _navigateCallback: ((url: string) => void) | null = null;
   private _domReadyCallback: (() => void) | null = null;
@@ -79,11 +83,28 @@ export class GjsGtk4Window implements IWindowProvider {
   public onLeaveFullScreen?: () => void;
   public onShow?: () => void;
   public onHide?: () => void;
+  public onMove?: (x: number, y: number) => void;
 
   constructor(options?: BrowserWindowOptions) {
     this.options = options || {};
     this.webPreferences = this.options.webPreferences || {};
     this._isResizable = this.options.resizable ?? true;
+
+    const partition = this.webPreferences.partition;
+    if (partition) {
+      const userDataBase = app.getPath('userData');
+      if (partition.startsWith('persist:')) {
+        this._userDataPath = path.join(userDataBase, 'Partitions', partition.substring(8));
+      } else if (partition.startsWith('temp:')) {
+        this._isTempSession = true;
+        this._userDataPath = path.join(
+          os.tmpdir(), 'node-with-window-webkit',
+          `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
+        );
+      } else {
+        this._userDataPath = path.join(userDataBase, 'Partitions', partition);
+      }
+    }
   }
 
   public async createWindow(): Promise<void> {
@@ -147,17 +168,34 @@ export class GjsGtk4Window implements IWindowProvider {
     });
 
     try {
-      this._webContext = new _WebKit.WebContext() as WebKit.WebContext;
+      if (this._userDataPath && !this._isTempSession) {
+        // persist: partition — dedicated data directory
+        const dataManager = new (_WebKit.WebsiteDataManager as any)({
+          base_data_directory: this._userDataPath,
+          base_cache_directory: path.join(this._userDataPath, 'cache'),
+        });
+        this._webContext = new (_WebKit.WebContext as any)({ website_data_manager: dataManager });
+      } else if (this._isTempSession) {
+        // temp: partition — ephemeral (in-memory) session
+        try {
+          const dataManager = new (_WebKit.WebsiteDataManager as any)({ is_ephemeral: true });
+          this._webContext = new (_WebKit.WebContext as any)({ website_data_manager: dataManager });
+        } catch {
+          this._webContext = new _WebKit.WebContext();
+        }
+      } else {
+        this._webContext = new _WebKit.WebContext();
+      }
     } catch {
       this._webContext = _WebKit.WebContext.get_default() as WebKit.WebContext;
     }
 
-    this._webContext.register_uri_scheme('nww', (req: WebKit.URISchemeRequest) => {
+    this._webContext!.register_uri_scheme('nww', (req: WebKit.URISchemeRequest) => {
       handleNwwScheme(req);
     });
 
     for (const [scheme] of protocol.getRegisteredSchemes()) {
-      this._webContext.register_uri_scheme(scheme, (req: WebKit.URISchemeRequest) => {
+      this._webContext!.register_uri_scheme(scheme, (req: WebKit.URISchemeRequest) => {
         void handleUriScheme(scheme, req);
       });
     }
@@ -335,6 +373,22 @@ export class GjsGtk4Window implements IWindowProvider {
         } catch { /* best-effort */ }
       });
     } catch { /* best-effort */ }
+
+    if (this.options.autoHideMenuBar) {
+      try {
+        const keyCtrl = new _Gtk.EventControllerKey() as Gtk.EventControllerKey;
+        keyCtrl.connect('key-pressed', (_ctrl: any, keyval: number, _keycode: number, state: number) => {
+          // Gdk.ModifierType.MOD1_MASK = Alt, keyval 65513=LeftAlt, 65514=RightAlt
+          const isAltAlone = (keyval === 65513 || keyval === 65514) && (state & 0x8) === 0;
+          if (isAltAlone && this._menuBar) {
+            const visible = this._menuBar.get_visible();
+            this._menuBar.set_visible(!visible);
+          }
+          return false;
+        });
+        this.win!.add_controller(keyCtrl);
+      } catch { /* best-effort */ }
+    }
   }
 
   /** Connect WebView signals: navigation events and title updates. Perform initial navigation. */
@@ -466,6 +520,9 @@ export class GjsGtk4Window implements IWindowProvider {
     this._cleanup();
     if (this.win) {
       try { this.win.destroy(); } catch { /* ignore */ }
+    }
+    if (this._isTempSession && this._userDataPath) {
+      try { fs.rmSync(this._userDataPath, { recursive: true, force: true }); } catch { /* best-effort */ }
     }
   }
 
@@ -690,13 +747,61 @@ export class GjsGtk4Window implements IWindowProvider {
     try {
       this._menuBar = new _Gtk.PopoverMenuBar({ menu_model: gioMenu }) as Gtk.PopoverMenuBar;
       this._contentBox.prepend(this._menuBar);
+      // autoHideMenuBar: initially hide; Alt key toggles visibility
+      if (this.options.autoHideMenuBar) {
+        this._menuBar.set_visible(false);
+      }
     } catch (e) {
       console.error('[gjs-gtk4] Failed to create PopoverMenuBar:', e);
     }
   }
 
-  public popupMenu(_items: MenuItemOptions[], _x?: number, _y?: number): void {
-    console.warn('[gjs-gtk4] popupMenu: not yet implemented on GTK4');
+  public popupMenu(items: MenuItemOptions[], x?: number, y?: number): void {
+    if (!this.win || !items || items.length === 0) return;
+    try {
+      const actions: Array<{ name: string; action: Gio.SimpleAction }> = [];
+      const gioMenu = buildGioMenu(items, _Gio, actions, (role) => this._roleAction(role), 'popup');
+
+      // Register actions temporarily on the window
+      const tempNames: string[] = [];
+      for (const { name, action } of actions) {
+        this.win.add_action(action);
+        tempNames.push(name);
+      }
+
+      const popover = new _Gtk.PopoverMenu({ menu_model: gioMenu }) as Gtk.PopoverMenu;
+      popover.set_parent(this.win);
+      popover.set_has_arrow(false);
+
+      if (x !== undefined && y !== undefined) {
+        // x/y are screen coordinates; translate to window-relative best-effort
+        try {
+          const surface = this.win.get_surface?.();
+          // On X11 we can compute window origin; on Wayland we just use as-is
+          let wx = x, wy = y;
+          if (surface && (surface as any).get_origin) {
+            let ox = 0, oy = 0;
+            try { (surface as any).get_origin(ox, oy); wx = x - ox; wy = y - oy; } catch { /* ignore */ }
+          }
+          const rect = new _Gdk.Rectangle() as Gdk.Rectangle;
+          rect.x = Math.round(wx); rect.y = Math.round(wy);
+          rect.width = 1; rect.height = 1;
+          popover.set_pointing_to(rect);
+        } catch { /* positioning is best-effort */ }
+      }
+
+      // Clean up actions and popover when dismissed
+      popover.connect('closed', () => {
+        try {
+          for (const name of tempNames) this.win!.remove_action(name);
+        } catch { /* ignore */ }
+        try { popover.unparent(); } catch { /* ignore */ }
+      });
+
+      popover.popup();
+    } catch (e) {
+      console.warn('[gjs-gtk4] popupMenu failed:', e);
+    }
   }
 
   private _roleAction(role: string): (() => void) | undefined {
@@ -847,7 +952,26 @@ export class GjsGtk4Window implements IWindowProvider {
   // ── Dialogs & capture ──────────────────────────────────────────────────────
 
   public async capturePage(): Promise<NativeImage> {
-    return new NativeImage(Buffer.alloc(0));
+    if (!this.webView) return new NativeImage(Buffer.alloc(0));
+    return new Promise<NativeImage>((resolve) => {
+      try {
+        const tmpPath = path.join(os.tmpdir(), `nww-snap-${Date.now()}.png`);
+        // WebKitGTK snapshot: region=FULL_DOCUMENT(1), options=NONE(0)
+        (this.webView as any).get_snapshot(1, 0, null, (source: any, result: any) => {
+          try {
+            const surface = source.get_snapshot_finish(result);
+            surface.writeToPNG(tmpPath);
+            const buf = fs.readFileSync(tmpPath);
+            try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+            resolve(new NativeImage(buf));
+          } catch {
+            resolve(new NativeImage(Buffer.alloc(0)));
+          }
+        });
+      } catch {
+        resolve(new NativeImage(Buffer.alloc(0)));
+      }
+    });
   }
 
   public showOpenDialog(options: OpenDialogOptions): Promise<string[] | undefined> {

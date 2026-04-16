@@ -57,6 +57,7 @@ export interface BrowserWindowOptions {
   alwaysOnTop?: boolean;
   skipTaskbar?: boolean;
   kiosk?: boolean;
+  autoHideMenuBar?: boolean;
   /** Absolute or relative path to the window icon image (PNG or JPG). */
   icon?: string;
   /** Backend to use for this window. Defaults to the app-level backend or platform default. */
@@ -245,6 +246,8 @@ export interface IWindowProvider {
   onShow?: () => void;
   /** Called when the window becomes hidden (hide()). */
   onHide?: () => void;
+  /** Called when the window is moved. x and y are screen coordinates in logical pixels. */
+  onMove?: (x: number, y: number) => void;
 
   // ── Methods required by all backends ──────────────────────────────────────
   sendToRenderer(channel: string, ...args: unknown[]): void;

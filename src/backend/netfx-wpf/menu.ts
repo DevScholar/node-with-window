@@ -28,6 +28,9 @@ interface WindowRef {
   executeJavaScript?(code: string): Promise<unknown>;
   isFullScreen(): boolean;
   setFullScreen(flag: boolean): void;
+  options?: { autoHideMenuBar?: boolean };
+  _autoHideMenuBarRegistered?: boolean;
+  _wpfMenuBar?: DotNetObject;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +204,33 @@ export function buildWpfMenu(window: WindowRef): void {
   panel.Children.Add(menuBar);
   panel.Children.Add(window.webView);
   window.browserWindow.Content = panel;
+
+  // autoHideMenuBar: initially collapse the menu bar; Alt key toggles visibility.
+  // Register the PreviewKeyDown handler only once per window (even if setMenu is called again).
+  window._wpfMenuBar = menuBar;
+  if (window.options?.autoHideMenuBar) {
+    menuBar.Visibility = 2; // Visibility.Collapsed
+    if (!window._autoHideMenuBarRegistered) {
+      window._autoHideMenuBarRegistered = true;
+      window.browserWindow.add_PreviewKeyDown((_s: unknown, e: DotNetObject) => {
+        try {
+          // Bare Alt fires as Key.System (156) with SystemKey = LeftAlt(119) or RightAlt(120)
+          const keyVal = e.Key as number;
+          if (keyVal === 156) {
+            const sysKey = e.SystemKey as number;
+            if (sysKey === 119 || sysKey === 120) {
+              const mb = window._wpfMenuBar;
+              if (mb) {
+                const vis = mb.Visibility as number;
+                mb.Visibility = vis === 0 ? 2 : 0; // toggle Visible(0) ↔ Collapsed(2)
+              }
+              e.Handled = true; // suppress default WPF Alt-focus on menu
+            }
+          }
+        } catch { /* best-effort */ }
+      });
+    }
+  }
 
   // Cleanup menu callbacks when window closes
   const originalOnClosed = window.onClosed;

@@ -105,6 +105,7 @@ export class BrowserWindow extends EventEmitter {
     this.provider.onLeaveFullScreen = () => this.emit('leave-full-screen');
     this.provider.onShow = () => this.emit('show');
     this.provider.onHide = () => this.emit('hide');
+    this.provider.onMove = (x, y) => this.emit('move', x, y);
 
     this.webContents = new WebContents({
       sendToRenderer: (channel, ...args) => {

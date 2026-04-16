@@ -90,6 +90,8 @@ export class NetFxWpfWindow implements IWindowProvider {
   public userDataPath: string;
   private _isTempSession = false;
   public pendingMenu: MenuItemOptions[] | null = null;
+  public _autoHideMenuBarRegistered = false;
+  public _wpfMenuBar: import('./dotnet/types.js').DotNetObject | undefined = undefined;
   /** Registered by BrowserWindow; called when the WPF window is closed externally. */
   public onClosed?: () => void;
   /** Registered by BrowserWindow; called when the user requests close (X button). Return true to cancel. */
@@ -110,6 +112,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   public onLeaveFullScreen?: () => void;
   public onShow?: () => void;
   public onHide?: () => void;
+  public onMove?: (x: number, y: number) => void;
   private isClosed = false;
   private _isVisible = false;
   private _isFullScreen = false;
@@ -419,6 +422,12 @@ export class NetFxWpfWindow implements IWindowProvider {
         const w = Math.round(e.NewSize.Width as number);
         const h = Math.round(e.NewSize.Height as number);
         this.onResize?.(w, h);
+      } catch { /* best-effort */ }
+    });
+    (this.browserWindow as DotNetObject).add_LocationChanged((_s: unknown, _e: unknown) => {
+      try {
+        const win = this.browserWindow as unknown as { Left: number; Top: number };
+        this.onMove?.(Math.round(win.Left), Math.round(win.Top));
       } catch { /* best-effort */ }
     });
     (this.browserWindow as DotNetObject).add_StateChanged((_s: unknown, _e: unknown) => {
