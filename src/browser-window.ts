@@ -65,6 +65,8 @@ export class BrowserWindow extends EventEmitter {
   private _isCreated = false;
   /** True once setMenu() has been called explicitly on this window. */
   private _menuSet = false;
+  /** Unsubscribe handle for the current menu's change listener. */
+  private _menuUnsub: (() => void) | null = null;
   private _createdPromise: Promise<void>;
 
   /** Electron-compatible webContents object. */
@@ -192,6 +194,9 @@ export class BrowserWindow extends EventEmitter {
     BrowserWindow._allWindows.delete(this._id);
     if (BrowserWindow._focusedId === this._id) BrowserWindow._focusedId = null;
 
+    this._menuUnsub?.();
+    this._menuUnsub = null;
+
     this.emit('closed');
 
     if (BrowserWindow._allWindows.size === 0) {
@@ -309,6 +314,14 @@ export class BrowserWindow extends EventEmitter {
       } else {
         this.provider.setMenu(resolved);
       }
+      // Subscribe to live updates from the application Menu instance (if any).
+      const appMenu = Menu.getApplicationMenu();
+      if (appMenu) {
+        this._menuUnsub?.();
+        this._menuUnsub = appMenu._subscribe(() => {
+          if (!this._menuSet) this.provider.setMenu(appMenu.items());
+        });
+      }
     }
     this.provider.show();
   }
@@ -325,12 +338,20 @@ export class BrowserWindow extends EventEmitter {
 
   public setMenu(menu: MenuItemOptions[] | Menu): void {
     this._menuSet = true;
-    const items: MenuItemOptions[] = Array.isArray(menu) ? menu : (menu as Menu).items();
-    this.provider.setMenu(items);
+    this._menuUnsub?.();
+    this._menuUnsub = null;
+    if (menu instanceof Menu) {
+      this.provider.setMenu(menu.items());
+      this._menuUnsub = menu._subscribe(() => this.provider.setMenu(menu.items()));
+    } else {
+      this.provider.setMenu(menu);
+    }
   }
 
   public removeMenu(): void {
     this._menuSet = true;
+    this._menuUnsub?.();
+    this._menuUnsub = null;
     this.provider.setMenu([]);
   }
 
@@ -505,4 +526,29 @@ export class BrowserWindow extends EventEmitter {
   public capturePage(): Promise<NativeImage> {
     return this.provider.capturePage();
   }
+
+  /**
+   * Called by Menu._appMenuUpdater when the application menu is replaced or
+   * one of its items changes. Updates this window's native menu if the window
+   * has not had an explicit per-window setMenu() call.
+   * @internal
+   */
+  _onApplicationMenuChanged(menu: Menu): void {
+    if (this._menuSet || !this._isCreated) return;
+    this._menuUnsub?.();
+    this._menuUnsub = menu._subscribe(() => {
+      if (!this._menuSet) this.provider.setMenu(menu.items());
+    });
+    this.provider.setMenu(menu.items());
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Inject the application-menu updater into Menu to break the circular import
+// (menu.ts cannot import browser-window.ts).
+// ---------------------------------------------------------------------------
+Menu._appMenuUpdater = (menu: Menu) => {
+  for (const win of BrowserWindow.getAllWindows()) {
+    win._onApplicationMenuChanged(menu);
+  }
+};

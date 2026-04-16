@@ -76,6 +76,8 @@ export interface BrowserWindowOptions {
  * MenuItemOptions - Configuration for a menu item
  */
 export interface MenuItemOptions {
+  /** Unique identifier for this item. Used with `Menu.getMenuItemById()`. */
+  id?: string;
   label?: string;
   type?: 'normal' | 'separator' | 'submenu' | 'checkbox' | 'radio';
   enabled?: boolean;
