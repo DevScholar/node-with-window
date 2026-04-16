@@ -16,6 +16,11 @@ function spawnToPromise(cmd: string, args: string[]): Promise<void> {
 
 export const shell = {
   openExternal(url: string): Promise<void> {
+    try {
+      new URL(url);
+    } catch {
+      return Promise.reject(new Error(`shell.openExternal: invalid URL: ${url}`));
+    }
     if (process.platform === 'win32') {
       return spawnToPromise('cmd', ['/c', 'start', '', url]);
     } else if (process.platform === 'darwin') {
@@ -94,7 +99,7 @@ export const shell = {
         // Linux / macOS: use gio trash or AppleScript.
         const [cmd, args] =
           process.platform === 'darwin'
-            ? ['osascript', ['-e', `tell application "Finder" to delete POSIX file "${filePath}"`]]
+            ? ['osascript', ['-e', `tell application "Finder" to delete POSIX file "${filePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`]]
             : ['gio', ['trash', filePath]];
 
         const proc = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'pipe'] });

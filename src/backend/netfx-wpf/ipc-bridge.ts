@@ -66,7 +66,7 @@ export class WpfIpcBridge {
             '})();';
         }
       } catch (e) {
-        console.error('[node-with-window] Failed to load preload script:', e);
+        console.error(`[node-with-window] Failed to load preload script "${absPreload}":`, e);
       }
     }
 

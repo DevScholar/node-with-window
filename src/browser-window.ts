@@ -171,9 +171,13 @@ export class BrowserWindow extends EventEmitter {
     const event = { preventDefault: () => { prevented = true; } };
     const listeners = this.rawListeners('close');
     for (const listener of listeners) {
-      const result = (listener as (event: { preventDefault: () => void }) => unknown)(event);
-      if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
-        await (result as Promise<unknown>);
+      try {
+        const result = (listener as (event: { preventDefault: () => void }) => unknown)(event);
+        if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+          await (result as Promise<unknown>);
+        }
+      } catch (e) {
+        console.error('[node-with-window] close listener error:', e);
       }
     }
     return prevented;

@@ -228,7 +228,7 @@ export class GjsGtk4Window implements IWindowProvider {
             '})();';
         }
       } catch (e) {
-        console.error('[gjs-gtk4] Failed to load preload script:', e);
+        console.error(`[gjs-gtk4] Failed to load preload script "${absPreload}":`, e);
       }
     }
 

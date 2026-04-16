@@ -188,7 +188,9 @@ class App extends EventEmitter {
         const windows = BrowserWindow.getAllWindows();
         if (windows.length > 0) windows[0].focus();
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.warn('[node-with-window] app.focus() failed:', err);
+      });
   }
 
   /**
