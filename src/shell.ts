@@ -2,24 +2,48 @@ import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+function spawnToPromise(cmd: string, args: string[]): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const proc = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+    proc.on('error', reject);
+    proc.on('close', (code: number | null) => {
+      if (code === 0 || code === null) resolve();
+      else reject(new Error(`${cmd} exited with code ${code}`));
+    });
+    proc.unref();
+  });
+}
+
 export const shell = {
-  openExternal(url: string): void {
+  openExternal(url: string): Promise<void> {
     if (process.platform === 'win32') {
-      spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' }).unref();
+      return spawnToPromise('cmd', ['/c', 'start', '', url]);
     } else if (process.platform === 'darwin') {
-      spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
+      return spawnToPromise('open', [url]);
     } else {
-      spawn('xdg-open', [url], { detached: true, stdio: 'ignore' }).unref();
+      return spawnToPromise('xdg-open', [url]);
     }
   },
 
-  openPath(filePath: string): void {
+  openPath(filePath: string): Promise<string> {
+    const run = (cmd: string, args: string[]): Promise<string> =>
+      new Promise<string>((resolve) => {
+        let stderr = '';
+        const proc = spawn(cmd, args, { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+        proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+        proc.on('error', (err: Error) => resolve(err.message));
+        proc.on('close', (code: number | null) => {
+          resolve(code === 0 || code === null ? '' : stderr.trim() || `exit code ${code}`);
+        });
+        proc.unref();
+      });
+
     if (process.platform === 'win32') {
-      spawn('explorer', [filePath], { detached: true, stdio: 'ignore' }).unref();
+      return run('explorer', [filePath]);
     } else if (process.platform === 'darwin') {
-      spawn('open', [filePath], { detached: true, stdio: 'ignore' }).unref();
+      return run('open', [filePath]);
     } else {
-      spawn('xdg-open', [filePath], { detached: true, stdio: 'ignore' }).unref();
+      return run('xdg-open', [filePath]);
     }
   },
 

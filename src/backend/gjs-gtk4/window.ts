@@ -987,7 +987,9 @@ export class GjsGtk4Window implements IWindowProvider {
     title?: string;
     message: string;
     buttons?: string[];
-  }): Promise<number> {
+    checkboxLabel?: string;
+    checkboxChecked?: boolean;
+  }): Promise<{ response: number; checkboxChecked: boolean }> {
     return showMessageBox(this.win, options);
   }
 }

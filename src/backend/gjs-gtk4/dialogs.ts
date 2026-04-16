@@ -93,15 +93,65 @@ export async function showSaveDialog(win: Gtk.ApplicationWindow | null, options:
 
 export async function showMessageBox(
   win: Gtk.ApplicationWindow | null,
-  options: { type?: string; title?: string; message: string; buttons?: string[] },
-): Promise<number> {
-  if (!win) return 0;
+  options: { type?: string; title?: string; message: string; buttons?: string[]; checkboxLabel?: string; checkboxChecked?: boolean },
+): Promise<{ response: number; checkboxChecked: boolean }> {
+  if (!win) return { response: 0, checkboxChecked: false };
 
   const buttons = options.buttons || ['OK'];
 
+  // When a checkbox is needed, always use Gtk.Dialog with custom content.
+  if (options.checkboxLabel) {
+    return new Promise<{ response: number; checkboxChecked: boolean }>((resolve) => {
+      try {
+        const dialog = new _Gtk.Dialog({
+          title: options.title || options.message,
+          transient_for: win,
+          modal: true,
+        } as unknown as Gtk.Dialog.ConstructorProps) as Gtk.Dialog;
+
+        const contentArea = (dialog as unknown as { get_content_area: () => Gtk.Box }).get_content_area();
+
+        const label = new _Gtk.Label({ label: options.message }) as Gtk.Label;
+        (label as unknown as { margin_start: number }).margin_start = 12;
+        (label as unknown as { margin_end: number }).margin_end = 12;
+        (label as unknown as { margin_top: number }).margin_top = 12;
+        (label as unknown as { margin_bottom: number }).margin_bottom = 8;
+        (label as unknown as { xalign: number }).xalign = 0;
+        (contentArea as unknown as { append: (w: unknown) => void }).append(label);
+
+        const checkbox = new _Gtk.CheckButton({
+          label: options.checkboxLabel,
+          active: options.checkboxChecked ?? false,
+        } as unknown as Gtk.CheckButton.ConstructorProps) as Gtk.CheckButton;
+        (checkbox as unknown as { margin_start: number }).margin_start = 12;
+        (checkbox as unknown as { margin_end: number }).margin_end = 12;
+        (checkbox as unknown as { margin_bottom: number }).margin_bottom = 12;
+        (contentArea as unknown as { append: (w: unknown) => void }).append(checkbox);
+
+        for (let i = 0; i < buttons.length; i++) {
+          (dialog as unknown as { add_button: (label: string, id: number) => void }).add_button(buttons[i], i);
+        }
+
+        (dialog as unknown as { connect: (sig: string, cb: (d: Gtk.Dialog, r: number) => void) => void })
+          .connect('response', (d: Gtk.Dialog, response: number) => {
+            const result = response >= 0 ? response : 0;
+            const checked = (checkbox as unknown as { active: boolean }).active;
+            (d as unknown as { close: () => void }).close();
+            resolve({ response: result, checkboxChecked: checked });
+          });
+
+        (dialog as unknown as { present: () => void }).present();
+      } catch (e) {
+        console.warn('[gjs-gtk4] showMessageBox (checkbox) failed:', e);
+        resolve({ response: 0, checkboxChecked: false });
+      }
+    });
+  }
+
+  // No checkbox — use AlertDialog (GTK ≥ 4.10) or MessageDialog fallback.
   if (_Gtk.AlertDialog) {
     try {
-      return await new Promise<number>((resolve) => {
+      const response = await new Promise<number>((resolve) => {
         const dialog = new _Gtk.AlertDialog({
           message: options.title || options.message,
           detail: options.title ? options.message : '',
@@ -120,12 +170,13 @@ export async function showMessageBox(
           resolve(result);
         }) as unknown as (...args: unknown[]) => void);
       });
+      return { response, checkboxChecked: false };
     } catch (e) {
       console.warn('[gjs-gtk4] AlertDialog failed, falling back to MessageDialog:', e);
     }
   }
 
-  return new Promise<number>((resolve) => {
+  const response = await new Promise<number>((resolve) => {
     try {
       const typeMap: Record<string, number> = {
         none:     0,
@@ -147,8 +198,8 @@ export async function showMessageBox(
         dialog.add_button(buttons[i], i);
       }
 
-      dialog.connect('response', (_d: Gtk.MessageDialog, response: number) => {
-        const result = response >= 0 ? response : 0;
+      dialog.connect('response', (_d: Gtk.MessageDialog, r: number) => {
+        const result = r >= 0 ? r : 0;
         _d.close();
         resolve(result);
       });
@@ -159,4 +210,5 @@ export async function showMessageBox(
       resolve(0);
     }
   });
+  return { response, checkboxChecked: false };
 }

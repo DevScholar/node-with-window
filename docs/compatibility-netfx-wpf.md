@@ -252,7 +252,7 @@ All methods are exposed as Promises but execute synchronously underneath (blocki
 |---|---|---|
 | `dialog.showOpenDialog([win,] options)` | ✅ | Returns `Promise<{ canceled, filePaths }>` |
 | `dialog.showSaveDialog([win,] options)` | ✅ | Returns `Promise<{ canceled, filePath }>` |
-| `dialog.showMessageBox([win,] options)` | ✅ | Returns `Promise<{ response }>`; `buttons` array supported |
+| `dialog.showMessageBox([win,] options)` | ✅ | Returns `Promise<{ response, checkboxChecked }>`; `buttons` array supported; `checkboxLabel` option supported — renders a custom WPF `Window` with a `CheckBox` (compiled once via `addType()`); `checkboxChecked` reflects user selection |
 | `dialog.showErrorBox(title, content)` | ✅ | |
 | `dialog.showOpenDialogSync([win,] options)` | ✅ | Returns `string[] \| undefined` |
 | `dialog.showSaveDialogSync([win,] options)` | ✅ | Returns `string \| undefined` |
@@ -265,11 +265,11 @@ All methods are exposed as Promises but execute synchronously underneath (blocki
 
 | API | Status | Notes |
 |---|---|---|
-| `shell.openExternal(url)` | ✅ | `cmd /c start` |
-| `shell.openPath(filePath)` | ✅ | `explorer` |
-| `shell.showItemInFolder(filePath)` | ✅ | `explorer /select,` |
+| `shell.openExternal(url)` | ✅ | `cmd /c start`; returns `Promise<void>` |
+| `shell.openPath(filePath)` | ✅ | `explorer`; returns `Promise<string>` (empty string on success, error message on failure) |
+| `shell.showItemInFolder(filePath)` | ✅ | `explorer /select,`; returns `void` |
 | `shell.beep()` | ✅ | Writes `\x07` to stdout |
-| `shell.trashItem(path)` | ✅ | `SHFileOperation` (shell32) with `FOF_ALLOWUNDO` — sends to Recycle Bin |
+| `shell.trashItem(path)` | ✅ | `SHFileOperation` (shell32) with `FOF_ALLOWUNDO` — sends to Recycle Bin; returns `Promise<void>` |
 | `shell.readShortcutLink()` | ❌ | Not implemented |
 | `shell.writeShortcutLink()` | ❌ | Not implemented |
 
@@ -297,15 +297,16 @@ All methods are exposed as Promises but execute synchronously underneath (blocki
 | API | Status | Notes |
 |---|---|---|
 | `nativeImage.createEmpty()` | ✅ | |
-| `nativeImage.createFromBuffer(buffer)` | ✅ | Expects PNG bytes |
-| `nativeImage.createFromPath(path)` | ❌ | Not implemented |
-| `nativeImage.createFromDataURL(url)` | ❌ | Not implemented |
-| `image.toPNG()` | ✅ | Returns `Buffer` |
-| `image.toDataURL()` | ✅ | Returns `data:image/png;base64,...` |
-| `image.toJPEG(quality)` | ❌ | Not implemented (no native JPEG encoder) |
+| `nativeImage.createFromBuffer(buffer)` | ✅ | Accepts PNG, JPEG, GIF, WebP or any raw image bytes |
+| `nativeImage.createFromPath(path)` | ✅ | `fs.readFileSync`; returns empty image on error |
+| `nativeImage.createFromDataURL(url)` | ✅ | Parses any `data:<mime>;base64,...` URL |
+| `image.toPNG()` | ✅ | Returns the raw stored bytes (PNG if loaded as PNG) |
+| `image.toDataURL()` | ✅ | MIME type auto-detected from magic bytes (PNG/JPEG/GIF/WebP) |
+| `image.toJPEG(quality)` | ✅ | `System.Drawing.Bitmap` + `JpegBitmapEncoder`; compiled once via `addType()` |
 | `image.isEmpty()` | ✅ | |
-| `image.getSize()` | ✅ | Reads PNG IHDR chunk |
-| `image.resize()` / `image.crop()` | ❌ | Not implemented |
+| `image.getSize()` | ✅ | PNG IHDR chunk or JPEG SOF marker scan |
+| `image.resize(options)` | ✅ | `System.Drawing.Graphics.DrawImage` with `HighQualityBicubic`; returns PNG |
+| `image.crop(rect)` | ✅ | `Bitmap.Clone(Rectangle, PixelFormat)`; returns PNG |
 
 ---
 

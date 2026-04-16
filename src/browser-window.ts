@@ -355,7 +355,9 @@ export class BrowserWindow extends EventEmitter {
     title?: string;
     message: string;
     buttons?: string[];
-  }): Promise<number> {
+    checkboxLabel?: string;
+    checkboxChecked?: boolean;
+  }): Promise<{ response: number; checkboxChecked: boolean }> {
     return this.provider.showMessageBox(options);
   }
 

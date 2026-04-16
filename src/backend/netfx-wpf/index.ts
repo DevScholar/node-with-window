@@ -7,7 +7,9 @@ import {
   setDotNetInstance as setDialogDotNetInstance,
 } from './dialogs.js';
 import { setMenu, buildWpfMenu, setDotNetInstance as setMenuDotNetInstance } from './menu.js';
+import { wpfImageOps, setDotNetInstance as setImageOpsDotNetInstance } from './image-ops.js';
 import { registerBackend } from '../../backends.js';
+import { registerImageOps } from '../../native-image.js';
 import type { BrowserWindowOptions } from '../../interfaces.js';
 import type { DotnetProxy } from './dotnet/types.js';
 
@@ -29,6 +31,8 @@ export function setDotNetInstance(instance: DotnetProxy): void {
   setWindowDotNetInstance(instance);
   setDialogDotNetInstance(instance);
   setMenuDotNetInstance(instance);
+  setImageOpsDotNetInstance(instance);
+  registerImageOps(wpfImageOps);
 }
 
 export function getDotNetInstance(): DotnetProxy | null {

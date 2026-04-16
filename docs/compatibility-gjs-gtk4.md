@@ -247,7 +247,7 @@ All methods execute synchronously underneath (`Gtk.FileDialog` async callbacks d
 |---|---|---|
 | `dialog.showOpenDialog([win,] options)` | ✅ | `Gtk.FileDialog`; returns `Promise<{ canceled, filePaths }>` |
 | `dialog.showSaveDialog([win,] options)` | ✅ | `Gtk.FileDialog`; returns `Promise<{ canceled, filePath }>` |
-| `dialog.showMessageBox([win,] options)` | ✅ | `Gtk.AlertDialog` (GTK ≥ 4.10) or `Gtk.MessageDialog` fallback; returns `Promise<{ response }>` |
+| `dialog.showMessageBox([win,] options)` | ✅ | `checkboxLabel` option supported — uses `Gtk.Dialog` + `Gtk.CheckButton`; without checkbox uses `Gtk.AlertDialog` (GTK ≥ 4.10) or `Gtk.MessageDialog` fallback; returns `Promise<{ response, checkboxChecked }>` |
 | `dialog.showOpenDialogSync([win,] options)` | ✅ | Returns `string[] \| undefined` |
 | `dialog.showSaveDialogSync([win,] options)` | ✅ | Returns `string \| undefined` |
 | `dialog.showMessageBoxSync([win,] options)` | ✅ | Returns `number` |
@@ -260,11 +260,11 @@ All methods execute synchronously underneath (`Gtk.FileDialog` async callbacks d
 
 | API | Status | Notes |
 |---|---|---|
-| `shell.openExternal(url)` | ✅ | `xdg-open` |
-| `shell.openPath(filePath)` | ✅ | `xdg-open` |
-| `shell.showItemInFolder(filePath)` | ✅ | `xdg-open` on parent directory |
+| `shell.openExternal(url)` | ✅ | `xdg-open`; returns `Promise<void>` |
+| `shell.openPath(filePath)` | ✅ | `xdg-open`; returns `Promise<string>` (empty string on success, error message on failure) |
+| `shell.showItemInFolder(filePath)` | ✅ | `xdg-open` on parent directory; returns `void` |
 | `shell.beep()` | ✅ | Writes `\x07` to stdout |
-| `shell.trashItem(path)` | ✅ | `gio trash` |
+| `shell.trashItem(path)` | ✅ | `gio trash`; returns `Promise<void>` |
 
 ---
 
@@ -290,15 +290,16 @@ All methods execute synchronously underneath (`Gtk.FileDialog` async callbacks d
 | API | Status | Notes |
 |---|---|---|
 | `nativeImage.createEmpty()` | ✅ | |
-| `nativeImage.createFromBuffer(buffer)` | ✅ | Expects PNG bytes |
-| `nativeImage.createFromPath(path)` | ❌ | Not implemented |
-| `nativeImage.createFromDataURL(url)` | ❌ | Not implemented |
-| `image.toPNG()` | ✅ | Returns `Buffer` |
-| `image.toDataURL()` | ✅ | Returns `data:image/png;base64,...` |
-| `image.toJPEG(quality)` | ❌ | Not implemented |
+| `nativeImage.createFromBuffer(buffer)` | ✅ | Accepts PNG, JPEG, GIF, WebP or any raw image bytes |
+| `nativeImage.createFromPath(path)` | ✅ | `fs.readFileSync`; returns empty image on error |
+| `nativeImage.createFromDataURL(url)` | ✅ | Parses any `data:<mime>;base64,...` URL |
+| `image.toPNG()` | ✅ | Returns the raw stored bytes (PNG if loaded as PNG) |
+| `image.toDataURL()` | ✅ | MIME type auto-detected from magic bytes (PNG/JPEG/GIF/WebP) |
+| `image.toJPEG(quality)` | ✅ | `GdkPixbuf.PixbufLoader` + `save_to_bufferv('jpeg', ...)` |
 | `image.isEmpty()` | ✅ | |
-| `image.getSize()` | ✅ | Reads PNG IHDR chunk |
-| `image.resize()` / `image.crop()` | ❌ | Not implemented |
+| `image.getSize()` | ✅ | PNG IHDR chunk or JPEG SOF marker scan |
+| `image.resize(options)` | ✅ | `Pixbuf.scale_simple(w, h, BILINEAR)`; returns PNG |
+| `image.crop(rect)` | ✅ | `Pixbuf.new_subpixbuf(x, y, w, h)`; returns PNG |
 
 ---
 

@@ -7,6 +7,87 @@ export function setDotNetInstance(instance: DotnetProxy): void {
   dotnet = instance;
 }
 
+// ---------------------------------------------------------------------------
+// C# custom dialog (checkbox support)
+// Compiled once via addType() on first use.
+// ---------------------------------------------------------------------------
+
+const CHECKBOX_DIALOG_SOURCE = `
+using System;
+using System.Windows;
+using System.Windows.Controls;
+public static class NwwCheckboxDialog {
+    public static int[] Show(string title, string message, string[] buttons, string checkboxLabel, bool checkboxChecked) {
+        int[] result = new int[] { 0, 0 };
+        Application.Current.Dispatcher.Invoke(new System.Action(() => {
+            Window window = new Window();
+            window.Title = title;
+            window.SizeToContent = SizeToContent.WidthAndHeight;
+            window.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            window.ResizeMode = ResizeMode.NoResize;
+            window.MinWidth = 320;
+
+            StackPanel root = new StackPanel();
+            root.Margin = new Thickness(20);
+
+            TextBlock msgBlock = new TextBlock();
+            msgBlock.Text = message;
+            msgBlock.TextWrapping = TextWrapping.Wrap;
+            msgBlock.MaxWidth = 400;
+            msgBlock.Margin = new Thickness(0, 0, 0, 12);
+            root.Children.Add(msgBlock);
+
+            CheckBox cb = new CheckBox();
+            cb.Content = checkboxLabel;
+            cb.IsChecked = checkboxChecked;
+            cb.Margin = new Thickness(0, 0, 0, 12);
+            root.Children.Add(cb);
+
+            StackPanel btnPanel = new StackPanel();
+            btnPanel.Orientation = Orientation.Horizontal;
+            btnPanel.HorizontalAlignment = HorizontalAlignment.Right;
+
+            for (int i = 0; i < buttons.Length; i++) {
+                Button btn = new Button();
+                btn.Content = buttons[i];
+                btn.MinWidth = 75;
+                btn.Padding = new Thickness(10, 5, 10, 5);
+                btn.Margin = new Thickness(5, 0, 0, 0);
+                int idx = i;
+                btn.Click += (s, e) => {
+                    result[0] = idx;
+                    result[1] = (cb.IsChecked == true) ? 1 : 0;
+                    window.DialogResult = true;
+                };
+                btnPanel.Children.Add(btn);
+            }
+
+            root.Children.Add(btnPanel);
+            window.Content = root;
+            window.ShowDialog();
+        }));
+        return result;
+    }
+}`;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _checkboxDialogType: any = null;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getCheckboxDialogType(): any {
+  if (_checkboxDialogType) return _checkboxDialogType;
+  _checkboxDialogType = (dotnet as unknown as {
+    addType: (source: string, refs: string[]) => { NwwCheckboxDialog: unknown };
+  }).addType(CHECKBOX_DIALOG_SOURCE, [
+    'PresentationFramework',
+    'PresentationCore',
+    'WindowsBase',
+  ]).NwwCheckboxDialog;
+  return _checkboxDialogType;
+}
+
+// ---------------------------------------------------------------------------
+
 export function showOpenDialog(options: OpenDialogOptions): Promise<string[] | undefined> {
   try {
     const dotnetNs = dotnet as DotnetProxy & Record<string, DotNetObject>;
@@ -71,8 +152,28 @@ export function showMessageBox(options: {
   title?: string;
   message: string;
   buttons?: string[];
-}): Promise<number> {
+  checkboxLabel?: string;
+  checkboxChecked?: boolean;
+}): Promise<{ response: number; checkboxChecked: boolean }> {
   try {
+    const buttons = options.buttons && options.buttons.length > 0 ? options.buttons : ['OK'];
+
+    // Use custom WPF Window when a checkbox label is requested.
+    if (options.checkboxLabel) {
+      const dlgType = getCheckboxDialogType();
+      const raw: unknown = (dlgType as { Show: (...args: unknown[]) => unknown }).Show(
+        options.title || 'Message',
+        options.message,
+        buttons,
+        options.checkboxLabel,
+        options.checkboxChecked ?? false,
+      );
+      // raw is int[] from C#: [buttonIndex, checkboxState]
+      const arr = raw as number[];
+      return Promise.resolve({ response: arr[0] ?? 0, checkboxChecked: arr[1] === 1 });
+    }
+
+    // No checkbox — use the lightweight Win32 MessageBox.
     const System = dotnet.System;
     const Windows = System.Windows;
 
@@ -111,9 +212,9 @@ export function showMessageBox(options: {
     if (result === 6) response = 0;
     else if (result === 7) response = 1;
     else if (result === 2) response = options.buttons && options.buttons.length > 2 ? 2 : 1;
-    return Promise.resolve(response);
+    return Promise.resolve({ response, checkboxChecked: false });
   } catch (e) {
     console.error('[node-with-window] MessageBox error:', e);
-    return Promise.resolve(0);
+    return Promise.resolve({ response: 0, checkboxChecked: false });
   }
 }

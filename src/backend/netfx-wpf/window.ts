@@ -870,7 +870,9 @@ export class NetFxWpfWindow implements IWindowProvider {
     title?: string;
     message: string;
     buttons?: string[];
-  }): Promise<number> {
+    checkboxLabel?: string;
+    checkboxChecked?: boolean;
+  }): Promise<{ response: number; checkboxChecked: boolean }> {
     return showMessageBox(options);
   }
 

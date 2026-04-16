@@ -205,7 +205,9 @@ export interface IWindowProvider {
     title?: string;
     message: string;
     buttons?: string[];
-  }): Promise<number>;
+    checkboxLabel?: string;
+    checkboxChecked?: boolean;
+  }): Promise<{ response: number; checkboxChecked: boolean }>;
 
   /**
    * Called by BrowserWindow immediately after createWindow() succeeds.

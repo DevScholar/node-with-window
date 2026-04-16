@@ -7,8 +7,10 @@ type MessageBoxOptions = {
   message: string;
   buttons?: string[];
   defaultId?: number;
+  checkboxLabel?: string;
+  checkboxChecked?: boolean;
 };
-type MessageBoxResult = { response: number };
+type MessageBoxResult = { response: number; checkboxChecked: boolean };
 type OpenDialogResult = { canceled: boolean; filePaths: string[] };
 type SaveDialogResult = { canceled: boolean; filePath: string | undefined };
 
@@ -49,8 +51,8 @@ export const dialog = {
   ): Promise<MessageBoxResult> {
     const win = resolveWindow(winOrOpts);
     const opts = resolveOpts(winOrOpts, options) ?? ({ message: '' } as MessageBoxOptions);
-    const response = (await win?.showMessageBox(opts)) ?? 0;
-    return { response };
+    const result = await win?.showMessageBox(opts);
+    return result ?? { response: 0, checkboxChecked: false };
   },
 
   showOpenDialogSync(
