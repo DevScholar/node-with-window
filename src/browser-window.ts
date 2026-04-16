@@ -361,6 +361,23 @@ export class BrowserWindow extends EventEmitter {
     return this.provider.showMessageBox(options);
   }
 
+  public showOpenDialogSync(options: OpenDialogOptions): string[] | undefined {
+    return this.provider.showOpenDialogSync?.(options);
+  }
+
+  public showSaveDialogSync(options: SaveDialogOptions): string | undefined {
+    return this.provider.showSaveDialogSync?.(options);
+  }
+
+  public showMessageBoxSync(options: {
+    type?: string;
+    title?: string;
+    message: string;
+    buttons?: string[];
+  }): number {
+    return this.provider.showMessageBoxSync?.(options) ?? 0;
+  }
+
   public getUserDataPath(): string | undefined {
     if ('userDataPath' in this.provider) {
       return (this.provider as { userDataPath: string }).userDataPath;

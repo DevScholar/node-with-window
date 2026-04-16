@@ -22,7 +22,7 @@ import {
   removeNwwCallbackPusher,
 } from '../../node-integration.js';
 import { buildGioMenu } from './menu.js';
-import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
+import { showOpenDialog, showSaveDialog, showMessageBox, showOpenDialogSync, showSaveDialogSync, showMessageBoxSync } from './dialogs.js';
 import { protocol } from '../../protocol.js';
 import { handleNwwScheme, handleUriScheme } from './scheme-handler.js';
 import { app } from '../../app.js';
@@ -991,5 +991,22 @@ export class GjsGtk4Window implements IWindowProvider {
     checkboxChecked?: boolean;
   }): Promise<{ response: number; checkboxChecked: boolean }> {
     return showMessageBox(this.win, options);
+  }
+
+  public showOpenDialogSync(options: OpenDialogOptions): string[] | undefined {
+    return showOpenDialogSync(this.win, options);
+  }
+
+  public showSaveDialogSync(options: SaveDialogOptions): string | undefined {
+    return showSaveDialogSync(this.win, options);
+  }
+
+  public showMessageBoxSync(options: {
+    type?: string;
+    title?: string;
+    message: string;
+    buttons?: string[];
+  }): number {
+    return showMessageBoxSync(this.win, options);
   }
 }

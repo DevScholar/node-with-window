@@ -88,7 +88,7 @@ function getCheckboxDialogType(): any {
 
 // ---------------------------------------------------------------------------
 
-export function showOpenDialog(options: OpenDialogOptions): Promise<string[] | undefined> {
+export function showOpenDialogSync(options: OpenDialogOptions): string[] | undefined {
   try {
     const dotnetNs = dotnet as DotnetProxy & Record<string, DotNetObject>;
     const OpenFileDlgType = dotnetNs['Microsoft.Win32.OpenFileDialog'];
@@ -109,16 +109,20 @@ export function showOpenDialog(options: OpenDialogOptions): Promise<string[] | u
     const ok = dlg.ShowDialog();
     if (ok) {
       const fileName: string = dlg.FileName;
-      return Promise.resolve(fileName ? [fileName] : undefined);
+      return fileName ? [fileName] : undefined;
     }
-    return Promise.resolve(undefined);
+    return undefined;
   } catch (e) {
     console.error('[node-with-window] Open dialog error:', e);
-    return Promise.resolve(undefined);
+    return undefined;
   }
 }
 
-export function showSaveDialog(options: SaveDialogOptions): Promise<string | undefined> {
+export function showOpenDialog(options: OpenDialogOptions): Promise<string[] | undefined> {
+  return Promise.resolve(showOpenDialogSync(options));
+}
+
+export function showSaveDialogSync(options: SaveDialogOptions): string | undefined {
   try {
     const dotnetNs = dotnet as DotnetProxy & Record<string, DotNetObject>;
     const SaveFileDlgType = dotnetNs['Microsoft.Win32.SaveFileDialog'];
@@ -138,12 +142,78 @@ export function showSaveDialog(options: SaveDialogOptions): Promise<string | und
     const ok = dlg.ShowDialog();
     if (ok) {
       const fileName: string = dlg.FileName;
-      return Promise.resolve(fileName || undefined);
+      return fileName || undefined;
     }
-    return Promise.resolve(undefined);
+    return undefined;
   } catch (e) {
     console.error('[node-with-window] Save dialog error:', e);
-    return Promise.resolve(undefined);
+    return undefined;
+  }
+}
+
+export function showSaveDialog(options: SaveDialogOptions): Promise<string | undefined> {
+  return Promise.resolve(showSaveDialogSync(options));
+}
+
+// ---------------------------------------------------------------------------
+// Shared MessageBox sync core
+// ---------------------------------------------------------------------------
+
+function _messageBoxSync(options: {
+  type?: string;
+  title?: string;
+  message: string;
+  buttons?: string[];
+}): number {
+  const buttons = options.buttons && options.buttons.length > 0 ? options.buttons : ['OK'];
+
+  const System = dotnet.System;
+  const Windows = System.Windows;
+
+  const iconMap: Record<string, number> = {
+    none: 0,
+    info: 64,
+    error: 16,
+    question: 32,
+    warning: 48,
+  };
+  const buttonMap: Record<string, number> = {
+    OK: 0,
+    OKCancel: 1,
+    YesNo: 4,
+    YesNoCancel: 3,
+  };
+
+  const iconType = iconMap[options.type || 'none'] || 0;
+  const buttonType =
+    buttons.length <= 1 ? buttonMap['OK']
+    : buttons.length === 2 ? buttonMap['YesNo']
+    : buttons.length === 3 ? buttonMap['YesNoCancel']
+    : buttonMap['OKCancel'];
+
+  const result = (Windows as unknown as DotNetObject).MessageBox.Show(
+    options.message,
+    options.title || 'Message',
+    buttonType,
+    iconType,
+  );
+  if (result === 6) return 0;        // Yes → index 0
+  if (result === 7) return 1;        // No  → index 1
+  if (result === 2) return buttons.length > 2 ? 2 : 1; // Cancel → last index
+  return 0;
+}
+
+export function showMessageBoxSync(options: {
+  type?: string;
+  title?: string;
+  message: string;
+  buttons?: string[];
+}): number {
+  try {
+    return _messageBoxSync(options);
+  } catch (e) {
+    console.error('[node-with-window] MessageBox error:', e);
+    return 0;
   }
 }
 
@@ -174,44 +244,7 @@ export function showMessageBox(options: {
     }
 
     // No checkbox — use the lightweight Win32 MessageBox.
-    const System = dotnet.System;
-    const Windows = System.Windows;
-
-    const iconMap: Record<string, number> = {
-      none: 0,
-      info: 64,
-      error: 16,
-      question: 32,
-      warning: 48,
-    };
-    const buttonMap: Record<string, number> = {
-      OK: 0,
-      OKCancel: 1,
-      YesNo: 4,
-      YesNoCancel: 3,
-    };
-
-    const iconType = iconMap[options.type || 'none'] || 0;
-    const buttonType = options.buttons
-      ? options.buttons.length <= 1
-        ? buttonMap['OK']
-        : options.buttons.length === 2
-          ? buttonMap['YesNo']
-          : options.buttons.length === 3
-            ? buttonMap['YesNoCancel']
-            : buttonMap['OKCancel']
-      : buttonMap['OK'];
-
-    const result = (Windows as unknown as DotNetObject).MessageBox.Show(
-      options.message,
-      options.title || 'Message',
-      buttonType,
-      iconType
-    );
-    let response = 0;
-    if (result === 6) response = 0;
-    else if (result === 7) response = 1;
-    else if (result === 2) response = options.buttons && options.buttons.length > 2 ? 2 : 1;
+    const response = _messageBoxSync({ ...options, buttons });
     return Promise.resolve({ response, checkboxChecked: false });
   } catch (e) {
     console.error('[node-with-window] MessageBox error:', e);

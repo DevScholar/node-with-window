@@ -1,9 +1,160 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { OpenDialogOptions, SaveDialogOptions } from '../../interfaces.js';
-import { _Gtk, _Gio } from './gtk-app.js';
+import { _Gtk, _Gio, _GLib } from './gtk-app.js';
 import type Gtk from '@girs/gtk-4.0';
 import type Gio from '@girs/gio-2.0';
+import type GLib from '@girs/glib-2.0';
+
+// Helper: create a GLib.MainLoop, run it, and return the quit function.
+function makeLoop(): { loop: GLib.MainLoop; quit: () => void } {
+  const loop = new _GLib.MainLoop(null, false) as GLib.MainLoop;
+  return {
+    loop,
+    quit: () => (loop as unknown as { quit: () => void }).quit(),
+  };
+}
+
+function runLoop(loop: GLib.MainLoop): void {
+  (loop as unknown as { run: () => void }).run();
+}
+
+export function showOpenDialogSync(win: Gtk.ApplicationWindow | null, options: OpenDialogOptions): string[] | undefined {
+  if (!win) return undefined;
+  const { loop, quit } = makeLoop();
+  let syncResult: string[] | undefined;
+  try {
+    const dialog = new _Gtk.FileDialog() as Gtk.FileDialog;
+    if (options.title) dialog.title = options.title;
+    const openFolder = options.defaultPath
+      ? _Gio.File.new_for_path(options.defaultPath)
+      : _Gio.File.new_for_path(process.cwd());
+    try { dialog.initial_folder = openFolder; } catch { /* ignore */ }
+
+    const isMulti = options.properties?.includes('multiSelections');
+    const isDir   = options.properties?.includes('openDirectory');
+
+    const callback = (source: Gtk.FileDialog, asyncResult: Gio.AsyncResult) => {
+      try {
+        if (isDir) {
+          const folder = source.select_folder_finish(asyncResult);
+          syncResult = folder ? [folder.get_path()!] : undefined;
+        } else if (isMulti) {
+          const list = source.open_multiple_finish(asyncResult);
+          const count = list.get_n_items();
+          syncResult = [];
+          for (let i = 0; i < count; i++) syncResult.push((list.get_item(i) as Gio.File).get_path()!);
+        } else {
+          const file = source.open_finish(asyncResult);
+          syncResult = file ? [file.get_path()!] : undefined;
+        }
+      } catch { /* user cancelled */ }
+      quit();
+    };
+
+    if (isDir) dialog.select_folder(win, null, callback as unknown as (...args: unknown[]) => void);
+    else if (isMulti) dialog.open_multiple(win, null, callback as unknown as (...args: unknown[]) => void);
+    else dialog.open(win, null, callback as unknown as (...args: unknown[]) => void);
+
+    runLoop(loop);
+  } catch (e) {
+    console.warn('[gjs-gtk4] showOpenDialogSync failed:', e);
+  }
+  return syncResult;
+}
+
+export function showSaveDialogSync(win: Gtk.ApplicationWindow | null, options: SaveDialogOptions): string | undefined {
+  if (!win) return undefined;
+  const { loop, quit } = makeLoop();
+  let syncResult: string | undefined;
+  try {
+    const dialog = new _Gtk.FileDialog() as Gtk.FileDialog;
+    if (options.title) dialog.title = options.title;
+    const dp = options.defaultPath;
+    if (dp) {
+      try {
+        const stat = fs.statSync(dp);
+        if (stat.isDirectory()) {
+          dialog.initial_folder = _Gio.File.new_for_path(dp);
+        } else {
+          dialog.initial_folder = _Gio.File.new_for_path(path.dirname(dp));
+          dialog.initial_name = path.basename(dp);
+        }
+      } catch {
+        dialog.initial_folder = _Gio.File.new_for_path(
+          path.isAbsolute(dp) ? path.dirname(dp) : process.cwd()
+        );
+        dialog.initial_name = path.basename(dp);
+      }
+    } else {
+      try { dialog.initial_folder = _Gio.File.new_for_path(process.cwd()); } catch { /* ignore */ }
+    }
+
+    dialog.save(win, null, ((source: Gtk.FileDialog, asyncResult: Gio.AsyncResult) => {
+      try {
+        const file = source.save_finish(asyncResult);
+        syncResult = file ? file.get_path()! : undefined;
+      } catch { /* user cancelled */ }
+      quit();
+    }) as unknown as (...args: unknown[]) => void);
+
+    runLoop(loop);
+  } catch (e) {
+    console.warn('[gjs-gtk4] showSaveDialogSync failed:', e);
+  }
+  return syncResult;
+}
+
+export function showMessageBoxSync(
+  win: Gtk.ApplicationWindow | null,
+  options: { type?: string; title?: string; message: string; buttons?: string[] },
+): number {
+  if (!win) return 0;
+  const buttons = options.buttons || ['OK'];
+  const { loop, quit } = makeLoop();
+  let response = 0;
+  try {
+    if (_Gtk.AlertDialog) {
+      const dialog = new _Gtk.AlertDialog({
+        message: options.title || options.message,
+        detail: options.title ? options.message : '',
+        buttons,
+        modal: true,
+      } as Gtk.AlertDialog.ConstructorProps) as Gtk.AlertDialog;
+      try { dialog.cancel_button = buttons.length - 1; } catch { /* ignore */ }
+
+      dialog.choose(win, null, ((source: Gtk.AlertDialog, asyncResult: Gio.AsyncResult) => {
+        try {
+          response = source.choose_finish(asyncResult);
+        } catch {
+          response = buttons.length - 1;
+        }
+        quit();
+      }) as unknown as (...args: unknown[]) => void);
+    } else {
+      // Fallback: Gtk.Dialog (GTK < 4.10)
+      const typeMap: Record<string, number> = { none: 0, info: 1, warning: 2, question: 3, error: 4 };
+      const dialog = new _Gtk.MessageDialog({
+        transient_for: win,
+        modal: true,
+        message_type: typeMap[options.type || 'none'] ?? 0,
+        text: options.title || 'Message',
+        secondary_text: options.message || '',
+      } as unknown as Gtk.MessageDialog.ConstructorProps) as Gtk.MessageDialog;
+      for (let i = 0; i < buttons.length; i++) dialog.add_button(buttons[i], i);
+      dialog.connect('response', (_d: Gtk.MessageDialog, r: number) => {
+        response = r >= 0 ? r : 0;
+        _d.close();
+        quit();
+      });
+      dialog.present();
+    }
+    runLoop(loop);
+  } catch (e) {
+    console.warn('[gjs-gtk4] showMessageBoxSync failed:', e);
+  }
+  return response;
+}
 
 export async function showOpenDialog(win: Gtk.ApplicationWindow | null, options: OpenDialogOptions): Promise<string[] | undefined> {
   if (!win) return undefined;

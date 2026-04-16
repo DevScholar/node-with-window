@@ -14,7 +14,7 @@ import { findWebView2Runtime } from './webview2-runtime.js';
 import { parseBackgroundColor } from './color.js';
 import { WpfIpcBridge } from './ipc-bridge.js';
 import { Win32Chrome } from './win32-chrome.js';
-import { showOpenDialog, showSaveDialog, showMessageBox } from './dialogs.js';
+import { showOpenDialog, showSaveDialog, showMessageBox, showOpenDialogSync, showSaveDialogSync, showMessageBoxSync } from './dialogs.js';
 import { buildWpfMenu } from './menu.js';
 import { initWebView2WithProtocols } from './webview-setup.js';
 import { popupContextMenu } from './popup-menu.js';
@@ -874,6 +874,23 @@ export class NetFxWpfWindow implements IWindowProvider {
     checkboxChecked?: boolean;
   }): Promise<{ response: number; checkboxChecked: boolean }> {
     return showMessageBox(options);
+  }
+
+  public showOpenDialogSync(options: OpenDialogOptions): string[] | undefined {
+    return showOpenDialogSync(options);
+  }
+
+  public showSaveDialogSync(options: SaveDialogOptions): string | undefined {
+    return showSaveDialogSync(options);
+  }
+
+  public showMessageBoxSync(options: {
+    type?: string;
+    title?: string;
+    message: string;
+    buttons?: string[];
+  }): number {
+    return showMessageBoxSync(options);
   }
 
   /** Captures the WebView2 rendering as a PNG and returns a NativeImage. */

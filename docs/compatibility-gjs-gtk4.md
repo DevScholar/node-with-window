@@ -248,9 +248,9 @@ All methods execute synchronously underneath (`Gtk.FileDialog` async callbacks d
 | `dialog.showOpenDialog([win,] options)` | ✅ | `Gtk.FileDialog`; returns `Promise<{ canceled, filePaths }>` |
 | `dialog.showSaveDialog([win,] options)` | ✅ | `Gtk.FileDialog`; returns `Promise<{ canceled, filePath }>` |
 | `dialog.showMessageBox([win,] options)` | ✅ | `checkboxLabel` option supported — uses `Gtk.Dialog` + `Gtk.CheckButton`; without checkbox uses `Gtk.AlertDialog` (GTK ≥ 4.10) or `Gtk.MessageDialog` fallback; returns `Promise<{ response, checkboxChecked }>` |
-| `dialog.showOpenDialogSync([win,] options)` | ✅ | Returns `string[] \| undefined` |
-| `dialog.showSaveDialogSync([win,] options)` | ✅ | Returns `string \| undefined` |
-| `dialog.showMessageBoxSync([win,] options)` | ✅ | Returns `number` |
+| `dialog.showOpenDialogSync([win,] options)` | ✅ | Blocks via `GLib.MainLoop.run()`; uses `Gtk.FileDialog`; returns `string[] \| undefined` |
+| `dialog.showSaveDialogSync([win,] options)` | ✅ | Blocks via `GLib.MainLoop.run()`; uses `Gtk.FileDialog`; returns `string \| undefined` |
+| `dialog.showMessageBoxSync([win,] options)` | ✅ | Blocks via `GLib.MainLoop.run()`; uses `Gtk.AlertDialog` (GTK ≥ 4.10) or `Gtk.MessageDialog` fallback; returns `number` |
 | `dialog.showErrorBox(title, content)` | ✅ | Delegates to `showMessageBox` |
 | `dialog.showCertificateTrustDialog()` | ❌ | Not implemented | macOS only |
 

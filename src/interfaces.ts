@@ -208,6 +208,9 @@ export interface IWindowProvider {
     checkboxLabel?: string;
     checkboxChecked?: boolean;
   }): Promise<{ response: number; checkboxChecked: boolean }>;
+  showOpenDialogSync?(options: OpenDialogOptions): string[] | undefined;
+  showSaveDialogSync?(options: SaveDialogOptions): string | undefined;
+  showMessageBoxSync?(options: { type?: string; title?: string; message: string; buttons?: string[] }): number;
 
   /**
    * Called by BrowserWindow immediately after createWindow() succeeds.

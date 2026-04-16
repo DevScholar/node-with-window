@@ -254,9 +254,9 @@ All methods are exposed as Promises but execute synchronously underneath (blocki
 | `dialog.showSaveDialog([win,] options)` | ✅ | Returns `Promise<{ canceled, filePath }>` |
 | `dialog.showMessageBox([win,] options)` | ✅ | Returns `Promise<{ response, checkboxChecked }>`; `buttons` array supported; `checkboxLabel` option supported — renders a custom WPF `Window` with a `CheckBox` (compiled once via `addType()`); `checkboxChecked` reflects user selection |
 | `dialog.showErrorBox(title, content)` | ✅ | |
-| `dialog.showOpenDialogSync([win,] options)` | ✅ | Returns `string[] \| undefined` |
-| `dialog.showSaveDialogSync([win,] options)` | ✅ | Returns `string \| undefined` |
-| `dialog.showMessageBoxSync([win,] options)` | ✅ | Returns `number` |
+| `dialog.showOpenDialogSync([win,] options)` | ✅ | Blocks synchronously (underlying `OpenFileDialog.ShowDialog()` is a Win32 modal call); returns `string[] \| undefined` |
+| `dialog.showSaveDialogSync([win,] options)` | ✅ | Blocks synchronously (underlying `SaveFileDialog.ShowDialog()` is a Win32 modal call); returns `string \| undefined` |
+| `dialog.showMessageBoxSync([win,] options)` | ✅ | Blocks synchronously (`MessageBox.Show()` is a Win32 modal call); returns `number` |
 | `dialog.showCertificateTrustDialog()` | ❌ | Not implemented | macOS only |
 
 ---

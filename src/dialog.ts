@@ -56,27 +56,30 @@ export const dialog = {
   },
 
   showOpenDialogSync(
-    _winOrOpts: BrowserWindow | OpenDialogOptions,
-    _options?: OpenDialogOptions
+    winOrOpts: BrowserWindow | OpenDialogOptions,
+    options?: OpenDialogOptions
   ): string[] | undefined {
-    console.warn('[node-with-window] showOpenDialogSync: not supported with async dialogs, use showOpenDialog');
-    return undefined;
+    const win = resolveWindow(winOrOpts);
+    const opts = resolveOpts(winOrOpts, options) ?? ({} as OpenDialogOptions);
+    return win?.showOpenDialogSync(opts);
   },
 
   showSaveDialogSync(
-    _winOrOpts: BrowserWindow | SaveDialogOptions,
-    _options?: SaveDialogOptions
+    winOrOpts: BrowserWindow | SaveDialogOptions,
+    options?: SaveDialogOptions
   ): string | undefined {
-    console.warn('[node-with-window] showSaveDialogSync: not supported with async dialogs, use showSaveDialog');
-    return undefined;
+    const win = resolveWindow(winOrOpts);
+    const opts = resolveOpts(winOrOpts, options) ?? ({} as SaveDialogOptions);
+    return win?.showSaveDialogSync(opts);
   },
 
   showMessageBoxSync(
-    _winOrOpts: BrowserWindow | MessageBoxOptions,
-    _options?: MessageBoxOptions
+    winOrOpts: BrowserWindow | MessageBoxOptions,
+    options?: MessageBoxOptions
   ): number {
-    console.warn('[node-with-window] showMessageBoxSync: not supported with async dialogs, use showMessageBox');
-    return 0;
+    const win = resolveWindow(winOrOpts);
+    const opts = resolveOpts(winOrOpts, options) ?? ({ message: '' } as MessageBoxOptions);
+    return win?.showMessageBoxSync(opts) ?? 0;
   },
 
   showErrorBox(title: string, content: string): void {
