@@ -1,6 +1,6 @@
 {
   "packages": {
-    "@devscholar/node-ps1-dotnet": "0.0.18",
-    "@devscholar/node-with-gjs": "0.0.13"
+    "@devscholar/node-ps1-dotnet": "0.0.19",
+    "@devscholar/node-with-gjs": "0.0.14"
   }
 }

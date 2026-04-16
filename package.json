@@ -1,6 +1,6 @@
 {
   "name": "@devscholar/node-with-window",
-  "version": "0.0.18",
+  "version": "0.0.19",
   "description": "lightweight Electron substitute for Node.js/Deno/Bun",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
