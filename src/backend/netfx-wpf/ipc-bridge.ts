@@ -24,6 +24,8 @@ export class WpfIpcBridge {
   private _navigateCallback: ((url: string) => void) | null = null;
   private _domReadyCallback: (() => void) | null = null;
   private _navigateFailedCallback: ((errorCode: number, errorDescription: string, url: string) => void) | null = null;
+  private _willNavigateCallback: ((url: string) => void) | null = null;
+  private _isLoading = false;
   private _nwwPushFn: ((id: string, args: unknown[]) => void) | null = null;
 
   constructor(
@@ -183,6 +185,7 @@ export class WpfIpcBridge {
     ).add_NavigationCompleted((_s, e) => {
       const evt = e as unknown as { IsSuccess: boolean; HttpStatusCode?: number };
       const url = (coreWebView2 as unknown as { Source: string }).Source ?? '';
+      this._isLoading = false;
       if (evt.IsSuccess) {
         this._navCompletedCallback?.();
         this._navigateCallback?.(url);
@@ -190,6 +193,15 @@ export class WpfIpcBridge {
         const errorCode = evt.HttpStatusCode ?? -1;
         this._navigateFailedCallback?.(errorCode, 'Navigation failed', url);
       }
+    });
+
+    // ── NavigationStarting → will-navigate / isLoading ────────────────────────
+    (coreWebView2 as unknown as {
+      add_NavigationStarting: (cb: (_s: unknown, _e: unknown) => void) => void;
+    }).add_NavigationStarting((_s, e) => {
+      const url = (e as unknown as { Uri: string }).Uri ?? '';
+      this._isLoading = true;
+      if (url && url !== 'about:blank') this._willNavigateCallback?.(url);
     });
   }
 
@@ -225,6 +237,14 @@ export class WpfIpcBridge {
 
   public onNavigateFailed(callback: (errorCode: number, errorDescription: string, url: string) => void): void {
     this._navigateFailedCallback = callback;
+  }
+
+  public onWillNavigate(callback: (url: string) => void): void {
+    this._willNavigateCallback = callback;
+  }
+
+  public getIsLoading(): boolean {
+    return this._isLoading;
   }
 
   public send(channel: string, ...args: unknown[]): void {

@@ -115,6 +115,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   private _isFullScreen = false;
   private _isKiosk = false;
   private _isResizable = true;
+  private _prevWindowState: unknown = null;
   private _webViewInitTimer: ReturnType<typeof setTimeout> | null = null;
   private _coreAssembly: unknown = null;
 
@@ -343,6 +344,34 @@ export class NetFxWpfWindow implements IWindowProvider {
     this._ipcBridge.onNavigateFailed(callback);
   }
 
+  public onWillNavigate(callback: (url: string) => void): void {
+    this._ipcBridge.onWillNavigate(callback);
+  }
+
+  public getURL(): string {
+    if (!this.coreWebView2) return '';
+    try { return (this.coreWebView2 as unknown as { Source: string }).Source ?? ''; } catch { return ''; }
+  }
+
+  public getWebTitle(): string {
+    if (!this.coreWebView2) return '';
+    try { return (this.coreWebView2 as unknown as { DocumentTitle: string }).DocumentTitle ?? ''; } catch { return ''; }
+  }
+
+  public isLoading(): boolean {
+    return this._ipcBridge.getIsLoading();
+  }
+
+  public goBack(): void {
+    if (!this.coreWebView2) return;
+    try { (this.coreWebView2 as unknown as { GoBack: () => void }).GoBack(); } catch { /* ignore */ }
+  }
+
+  public goForward(): void {
+    if (!this.coreWebView2) return;
+    try { (this.coreWebView2 as unknown as { GoForward: () => void }).GoForward(); } catch { /* ignore */ }
+  }
+
   public executeJavaScript(code: string): Promise<unknown> {
     return this._ipcBridge.executeJavaScript(code);
   }
@@ -390,6 +419,23 @@ export class NetFxWpfWindow implements IWindowProvider {
         const w = Math.round(e.NewSize.Width as number);
         const h = Math.round(e.NewSize.Height as number);
         this.onResize?.(w, h);
+      } catch { /* best-effort */ }
+    });
+    (this.browserWindow as DotNetObject).add_StateChanged((_s: unknown, _e: unknown) => {
+      try {
+        const WindowState = dotnet.System.Windows.WindowState;
+        const state = (this.browserWindow as unknown as { WindowState: unknown }).WindowState;
+        const prev = this._prevWindowState;
+        this._prevWindowState = state;
+
+        if (state === WindowState.Minimized) {
+          this.onMinimize?.();
+        } else if (state === WindowState.Maximized) {
+          if (!this._isFullScreen) this.onMaximize?.();
+        } else if (state === WindowState.Normal) {
+          if (prev === WindowState.Minimized) this.onRestore?.();
+          else if (prev === WindowState.Maximized && !this._isFullScreen) this.onUnmaximize?.();
+        }
       } catch { /* best-effort */ }
     });
   }
@@ -631,12 +677,15 @@ export class NetFxWpfWindow implements IWindowProvider {
 
   public setFullScreen(flag: boolean): void {
     if (!this.browserWindow) return;
+    const prev = this._isFullScreen;
     this._isFullScreen = flag;
     const needFrameless = this.options.frame === false || this.options.transparent === true
       || this.options.titleBarStyle === 'hidden' || this.options.titleBarStyle === 'hiddenInset';
     dotnet.setFullScreen(
       this.browserWindow, flag, needFrameless, this.options.alwaysOnTop ?? false
     );
+    if (flag && !prev) this.onEnterFullScreen?.();
+    else if (!flag && prev) this.onLeaveFullScreen?.();
   }
 
   public isFullScreen(): boolean {
