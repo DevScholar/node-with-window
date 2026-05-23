@@ -150,7 +150,7 @@ export class GjsGtk4Window implements IWindowProvider {
     try {
       this.ucm.register_script_message_handler('ipc', null);
     } catch {
-      this.ucm.register_script_message_handler('ipc');
+      (this.ucm as any).register_script_message_handler('ipc');
     }
 
     this.ucm.connect('script-message-received::ipc', async (_ucm: WebKit.UserContentManager, jsResult: any) => {

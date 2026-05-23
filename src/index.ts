@@ -1,6 +1,11 @@
-// Side-effect imports to register built-in backends at module load time
-import './backend/netfx-wpf/index.js';
-import './backend/gjs-gtk4/index.js';
+// Dynamic imports with computed paths so tsc doesn't statically resolve them.
+// Top-level await ensures all present backends register before the app resolves.
+const _be = [
+  './backend/netfx-wpf/index.js',
+  './backend/gjs-gtk4/index.js',
+  './backend/jxa-cocoa/index.js',
+];
+await Promise.allSettled(_be.map(p => import(p)));
 
 export * from './app.js';
 export * from './browser-window.js';

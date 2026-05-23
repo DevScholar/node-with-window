@@ -21,7 +21,7 @@
     "scripts"
   ],
   "scripts": {
-    "build": "tsc && node -e \"require('fs').cpSync('src/backend/netfx-wpf/Win32Helper.cs','dist/backend/netfx-wpf/Win32Helper.cs')\"",
+    "build": "node scripts/build.js",
     "dev": "tsc --watch",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write src",
@@ -58,6 +58,7 @@
   },
   "optionalDependencies": {
     "@devscholar/node-ps1-dotnet": "0.0.19",
-    "@devscholar/node-with-gjs": "0.0.14"
+    "@devscholar/node-with-gjs": "0.0.14",
+    "@devscholar/node-with-jxa": "0.0.3"
   }
 }

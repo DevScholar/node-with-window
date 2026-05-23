@@ -86,8 +86,10 @@ export const shell = {
         }
 
         // Use the already-running WPF bridge process (SHFileOperation P/Invoke).
-        // Dynamic import avoids pulling in the .NET bridge on non-Windows platforms.
-        import('./backend/netfx-wpf/dotnet/index.js').then(mod => {
+        // Dynamic import via variable so tsc doesn't statically resolve the
+        // platform-specific module (mirrors the pattern in src/index.ts).
+        const netfxPath = './backend/netfx-wpf/dotnet/index.js';
+        import(netfxPath).then(mod => {
           try {
             (mod.default as unknown as { trashItem: (p: string) => void }).trashItem(filePath);
             resolve();

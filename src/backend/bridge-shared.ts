@@ -24,7 +24,7 @@
  */
 
 export interface NodeBridgeOptions {
-  platform: 'win32' | 'linux';
+  platform: 'win32' | 'linux' | 'darwin';
   /** JSON.stringify'd arch string ready for direct embedding. */
   injectedArch: string;
   /** JSON.stringify'd version string ready for direct embedding. */
