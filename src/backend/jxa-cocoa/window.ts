@@ -297,6 +297,19 @@ export class JxaCocoaWindow implements IWindowProvider {
       Number($.NSViewWidthSizable) | Number($.NSViewHeightSizable),
     );
 
+    // WKWebView has no public `drawsBackground`/`isOpaque` setter (unlike the
+    // legacy WebView), so it paints an opaque white background over the clear
+    // NSWindow.  Flip the private `drawsBackground` KVC key (the same one
+    // Tauri/wry use) to make the web view transparent too.
+    if (this.options.transparent) {
+      this.webView.setOpaque(false);
+      try {
+        this.webView.setValueForKey(false, 'drawsBackground');
+      } catch (e) {
+        console.error('[jxa-cocoa] drawsBackground KVC failed:', e);
+      }
+    }
+
     // Bridge script injection
     let bridgeScript = generateBridgeScript(this.webPreferences);
 
