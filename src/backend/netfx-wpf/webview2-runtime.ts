@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
  * - Microsoft.Web.WebView2.Core.dll
  * - Microsoft.Web.WebView2.Wpf.dll
  *
- * Supports both subdirectory layouts (versioned) and flat layouts.
+ * Expects the versioned subdirectory layout (runtimes/webview2/<version>/).
  *
  * Primary search is relative to this file's location (import.meta.url),
  * which is reliable regardless of the working directory of the host app.
@@ -62,13 +62,6 @@ export function findWebView2Runtime(): string {
           return runtimePath;
         }
       }
-    }
-
-    // Check for flat layout (DLLs directly in basePath)
-    const coreDllPath = path.join(basePath, 'Microsoft.Web.WebView2.Core.dll');
-    const wpfDllPath = path.join(basePath, 'Microsoft.Web.WebView2.Wpf.dll');
-    if (fs.existsSync(coreDllPath) && fs.existsSync(wpfDllPath)) {
-      return basePath;
     }
   }
 
