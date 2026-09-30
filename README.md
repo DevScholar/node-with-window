@@ -3,11 +3,13 @@
 > ⚠️ Alpha — expect breaking changes.
 
 A cross-platform windowing library for Node.js with an Electron-compatible API.
-Uses WPF + WebView2 on Windows and GTK 4 + WebKitGTK on Linux.
+Uses WPF + WebView2 on Windows, GTK 4 + WebKitGTK on Linux, and AppKit + WKWebView on macOS.
 
 ![WPF Notepad Screenshot](./screenshots/wpf-notepad.png)
 
 ![GTK Notepad Screenshot](./screenshots/gtk-notepad.png)
+
+![Cocoa Notepad Screenshot](./screenshots/cocoa-notepad.png)
 
 ## Install
 
@@ -56,7 +58,8 @@ sudo apt install gjs gir1.2-gtk-4.0 gir1.2-webkit-6.0
 ```
 ### macOS
 
-[Under Construction]
+- Node.js 18+
+- macOS 12+ (Monterey)
 
 ## API
 
