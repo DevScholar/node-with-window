@@ -2,10 +2,6 @@ import * as path from 'node:path';
 import { $, ObjC } from '@devscholar/node-with-jxa';
 import type { OpenDialogOptions, SaveDialogOptions } from '../../interfaces.js';
 
-function toNSString(str: string): any {
-  return $.NSString.stringWithUTF8String(str);
-}
-
 function unwrapURLArray(nsArray: any): string[] {
   const result: string[] = [];
   try {
@@ -35,19 +31,27 @@ export function showOpenDialogSync(
     panel.setShowsHiddenFiles(
       !!options.properties?.includes('showHiddenFiles'),
     );
-    if (options.title) panel.setMessage(toNSString(options.title));
+    if (options.title) panel.setMessage(options.title);
     if (options.defaultPath)
-      panel.setDirectoryURL($.NSURL.fileURLWithPath(toNSString(options.defaultPath)));
+      panel.setDirectoryURL($.NSURL.fileURLWithPath(options.defaultPath));
     if (options.filters) {
       const types = $.NSMutableArray.alloc.init;
       for (const filter of options.filters) {
         for (const ext of filter.extensions) {
-          types.addObject(toNSString(ext));
+          types.addObject(ext);
         }
       }
       panel.setAllowedFileTypes(types);
     }
-    const response = Number(panel.runModal);
+    // macOS 12 (Monterey) moved the open/save panel UI into a separate XPC
+    // "open and save panel service".  Calling `[NSOpenPanel runModal]` under
+    // that architecture fails with "The open file operation failed to connect
+    // to the open and save panel service" (-1001).  `[NSApp runModalForWindow:]`
+    // is the API Apple expects on macOS 12+ for app-modal panels.  (Tk hit the
+    // exact same regression — see Tk bug 108ada5dc8.)
+    const response = Number(
+      $.NSApplication.sharedApplication.runModalForWindow(panel),
+    );
     if (response === 1) {
       // NSModalResponseOK
       return unwrapURLArray(panel.URLs);
@@ -64,30 +68,33 @@ export function showSaveDialogSync(
 ): string | undefined {
   try {
     const panel = $.NSSavePanel.savePanel;
-    if (options.title) panel.setTitle(toNSString(options.title));
+    if (options.title) panel.setTitle(options.title);
     if (options.defaultPath) {
       const dp = options.defaultPath;
       try {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const stat = require('node:fs').statSync(dp);
         if (stat.isDirectory()) {
-          panel.setDirectoryURL($.NSURL.fileURLWithPath(toNSString(dp)));
+          panel.setDirectoryURL($.NSURL.fileURLWithPath(dp));
         } else {
           panel.setDirectoryURL(
-            $.NSURL.fileURLWithPath(toNSString(path.dirname(dp))),
+            $.NSURL.fileURLWithPath(path.dirname(dp)),
           );
-          panel.setNameFieldStringValue(toNSString(path.basename(dp)));
+          panel.setNameFieldStringValue(path.basename(dp));
         }
       } catch {
         panel.setDirectoryURL(
           $.NSURL.fileURLWithPath(
-            toNSString(path.isAbsolute(dp) ? path.dirname(dp) : process.cwd()),
+            path.isAbsolute(dp) ? path.dirname(dp) : process.cwd(),
           ),
         );
-        panel.setNameFieldStringValue(toNSString(path.basename(dp)));
+        panel.setNameFieldStringValue(path.basename(dp));
       }
     }
-    const response = Number(panel.runModal);
+    // Same macOS 12+ panel-service requirement as showOpenDialogSync.
+    const response = Number(
+      $.NSApplication.sharedApplication.runModalForWindow(panel),
+    );
     if (response === 1) {
       return (ObjC.unwrap(panel.URL.path) as string) || undefined;
     }
@@ -108,11 +115,11 @@ export function showMessageBoxSync(
 ): number {
   try {
     const alert = $.NSAlert.alloc.init;
-    if (options.title) alert.setMessageText(toNSString(options.title));
-    alert.setInformativeText(toNSString(options.message));
+    if (options.title) alert.setMessageText(options.title);
+    alert.setInformativeText(options.message);
     const buttons = options.buttons || ['OK'];
     for (const btn of buttons) {
-      alert.addButtonWithTitle(toNSString(btn));
+      alert.addButtonWithTitle(btn);
     }
     const response = Number(alert.runModal);
     // NSAlertFirstButtonReturn = 1000, second = 1001, etc.
