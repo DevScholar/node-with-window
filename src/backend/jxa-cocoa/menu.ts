@@ -32,13 +32,13 @@ function parseAccelerator(accel: string): { key: string; modifiers: number } {
     down: '↓',  // ↓
     left: '←',  // ←
     right: '→', // →
-    escape: '',
+    escape: '\u001b',
     enter: '\r',
     return: '\r',
     tab: '\t',
     space: ' ',
     backspace: '\b',
-    delete: '',
+    delete: '\u007f',
     home: '↖',  // ↖
     end: '↘',   // ↘
     pageup: '⇞',   // ⇞
@@ -92,7 +92,6 @@ function getMenuHandler(): any {
       if (cb) cb();
     } catch { /* ignore */ }
   };
-  (impl as any).__nww_syncReturn = null;
 
   ObjC.registerSubclass({
     name: 'NwjxaMenuHandler',
@@ -168,4 +167,64 @@ export function buildCocoaMenu(
     menu.addItem(nsItem);
   }
   return menu;
+}
+
+// ---------------------------------------------------------------------------
+// Application menu (≈ Windows sysmenu)
+// ---------------------------------------------------------------------------
+// AppKit reserves the FIRST top-level slot of NSApp.mainMenu for the
+// application menu: it forces that slot's title to the process name (or
+// CFBundleName for a real .app bundle) and expects About / Hide / Quit inside.
+// If we don't insert one ourselves, AppKit promotes the user's first menu
+// (e.g. "File") into that slot and renames it to "osascript", silently
+// destroying a user menu.  Electron inserts an equivalent application menu
+// automatically; we mirror that so user menus (File/Edit/View/...) keep their
+// titles and start from the second slot — matching standard macOS layout.
+export function buildApplicationMenu(): any {
+  const appMenu = $.NSMenu.alloc.initWithTitle('');
+
+  const about = $.NSMenuItem.alloc.initWithTitleActionKeyEquivalent(
+    'About',
+    'orderFrontStandardAboutPanel:',
+    '',
+  );
+  appMenu.addItem(about);
+  appMenu.addItem($.NSMenuItem.separatorItem);
+
+  const hide = $.NSMenuItem.alloc.initWithTitleActionKeyEquivalent(
+    'Hide',
+    'hide:',
+    'h',
+  );
+  appMenu.addItem(hide);
+
+  const hideOthers = $.NSMenuItem.alloc.initWithTitleActionKeyEquivalent(
+    'Hide Others',
+    'hideOtherApplications:',
+    'h',
+  );
+  hideOthers.setKeyEquivalentModifierMask(
+    Number($.NSEventModifierFlagCommand) |
+      Number($.NSEventModifierFlagOption),
+  );
+  appMenu.addItem(hideOthers);
+
+  const showAll = $.NSMenuItem.alloc.initWithTitleActionKeyEquivalent(
+    'Show All',
+    'unhideAllApplications:',
+    '',
+  );
+  appMenu.addItem(showAll);
+  appMenu.addItem($.NSMenuItem.separatorItem);
+
+  const quit = $.NSMenuItem.alloc.initWithTitleActionKeyEquivalent(
+    'Quit',
+    'terminate:',
+    'q',
+  );
+  appMenu.addItem(quit);
+
+  const item = $.NSMenuItem.alloc.initWithTitleActionKeyEquivalent('', '', '');
+  item.setSubmenu(appMenu);
+  return item;
 }

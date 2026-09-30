@@ -18,7 +18,7 @@ import {
   handleNwwRequest,
   setBridgeScript,
 } from '../../node-integration.js';
-import { buildCocoaMenu } from './menu.js';
+import { buildCocoaMenu, buildApplicationMenu } from './menu.js';
 import {
   showOpenDialog,
   showSaveDialog,
@@ -229,7 +229,6 @@ export class JxaCocoaWindow implements IWindowProvider {
       // Quit when last window closes
       return true;
     };
-    (impl as any).__nww_syncReturn = true;
 
     ObjC.registerSubclass({
       name: 'NwjxaAppDelegate',
@@ -258,6 +257,13 @@ export class JxaCocoaWindow implements IWindowProvider {
     // IPC handler
     const handlerName = `NwjxaIpcHandler_${this._id}`;
 
+    // Plain JXA callback — void return type, so node-with-jxa dispatches it
+    // fire-and-forget (async_event) rather than pumping a nested reply loop.
+    // That defers the renderer-triggered runModal (showOpenDialog) out of
+    // WebKit's script-message callback stack into the top-level app run loop —
+    // the context macOS requires for the open/save panel service (fixes the
+    // -1001 "failed to connect to the open and save panel service" error and
+    // the greyed-out-file bug).
     const handlerImpl = (_controller: any, message: any) => {
       try {
         const body = ObjC.unwrap(message.body) as string;
@@ -266,7 +272,6 @@ export class JxaCocoaWindow implements IWindowProvider {
         console.error('[jxa-cocoa] IPC handler error:', e);
       }
     };
-    (handlerImpl as any).__nww_syncReturn = null;
 
     ObjC.registerSubclass({
       name: handlerName,
@@ -407,12 +412,10 @@ export class JxaCocoaWindow implements IWindowProvider {
           /* best-effort */ }
       }
     };
-    (startTaskImpl as any).__nww_syncReturn = null;
 
     const stopTaskImpl = (_webView: any, _task: any) => {
       // No-op: nww:// requests are handled synchronously
     };
-    (stopTaskImpl as any).__nww_syncReturn = null;
 
     ObjC.registerSubclass({
       name: schemeHandlerName,
@@ -447,17 +450,14 @@ export class JxaCocoaWindow implements IWindowProvider {
     const willClose = () => {
       winRef._onWindowClosed();
     };
-    (willClose as any).__nww_syncReturn = null;
 
     const didBecomeKey = () => {
       winRef.onFocus?.();
     };
-    (didBecomeKey as any).__nww_syncReturn = null;
 
     const didResignKey = () => {
       winRef.onBlur?.();
     };
-    (didResignKey as any).__nww_syncReturn = null;
 
     const didResize = () => {
       try {
@@ -468,31 +468,26 @@ export class JxaCocoaWindow implements IWindowProvider {
       } catch {
         /* ignore */ }
     };
-    (didResize as any).__nww_syncReturn = null;
 
     const didMiniaturize = () => {
       winRef._isMinimized = true;
       winRef.onMinimize?.();
     };
-    (didMiniaturize as any).__nww_syncReturn = null;
 
     const didDeminiaturize = () => {
       winRef._isMinimized = false;
       winRef.onRestore?.();
     };
-    (didDeminiaturize as any).__nww_syncReturn = null;
 
     const didEnterFullScreen = () => {
       winRef._isFullScreen = true;
       winRef.onEnterFullScreen?.();
     };
-    (didEnterFullScreen as any).__nww_syncReturn = null;
 
     const didExitFullScreen = () => {
       winRef._isFullScreen = false;
       winRef.onLeaveFullScreen?.();
     };
-    (didExitFullScreen as any).__nww_syncReturn = null;
 
     const didMove = () => {
       try {
@@ -501,7 +496,6 @@ export class JxaCocoaWindow implements IWindowProvider {
       } catch {
         /* ignore */ }
     };
-    (didMove as any).__nww_syncReturn = null;
 
     ObjC.registerSubclass({
       name: delegateName,
@@ -555,7 +549,6 @@ export class JxaCocoaWindow implements IWindowProvider {
         if (action) action();
       }
     };
-    (didFinish as any).__nww_syncReturn = null;
 
     const didFail = (_webView: any, _navigation: any, error: any) => {
       try {
@@ -568,7 +561,6 @@ export class JxaCocoaWindow implements IWindowProvider {
       } catch {
         /* ignore */ }
     };
-    (didFail as any).__nww_syncReturn = null;
 
     const didCommit = () => {
       try {
@@ -582,7 +574,6 @@ export class JxaCocoaWindow implements IWindowProvider {
       } catch {
         /* ignore */ }
     };
-    (didCommit as any).__nww_syncReturn = null;
 
     // Not registering decidePolicyForNavigationAction:decisionHandler:
     // because JXA cannot call the ObjC decisionHandler block — even
@@ -592,11 +583,9 @@ export class JxaCocoaWindow implements IWindowProvider {
 
     const didStartProvisional = () => {
     };
-    (didStartProvisional as any).__nww_syncReturn = null;
 
     const didFailProvisional = (_w: any, _n: any, error: any) => {
     };
-    (didFailProvisional as any).__nww_syncReturn = null;
 
     ObjC.registerSubclass({
       name: delegateName,
@@ -978,6 +967,10 @@ export class JxaCocoaWindow implements IWindowProvider {
       return;
     }
     const menu = buildCocoaMenu(items, (role) => this._roleAction(role));
+    // Reserve the first slot for the application menu so AppKit doesn't
+    // promote the user's first menu ("File") into it and rename it to the
+    // process name ("osascript").  Mirrors Electron's automatic app menu.
+    menu.insertItemAtIndex(buildApplicationMenu(), 0);
     this.nsApp.setMainMenu(menu);
   }
 

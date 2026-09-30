@@ -36,12 +36,21 @@ export function showOpenDialogSync(
       panel.setDirectoryURL($.NSURL.fileURLWithPath(options.defaultPath));
     if (options.filters) {
       const types = $.NSMutableArray.alloc.init;
+      let allowOthers = false;
       for (const filter of options.filters) {
         for (const ext of filter.extensions) {
-          types.addObject(ext);
+          // Electron uses '*' to mean "all files"; NSOpenPanel has no '*' UTI,
+          // so translate it to allowsOtherFileTypes instead of poisoning the
+          // allowedFileTypes list (an unmatched type greys out every file and
+          // disables the Open button).
+          if (ext === '*') { allowOthers = true; continue; }
+          if (!ext) continue;
+          const clean = ext.startsWith('.') ? ext.slice(1) : ext;
+          types.addObject(clean);
         }
       }
-      panel.setAllowedFileTypes(types);
+      if (allowOthers) panel.setAllowsOtherFileTypes(true);
+      if (Number(types.count) > 0) panel.setAllowedFileTypes(types);
     }
     // macOS 12 (Monterey) moved the open/save panel UI into a separate XPC
     // "open and save panel service".  Calling `[NSOpenPanel runModal]` under
