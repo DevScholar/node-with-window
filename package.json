@@ -59,6 +59,6 @@
   "optionalDependencies": {
     "@devscholar/node-ps1-dotnet": "0.0.19",
     "@devscholar/node-with-gjs": "0.0.14",
-    "@devscholar/node-with-jxa": "0.0.3"
+    "@devscholar/node-with-jxa": "file:../node-with-jxa"
   }
 }

@@ -108,15 +108,11 @@ function getMenuHandler(): any {
   return menuHandlerInstance;
 }
 
-function toNSString(str: string): any {
-  return $.NSString.stringWithUTF8String(str);
-}
-
 export function buildCocoaMenu(
   items: MenuItemOptions[],
   resolveRole?: (role: string) => (() => void) | undefined,
 ): any {
-  const menu = $.NSMenu.alloc.initWithTitle(toNSString(''));
+  const menu = $.NSMenu.alloc.initWithTitle('');
   for (const item of items) {
     if (item.visible === false) continue;
 
@@ -128,9 +124,9 @@ export function buildCocoaMenu(
     if (item.submenu && item.submenu.length > 0) {
       const sub = buildCocoaMenu(item.submenu, resolveRole);
       const subItem = $.NSMenuItem.alloc.initWithTitleActionKeyEquivalent(
-        toNSString(item.label || ''),
-        toNSString(''),
-        toNSString(''),
+        item.label || '',
+        '',
+        '',
       );
       subItem.setSubmenu(sub);
       if (item.enabled === false) subItem.setEnabled(false);
@@ -152,9 +148,9 @@ export function buildCocoaMenu(
     }
 
     const nsItem = $.NSMenuItem.alloc.initWithTitleActionKeyEquivalent(
-      toNSString(item.label || ''),
-      toNSString(roleSel || 'menuItemClicked:'),
-      toNSString(keyEquiv),
+      item.label || '',
+      roleSel || 'menuItemClicked:',
+      keyEquiv,
     );
 
     if (roleSel) {

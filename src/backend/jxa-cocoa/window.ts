@@ -15,8 +15,9 @@ import { generateBridgeScript } from './bridge.js';
 import {
   addNwwCallbackPusher,
   removeNwwCallbackPusher,
+  handleNwwRequest,
+  setBridgeScript,
 } from '../../node-integration.js';
-import { handleNwwRequest } from '../../node-integration.js';
 import { buildCocoaMenu } from './menu.js';
 import {
   showOpenDialog,
@@ -148,7 +149,7 @@ export class JxaCocoaWindow implements IWindowProvider {
       );
 
     this.nsWindow.setTitle(
-      toNSString(this.options.title || 'node-with-window'),
+      this.options.title || 'node-with-window',
     );
 
     if (!this._isResizable)
@@ -157,17 +158,21 @@ export class JxaCocoaWindow implements IWindowProvider {
       );
 
     if (this.options.minWidth || this.options.minHeight) {
-      const minSize = $.NSSize;
-      minSize.width = this.options.minWidth ?? 0;
-      minSize.height = this.options.minHeight ?? 0;
-      this.nsWindow.setMinSize(minSize);
+      this.nsWindow.setMinSize(
+        $.NSMakeSize(
+          this.options.minWidth ?? 0,
+          this.options.minHeight ?? 0,
+        ),
+      );
     }
 
     if (this.options.maxWidth || this.options.maxHeight) {
-      const maxSize = $.NSSize;
-      maxSize.width = this.options.maxWidth ?? 99999;
-      maxSize.height = this.options.maxHeight ?? 99999;
-      this.nsWindow.setMaxSize(maxSize);
+      this.nsWindow.setMaxSize(
+        $.NSMakeSize(
+          this.options.maxWidth ?? 99999,
+          this.options.maxHeight ?? 99999,
+        ),
+      );
     }
 
     // Transparency / background color
@@ -274,7 +279,7 @@ export class JxaCocoaWindow implements IWindowProvider {
       },
     });
     const ipcHandler = $[handlerName].alloc.init;
-    userContent.addScriptMessageHandlerName(ipcHandler, toNSString('ipc'));
+    userContent.addScriptMessageHandlerName(ipcHandler, 'ipc');
     this._delegates.push(ipcHandler);
 
     config.setUserContentController(userContent);
@@ -313,8 +318,20 @@ export class JxaCocoaWindow implements IWindowProvider {
       }
     }
 
+    // Store the bridge script so the nww:// scheme handler can serve it.
+    // This avoids sending the (potentially large) script inline in the
+    // WKUserScript AllocInit command, which can hang the JXA IPC pipe.
+    setBridgeScript(bridgeScript);
+
+    // Synchronous XHR through the nww:// scheme to load the bridge script.
+    // Dynamic <script> elements load asynchronously, but we need the bridge
+    // available before any page scripts run (require(), ipcRenderer, etc.).
+    const loader = 'var x=new XMLHttpRequest();' +
+      'x.open("GET","nww://bridge/bridge.js",false);' +
+      'try{x.send()}catch(e){}' +
+      'if(x.status===200)eval(x.responseText);';
     const userScript = $.WKUserScript.alloc.initWithSourceInjectionTimeForMainFrameOnly(
-      toNSString(bridgeScript),
+      loader,
       0, // WKUserScriptInjectionTimeAtDocumentStart
       false,
     );
@@ -347,38 +364,38 @@ export class JxaCocoaWindow implements IWindowProvider {
 
         const result = handleNwwRequest(url, method, body);
 
-        if (result.status === 204) {
-          const response =
-            $.NSURLResponse.alloc.initWithURLMIMETypeExpectedContentLengthTextEncodingName(
-              request.URL,
-              toNSString('application/json'),
-              0,
-              null,
-            );
-          task.didReceiveResponse(response);
-          task.didFinish();
-        } else {
-          const nsBody = toNSString(result.body);
-          const data = nsBody.dataUsingEncoding(4 /* NSUTF8StringEncoding */);
-          const response =
-            $.NSURLResponse.alloc.initWithURLMIMETypeExpectedContentLengthTextEncodingName(
-              request.URL,
-              toNSString(result.mimeType),
-              Number(data.length),
-              null,
-            );
-          task.didReceiveResponse(response);
+        // A custom-scheme response MUST be an NSHTTPURLResponse to carry a
+        // real HTTP status code. A plain NSURLResponse reports XHR status 0,
+        // which breaks the bridge loader (status===200 gate) and every
+        // require()/ipcRenderer call (status!==200 checks). 204 and 200 both
+        // go through here.
+        const statusCode = result.status === 204 ? 204 : 200;
+        const nsBody = result.status === 204 ? toNSString('') : toNSString(result.body);
+        const data = nsBody.dataUsingEncoding(4 /* NSUTF8StringEncoding */);
+        const response =
+          $.NSHTTPURLResponse.alloc.initWithURLStatusCodeHTTPVersionHeaderFields(
+            request.URL,
+            statusCode,
+            'HTTP/1.1',
+            {
+              'Content-Type': result.mimeType,
+              'Content-Length': String(Number(data.length)),
+            },
+          );
+        task.didReceiveResponse(response);
+        if (result.status !== 204) {
           task.didReceiveData(data);
-          task.didFinish();
         }
+        // didFinish is a zero-arg ObjC method; JXA auto-invokes it on bare
+        // property access, so the parens form would call the void result.
+        task.didFinish;
       } catch (e) {
         console.error('[jxa-cocoa] nww scheme handler error:', e);
         try {
-          const errMsg = toNSString(
-            (e as Error).message || 'Scheme handler error',
-          );
+          const errMsg =
+            (e as Error).message || 'Scheme handler error';
           const err = $.NSError.alloc.initWithDomainCodeUserInfo(
-            toNSString('NwjxaSchemeHandler'),
+            'NwjxaSchemeHandler',
             -1,
             $.NSDictionary.dictionaryWithObjectForKey(
               errMsg,
@@ -416,7 +433,7 @@ export class JxaCocoaWindow implements IWindowProvider {
     const schemeHandler = $[schemeHandlerName].alloc.init;
     config.setURLSchemeHandlerForURLScheme(
       schemeHandler,
-      toNSString('nww'),
+      'nww',
     );
     this._delegates.push(schemeHandler);
   }
@@ -557,6 +574,9 @@ export class JxaCocoaWindow implements IWindowProvider {
       try {
         const url =
           (ObjC.unwrap(winRef.webView.URL?.absoluteString) as string) || '';
+        if (url && url !== 'about:blank') {
+          winRef._willNavigateCallback?.(url);
+        }
         winRef._domReadyCallback?.();
         winRef._navigateCallback?.(url);
       } catch {
@@ -564,30 +584,28 @@ export class JxaCocoaWindow implements IWindowProvider {
     };
     (didCommit as any).__nww_syncReturn = null;
 
-    const decidePolicy = (
-      _webView: any,
-      navAction: any,
-      decisionHandler: any,
-    ) => {
-      try {
-        if (winRef._willNavigateCallback) {
-          const url =
-            (ObjC.unwrap(navAction.request.URL.absoluteString) as string) || '';
-          if (url && url !== 'about:blank') {
-            winRef._willNavigateCallback(url);
-          }
-        }
-        decisionHandler(0); // WKNavigationActionPolicyAllow = 0
-      } catch {
-        decisionHandler(0);
-      }
+    // Not registering decidePolicyForNavigationAction:decisionHandler:
+    // because JXA cannot call the ObjC decisionHandler block — even
+    // before processNestedCommands(), calling the block throws
+    // "Object is not a function".  Without this delegate method WebKit
+    // defaults to WKNavigationActionPolicyAllow.
+
+    const didStartProvisional = () => {
     };
-    (decidePolicy as any).__nww_syncReturn = null;
+    (didStartProvisional as any).__nww_syncReturn = null;
+
+    const didFailProvisional = (_w: any, _n: any, error: any) => {
+    };
+    (didFailProvisional as any).__nww_syncReturn = null;
 
     ObjC.registerSubclass({
       name: delegateName,
       superclass: 'NSObject',
       methods: {
+        'webView:didStartProvisionalNavigation:': {
+          types: ['void', ['id', 'id']],
+          implementation: didStartProvisional,
+        },
         'webView:didFinishNavigation:': {
           types: ['void', ['id', 'id']],
           implementation: didFinish,
@@ -596,13 +614,13 @@ export class JxaCocoaWindow implements IWindowProvider {
           types: ['void', ['id', 'id', 'id']],
           implementation: didFail,
         },
+        'webView:didFailProvisionalNavigation:withError:': {
+          types: ['void', ['id', 'id', 'id']],
+          implementation: didFailProvisional,
+        },
         'webView:didCommitNavigation:': {
           types: ['void', ['id', 'id']],
           implementation: didCommit,
-        },
-        'webView:decidePolicyForNavigationAction:decisionHandler:': {
-          types: ['void', ['id', 'id', 'id']],
-          implementation: decidePolicy,
         },
       },
     });
@@ -707,7 +725,7 @@ export class JxaCocoaWindow implements IWindowProvider {
       this.navigationQueue.push(() => this.loadURL(url));
       return;
     }
-    const nsUrl = $.NSURL.URLWithString(toNSString(url));
+    const nsUrl = $.NSURL.URLWithString(url);
     const req = $.NSURLRequest.requestWithURL(nsUrl);
     this.webView.loadRequest(req);
   }
@@ -721,7 +739,7 @@ export class JxaCocoaWindow implements IWindowProvider {
       this._pendingFilePath = absolutePath;
       return;
     }
-    const nsUrl = $.NSURL.URLWithString(toNSString(fileUri));
+    const nsUrl = $.NSURL.URLWithString(fileUri);
     const req = $.NSURLRequest.requestWithURL(nsUrl);
     this.webView.loadRequest(req);
   }
@@ -799,8 +817,8 @@ export class JxaCocoaWindow implements IWindowProvider {
 
   private _evaluateJs(code: string): void {
     if (!this.webView) return;
-    this.webView.evaluateJavaScript_completionHandler(
-      toNSString(code),
+    this.webView.evaluateJavaScriptCompletionHandler(
+      code,
       null,
     );
   }
@@ -1108,7 +1126,7 @@ export class JxaCocoaWindow implements IWindowProvider {
   }
 
   public setTitle(title: string): void {
-    if (this.nsWindow) this.nsWindow.setTitle(toNSString(title));
+    if (this.nsWindow) this.nsWindow.setTitle(title);
   }
 
   public getTitle(): string {
@@ -1254,7 +1272,7 @@ export class JxaCocoaWindow implements IWindowProvider {
     const nsColor = this._parseColor(color);
     if (nsColor) {
       try {
-        this.webView.setValueForKey(nsColor, toNSString('backgroundColor'));
+        this.webView.setValueForKey(nsColor, 'backgroundColor');
       } catch {
         /* best-effort */ }
     }

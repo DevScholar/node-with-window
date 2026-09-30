@@ -2,7 +2,7 @@
 // TypeScript never resolves optional dependencies that exist only on other OSes.
 // Restores everything afterwards (try/finally).
 
-import { renameSync, existsSync, cpSync, mkdirSync } from 'node:fs';
+import { renameSync, existsSync, cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -15,6 +15,17 @@ const FOREIGN = {
   linux:  ['src/backend/jxa-cocoa', 'src/backend/netfx-wpf'],
   win32:  ['src/backend/gjs-gtk4', 'src/backend/jxa-cocoa'],
 }[process.platform] ?? [];
+
+// Non-Linux platforms don't have @girs/gjs installed, so patch tsconfig
+// to remove it from the "types" array during compilation.
+const TSCONFIG = join(root, 'tsconfig.json');
+let tsconfigOriginal = null;
+if (process.platform !== 'linux') {
+  tsconfigOriginal = readFileSync(TSCONFIG, 'utf8');
+  const patched = tsconfigOriginal.replace(/"@girs\/gjs"\s*,\s*|\s*"@girs\/gjs"/, '');
+  writeFileSync(TSCONFIG, patched, 'utf8');
+  console.log('[build] Patched tsconfig.json: removed @girs/gjs from types');
+}
 
 // 1. Hide foreign backend dirs (dot-prefix so tsc's ** glob skips them)
 const hidden = [];
@@ -33,7 +44,12 @@ try {
   console.log('[build] Running tsc...');
   execSync('npx tsc', { cwd: root, stdio: 'inherit' });
 } finally {
-  // 3. Restore
+  // 3. Restore tsconfig if patched
+  if (tsconfigOriginal) {
+    writeFileSync(TSCONFIG, tsconfigOriginal, 'utf8');
+    console.log('[build] Restored tsconfig.json');
+  }
+  // 4. Restore hidden dirs
   for (const { abs, tmp } of hidden) {
     if (existsSync(tmp)) {
       renameSync(tmp, abs);

@@ -41,6 +41,17 @@ const refRegistry = new Map<string, unknown>();
 /** One push function per open window, registered on window init. */
 const _callbackPushers = new Set<(id: string, args: unknown[]) => void>();
 
+// ── Bridge script store ────────────────────────────────────────────────────────
+
+let _bridgeScript: string = '';
+
+/** Store the bridge script so it can be served via nww://bridge/bridge.js.
+ *  Avoids sending the (potentially large) script inline in a WKUserScript
+ *  AllocInit command over the JXA IPC pipe. */
+export function setBridgeScript(script: string): void {
+  _bridgeScript = script;
+}
+
 /** Register a window's IPC push function. Call on window open. */
 export function addNwwCallbackPusher(fn: (id: string, args: unknown[]) => void): void {
   _callbackPushers.add(fn);
@@ -186,6 +197,15 @@ export function handleNwwRequest(
     } catch (e: unknown) {
       return { status: 500, mimeType: 'text/plain', body: (e as Error).message ?? String(e) };
     }
+  }
+
+  // ── GET /bridge.js ───────────────────────────────────────────────────────────
+  if (pathname === '/bridge.js') {
+    return {
+      status: 200,
+      mimeType: 'text/javascript',
+      body: _bridgeScript,
+    };
   }
 
   // All remaining endpoints are POST and require a parsed body.
