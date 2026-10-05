@@ -814,11 +814,16 @@ export class JxaCocoaWindow implements IWindowProvider {
       });
 
       const eid = JSON.stringify(id);
+      // Evaluate via eval() so a bare expression (`1+1`) yields its completion
+      // value, matching Electron's executeJavaScript semantics.  The previous
+      // `(function(){ ${code} })()` form treated the code as a function body,
+      // so an expression without an explicit `return` produced undefined and
+      // every result came back as null.
       const wrapped =
         `(function(){` +
         `var eid=${eid};` +
         `try{` +
-        `  var r=(function(){${code}})();` +
+        `  var r=eval(${JSON.stringify(code)});` +
         `  if(r&&typeof r.then==='function'){` +
         `    r.then(function(v){window.webkit.messageHandlers.ipc.postMessage(JSON.stringify({type:'execResult',id:eid,result:v==null?null:v}));})` +
         `    .catch(function(e){window.webkit.messageHandlers.ipc.postMessage(JSON.stringify({type:'execResult',id:eid,error:String(e)}));});` +
