@@ -57,8 +57,8 @@
     "vitest": "^4.0.18"
   },
   "optionalDependencies": {
-    "@devscholar/node-ps1-dotnet": "0.0.20",
-    "@devscholar/node-with-gjs": "0.0.16",
+    "@devscholar/node-ps1-dotnet": "file:../node-ps1-dotnet",
+    "@devscholar/node-with-gjs": "file:../node-with-gjs",
     "@devscholar/node-with-jxa": "file:../node-with-jxa"
   }
 }

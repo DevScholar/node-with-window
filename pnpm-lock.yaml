@@ -4,13 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+pnpmfileChecksum: sha256-0lLvFf/jv8hO2Hpd5JIo1Mn78sJceNHU/9lnk5Bm1mk=
+
 importers:
 
   .:
-    dependencies:
-      '@devscholar/node-ps1-dotnet':
-        specifier: file:../node-ps1-dotnet
-        version: file:../node-ps1-dotnet
     devDependencies:
       '@types/node':
         specifier: ^25.3.3
@@ -42,11 +40,31 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.1.2(@types/node@25.5.0)(vite@8.0.3(@types/node@25.5.0)(esbuild@0.25.12))
+    optionalDependencies:
+      '@devscholar/node-ps1-dotnet':
+        specifier: file:../node-ps1-dotnet
+        version: file:../node-ps1-dotnet
+      '@devscholar/node-with-gjs':
+        specifier: file:../node-with-gjs
+        version: file:../node-with-gjs
+      '@devscholar/node-with-jxa':
+        specifier: file:../node-with-jxa
+        version: file:../node-with-jxa
 
 packages:
 
   '@devscholar/node-ps1-dotnet@file:../node-ps1-dotnet':
     resolution: {directory: ../node-ps1-dotnet, type: directory}
+    os: [win32]
+
+  '@devscholar/node-with-gjs@file:../node-with-gjs':
+    resolution: {directory: ../node-with-gjs, type: directory}
+    engines: {node: '>=18.0.0'}
+    os: [linux]
+
+  '@devscholar/node-with-jxa@file:../node-with-jxa':
+    resolution: {directory: ../node-with-jxa, type: directory}
+    engines: {node: '>=18.0.0'}
 
   '@emnapi/core@1.9.1':
     resolution: {integrity: sha512-mukuNALVsoix/w1BJwFzwXBN/dHeejQtuVzcDsfOEsdpCumXb/E9j8w11h5S54tT1xhifGfbbSm/ICrObRb3KA==}
@@ -1074,7 +1092,14 @@ packages:
 
 snapshots:
 
-  '@devscholar/node-ps1-dotnet@file:../node-ps1-dotnet': {}
+  '@devscholar/node-ps1-dotnet@file:../node-ps1-dotnet':
+    optional: true
+
+  '@devscholar/node-with-gjs@file:../node-with-gjs':
+    optional: true
+
+  '@devscholar/node-with-jxa@file:../node-with-jxa':
+    optional: true
 
   '@emnapi/core@1.9.1':
     dependencies:
