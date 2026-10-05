@@ -143,7 +143,22 @@ export class WpfIpcBridge {
             else pending.resolve(message.result);
           }
         } else if (type === 'send') {
-          ipcMain.emit(channel, event, ...args);
+          // Built-in BOM window commands: handled directly against the window
+          // provider rather than emitted to ipcMain (no user listener involved).
+          if (channel === 'window:close') {
+            (this.getWindowSender() as unknown as { requestClose?: () => void })?.requestClose?.();
+          } else if (channel === 'window:moveTo') {
+            (this.getWindowSender() as unknown as { setPosition?: (x: number, y: number) => void })
+              ?.setPosition?.(args[0], args[1]);
+          } else if (channel === 'window:resizeTo') {
+            (this.getWindowSender() as unknown as { setSize?: (w: number, h: number) => void })
+              ?.setSize?.(args[0], args[1]);
+          } else if (channel === 'process:exit') {
+            const code = typeof args[0] === 'number' ? args[0] : 0;
+            process.exit(code);
+          } else {
+            ipcMain.emit(channel, event, ...args);
+          }
         } else if (type === 'invoke') {
           const handler = handlers.get(channel);
           if (handler) {

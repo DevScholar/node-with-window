@@ -564,6 +564,23 @@ export class NetFxWpfWindow implements IWindowProvider {
     // Do NOT call process.exit() here — BrowserWindow._handleClosed() owns exit logic.
   }
 
+  /**
+   * Renderer-initiated close (window.close() in the page).
+   * Mirrors BrowserWindow.close(): runs the cancelable 'close' event via
+   * onCloseRequest, and if not prevented, closes the window and fires onClosed
+   * so BrowserWindow._handleClosed() cleans up the registry, emits
+   * 'window-all-closed', and (if unhandled) exits the process.
+   */
+  public requestClose(): void {
+    void (async () => {
+      if (this.isClosed) return;
+      const prevented = await (this.onCloseRequest?.() ?? false);
+      if (prevented) return;
+      this.close();
+      this.onClosed?.();
+    })();
+  }
+
   // -------------------------------------------------------------------------
   // Internal helpers
   // -------------------------------------------------------------------------

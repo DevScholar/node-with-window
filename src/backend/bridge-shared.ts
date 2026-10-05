@@ -191,6 +191,19 @@ export function generateNodeBridgeIife(opts: NodeBridgeOptions): string {
         }
     };
 
+    // ── BOM window methods ───────────────────────────────────────────────────
+    // window.close() / moveTo(x,y) / resizeTo(w,h) are forwarded to the main
+    // process via the IPC channel (same transport as process:exit).
+    window.close = function() {
+        ${postMessage}(JSON.stringify({ type: 'send', channel: 'window:close', args: [] }));
+    };
+    window.moveTo = function(x, y) {
+        ${postMessage}(JSON.stringify({ type: 'send', channel: 'window:moveTo', args: [x, y] }));
+    };
+    window.resizeTo = function(w, h) {
+        ${postMessage}(JSON.stringify({ type: 'send', channel: 'window:resizeTo', args: [w, h] }));
+    };
+
     if (${importMapJson} !== null) {
         var __nwwImportMapJson = ${importMapJson};
         function __nwwDoInjectImportMap() {
