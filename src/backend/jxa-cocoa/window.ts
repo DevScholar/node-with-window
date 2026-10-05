@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { $, ObjC } from '@devscholar/node-with-jxa';
+import { $, ObjC, registerNwwSchemeHandler, completeNwwSchemeTask } from '@devscholar/node-with-jxa';
 import {
   IWindowProvider,
   BrowserWindowOptions,
@@ -29,10 +29,6 @@ import {
 } from './dialogs.js';
 
 let _nextWindowId = 0;
-
-function toNSString(str: string): any {
-  return $.NSString.stringWithUTF8String(str);
-}
 
 /**
  * JxaCocoaWindow — macOS window provider using AppKit + WKWebView via JXA.
@@ -361,94 +357,36 @@ export class JxaCocoaWindow implements IWindowProvider {
   /** Register a WKURLSchemeHandler for the nww:// custom scheme.
    *  This is the JXA equivalent of WebKitGTK's register_uri_scheme.
    *  Without it, require(), ipcRenderer.sendSync(), and ref-based callbacks
-   *  in the renderer do not work. */
+   *  in the renderer do not work.
+   *
+   *  The handler's start callback runs INLINE in the JXA host process —
+   *  url/method/body are extracted there with zero Node IPC, pushed to Node as
+   *  a single async_event, and the HTTP response is constructed back in the
+   *  host via completeNwwSchemeTask.  This collapses the per-request path from
+   *  ~15 FIFO round-trips (one per ObjC property access through the proxy) to
+   *  two, matching how the Windows backend inlines Request.Uri/Method in C#. */
   private _registerNwwSchemeHandler(config: any): void {
     const schemeHandlerName = `NwjxaSchemeHandler_${this._id}`;
 
-    const startTaskImpl = (_webView: any, task: any) => {
-      try {
-        const request = task.request;
-        const url: string = ObjC.unwrap(request.URL.absoluteString) || '';
-        const method: string = ObjC.unwrap(request.HTTPMethod) || 'GET';
-
-        let body: string | null = null;
-        if (method === 'POST') {
-          const bodyData = request.HTTPBody;
-          if (bodyData) {
-            body =
-              (ObjC.unwrap(
-                $.NSString.alloc.initWithDataEncoding(bodyData, 4 /* NSUTF8StringEncoding */),
-              ) as string) || null;
-          }
-        }
-
-        const result = handleNwwRequest(url, method, body);
-
-        // A custom-scheme response MUST be an NSHTTPURLResponse to carry a
-        // real HTTP status code. A plain NSURLResponse reports XHR status 0,
-        // which breaks the bridge loader (status===200 gate) and every
-        // require()/ipcRenderer call (status!==200 checks). 204 and 200 both
-        // go through here.
-        const statusCode = result.status === 204 ? 204 : 200;
-        const nsBody = result.status === 204 ? toNSString('') : toNSString(result.body);
-        const data = nsBody.dataUsingEncoding(4 /* NSUTF8StringEncoding */);
-        const response =
-          $.NSHTTPURLResponse.alloc.initWithURLStatusCodeHTTPVersionHeaderFields(
-            request.URL,
-            statusCode,
-            'HTTP/1.1',
-            {
-              'Content-Type': result.mimeType,
-              'Content-Length': String(Number(data.length)),
-            },
-          );
-        task.didReceiveResponse(response);
-        if (result.status !== 204) {
-          task.didReceiveData(data);
-        }
-        // didFinish is a zero-arg ObjC method; JXA auto-invokes it on bare
-        // property access, so the parens form would call the void result.
-        task.didFinish;
-      } catch (e) {
-        console.error('[jxa-cocoa] nww scheme handler error:', e);
+    const schemeHandler = registerNwwSchemeHandler(
+      schemeHandlerName,
+      (url: string, method: string, body: string | null, taskId: string) => {
         try {
-          const errMsg =
-            (e as Error).message || 'Scheme handler error';
-          const err = $.NSError.alloc.initWithDomainCodeUserInfo(
-            'NwjxaSchemeHandler',
-            -1,
-            $.NSDictionary.dictionaryWithObjectForKey(
-              errMsg,
-              $.NSLocalizedDescriptionKey,
-            ),
-          );
-          task.didFailWithError(err);
-        } catch {
-          /* best-effort */ }
-      }
-    };
-
-    const stopTaskImpl = (_webView: any, _task: any) => {
-      // No-op: nww:// requests are handled synchronously
-    };
-
-    ObjC.registerSubclass({
-      name: schemeHandlerName,
-      superclass: 'NSObject',
-      protocols: ['WKURLSchemeHandler'],
-      methods: {
-        'webView:startURLSchemeTask:': {
-          types: ['void', ['id', 'id']],
-          implementation: startTaskImpl,
-        },
-        'webView:stopURLSchemeTask:': {
-          types: ['void', ['id', 'id']],
-          implementation: stopTaskImpl,
-        },
+          const result = handleNwwRequest(url, method, body);
+          completeNwwSchemeTask(taskId, {
+            status: result.status,
+            mimeType: result.mimeType,
+            body: result.body,
+          });
+        } catch (e) {
+          console.error('[jxa-cocoa] nww scheme handler error:', e);
+          completeNwwSchemeTask(taskId, {
+            error: (e as Error).message || 'Scheme handler error',
+          });
+        }
       },
-    });
+    );
 
-    const schemeHandler = $[schemeHandlerName].alloc.init;
     config.setURLSchemeHandlerForURLScheme(
       schemeHandler,
       'nww',
