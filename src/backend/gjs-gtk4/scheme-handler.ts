@@ -1,9 +1,7 @@
 import { _GLib, _Gio, _WebKit } from './gtk-app.js';
 import { handleNwwRequest } from '../../node-integration.js';
 import { protocol } from '../../protocol.js';
-import type GLib from '@girs/glib-2.0';
-import type Gio from '@girs/gio-2.0';
-import type WebKit from '@girs/webkit-6.0';
+import type { GLib, Gio, WebKit } from '@devscholar/node-with-gjs';
 
 function readNwwBody(req: WebKit.URISchemeRequest): string | null {
   try {

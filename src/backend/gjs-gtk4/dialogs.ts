@@ -2,9 +2,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { OpenDialogOptions, SaveDialogOptions } from '../../interfaces.js';
 import { _Gtk, _Gio, _GLib } from './gtk-app.js';
-import type Gtk from '@girs/gtk-4.0';
-import type Gio from '@girs/gio-2.0';
-import type GLib from '@girs/glib-2.0';
+import type { Gtk, Gio, GLib } from '@devscholar/node-with-gjs';
 
 // Helper: create a GLib.MainLoop, run it, and return the quit function.
 function makeLoop(): { loop: GLib.MainLoop; quit: () => void } {

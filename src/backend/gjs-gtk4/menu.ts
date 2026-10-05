@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import { MenuItemOptions } from '../../interfaces.js';
-import type Gio from '@girs/gio-2.0';
+import type { Gio } from '@devscholar/node-with-gjs';
 
 export function buildGioMenu(
   items: MenuItemOptions[],

@@ -1,9 +1,4 @@
-import { imports as gjsImports } from '@devscholar/node-with-gjs';
-import type Gtk from '@girs/gtk-4.0';
-import type Gdk from '@girs/gdk-4.0';
-import type Gio from '@girs/gio-2.0';
-import type GLib from '@girs/glib-2.0';
-import type WebKit from '@girs/webkit-6.0';
+import { imports as gjsImports, type Gtk, type Gdk, type Gio, type GLib, type WebKit } from '@devscholar/node-with-gjs';
 
 export let _gi: typeof gjsImports.gi = null as unknown as typeof gjsImports.gi;
 export let _Gtk: typeof Gtk = null as unknown as typeof Gtk;

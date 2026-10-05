@@ -8,7 +8,7 @@
     "strict": true,
     "noImplicitAny": true,
     "skipLibCheck": true,
-    "types": ["node", "@girs/gjs"],
+    "types": ["node"],
     "outDir": "dist",
     "rootDir": "src",
     "declaration": true,
