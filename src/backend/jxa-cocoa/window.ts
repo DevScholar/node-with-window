@@ -60,6 +60,8 @@ export class JxaCocoaWindow implements IWindowProvider {
   private _isKiosk = false;
   private _isResizable = true;
   private _zoomLevel = 1.0;
+  /** True once setTitle() has been called; document.title changes no longer override the native title. */
+  public explicitTitle = false;
 
   private _nwwPushFn: ((id: string, args: unknown[]) => void) | null = null;
   private _pendingMenu: MenuItemOptions[] | null = null;
@@ -88,7 +90,7 @@ export class JxaCocoaWindow implements IWindowProvider {
   public onFocus?: () => void;
   public onBlur?: () => void;
   public onResize?: (width: number, height: number) => void;
-  public onTitleUpdated?: (title: string) => void;
+  public onTitleUpdated?: (title: string, explicitSet: boolean) => void;
   public onMinimize?: () => void;
   public onMaximize?: () => void;
   public onUnmaximize?: () => void;
@@ -1132,6 +1134,7 @@ export class JxaCocoaWindow implements IWindowProvider {
   }
 
   public setTitle(title: string): void {
+    this.explicitTitle = true;
     if (this.nsWindow) this.nsWindow.setTitle(title);
   }
 

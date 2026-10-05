@@ -235,8 +235,10 @@ export interface IWindowProvider {
   onBlur?: () => void;
   /** Called when the window is resized. Width and height are in logical pixels. */
   onResize?: (width: number, height: number) => void;
-  /** Called when the page title changes (DocumentTitleChanged / notify::title). */
-  onTitleUpdated?: (title: string) => void;
+  /** Called when the page title changes (DocumentTitleChanged / notify::title).
+   *  explicitSet is true when the window title was set via setTitle(), in which
+   *  case the document title no longer overrides the native title (Electron-compatible). */
+  onTitleUpdated?: (title: string, explicitSet: boolean) => void;
   /** Called when the window is minimized (iconified). */
   onMinimize?: () => void;
   /** Called when the window is maximized. */

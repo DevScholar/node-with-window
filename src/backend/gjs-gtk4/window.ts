@@ -57,6 +57,8 @@ export class GjsGtk4Window implements IWindowProvider {
   private _isKiosk = false;
   private _isResizable = true;
   private _zoomLevel = 1.0;
+  /** True once setTitle() has been called; document.title changes no longer override the native title. */
+  public explicitTitle = false;
   private _userDataPath: string | null = null;
   private _isTempSession = false;
   private _navCompletedCallback: (() => void) | null = null;
@@ -74,7 +76,7 @@ export class GjsGtk4Window implements IWindowProvider {
   public onFocus?: () => void;
   public onBlur?: () => void;
   public onResize?: (width: number, height: number) => void;
-  public onTitleUpdated?: (title: string) => void;
+  public onTitleUpdated?: (title: string, explicitSet: boolean) => void;
   public onMinimize?: () => void;
   public onMaximize?: () => void;
   public onUnmaximize?: () => void;
@@ -439,8 +441,8 @@ export class GjsGtk4Window implements IWindowProvider {
       try {
         const pageTitle: string = this.webView!.get_title?.() ?? '';
         if (pageTitle) {
-          this.win!.set_title(pageTitle);
-          this.onTitleUpdated?.(pageTitle);
+          if (!this.explicitTitle) this.win!.set_title(pageTitle);
+          this.onTitleUpdated?.(pageTitle, this.explicitTitle);
         }
       } catch { /* best-effort */ }
     });
@@ -866,6 +868,7 @@ export class GjsGtk4Window implements IWindowProvider {
   }
 
   public setTitle(title: string): void {
+    this.explicitTitle = true;
     if (this.win) this.win.set_title(title);
   }
 

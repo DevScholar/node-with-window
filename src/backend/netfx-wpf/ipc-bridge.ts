@@ -113,8 +113,15 @@ export class WpfIpcBridge {
     }).add_DocumentTitleChanged((_sender: unknown, _e: unknown) => {
       const title = (coreWebView2 as unknown as { DocumentTitle: string }).DocumentTitle;
       if (title) {
-        (this.getBrowserWindow() as unknown as { Title: string }).Title = title;
-        (this.getWindowSender() as DotNetObject)?.onTitleUpdated?.(title);
+        const sender = this.getWindowSender() as unknown as {
+          explicitTitle?: boolean;
+          onTitleUpdated?: (title: string, explicitSet: boolean) => void;
+        };
+        const explicitSet = sender?.explicitTitle === true;
+        if (!explicitSet) {
+          (this.getBrowserWindow() as unknown as { Title: string }).Title = title;
+        }
+        sender?.onTitleUpdated?.(title, explicitSet);
       }
     });
 

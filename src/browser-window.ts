@@ -98,7 +98,7 @@ export class BrowserWindow extends EventEmitter {
     };
     this.provider.onBlur = () => this.emit('blur');
     this.provider.onResize = (width, height) => this.emit('resize', width, height);
-    this.provider.onTitleUpdated = (title) => this.emit('page-title-updated', {}, title, false);
+    this.provider.onTitleUpdated = (title, explicitSet) => this.emit('page-title-updated', {}, title, explicitSet);
     this.provider.onMinimize = () => this.emit('minimize');
     this.provider.onMaximize = () => this.emit('maximize');
     this.provider.onUnmaximize = () => this.emit('unmaximize');

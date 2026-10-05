@@ -86,6 +86,8 @@ export class NetFxWpfWindow implements IWindowProvider {
   public isWebViewReady = false;
   public navigationQueue: Array<() => void> = [];
   public pendingFilePath: string | null = null;
+  /** True once setTitle() has been called; document.title changes no longer override the native title. */
+  public explicitTitle = false;
   private _pendingAbsFilePath: string | null = null;
   public userDataPath: string;
   private _isTempSession = false;
@@ -103,7 +105,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   /** Registered by BrowserWindow; called when the window is resized. */
   public onResize?: (width: number, height: number) => void;
   /** Registered by BrowserWindow; called when the page title changes. */
-  public onTitleUpdated?: (title: string) => void;
+  public onTitleUpdated?: (title: string, explicitSet: boolean) => void;
   public onMinimize?: () => void;
   public onMaximize?: () => void;
   public onUnmaximize?: () => void;
@@ -737,6 +739,7 @@ export class NetFxWpfWindow implements IWindowProvider {
   }
 
   public setTitle(title: string): void {
+    this.explicitTitle = true;
     if (!this.browserWindow) return;
     (this.browserWindow as unknown as { Title: string }).Title = title;
   }
