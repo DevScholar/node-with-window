@@ -26,10 +26,7 @@ import { showOpenDialog, showSaveDialog, showMessageBox, showOpenDialogSync, sho
 import { protocol } from '../../protocol.js';
 import { handleNwwScheme, handleUriScheme } from './scheme-handler.js';
 import { app } from '../../app.js';
-import type Gtk from '@girs/gtk-4.0';
-import type Gdk from '@girs/gdk-4.0';
-import type Gio from '@girs/gio-2.0';
-import type WebKit from '@girs/webkit-6.0';
+import type { Gtk, Gdk, Gio, WebKit } from '@devscholar/node-with-gjs';
 
 export class GjsGtk4Window implements IWindowProvider {
   public options: BrowserWindowOptions;
@@ -322,7 +319,10 @@ export class GjsGtk4Window implements IWindowProvider {
       }
     };
     (closeRequestHandler as unknown as { __syncReturn?: boolean }).__syncReturn = true;
-    this.win!.connect('close-request', closeRequestHandler);
+    // @girs 5.x types the close-request callback as () => boolean | void, but this
+    // handler is async: node-with-gjs's marshal layer reads __syncReturn and returns
+    // it to GTK synchronously while the real close logic runs asynchronously in Node.
+    this.win!.connect('close-request', closeRequestHandler as unknown as () => boolean | void);
 
     this.win!.connect('notify::is-active', () => {
       try {
@@ -439,8 +439,11 @@ export class GjsGtk4Window implements IWindowProvider {
 
     this.webView!.connect('notify::title', () => {
       try {
-        const pageTitle: string = this.webView!.get_title?.() ?? '';
-        if (pageTitle) {
+        const pageTitle = this.webView!.get_title?.();
+        // webkit_web_view_get_title() returns NULL when the document has no
+        // <title> at all, and '' for an empty <title>.  Only skip the NULL case —
+        // an empty string is a valid title (Electron allows setTitle('')).
+        if (pageTitle !== null && pageTitle !== undefined) {
           if (!this.explicitTitle) this.win!.set_title(pageTitle);
           this.onTitleUpdated?.(pageTitle, this.explicitTitle);
         }

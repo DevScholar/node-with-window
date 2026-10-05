@@ -111,18 +111,19 @@ export class WpfIpcBridge {
     (coreWebView2 as unknown as {
       add_DocumentTitleChanged: (cb: (_s: unknown, _e: unknown) => void) => void;
     }).add_DocumentTitleChanged((_sender: unknown, _e: unknown) => {
+      // DocumentTitleChanged fires only when the title actually changes, so an
+      // empty string here is a real value (page cleared its <title>), not "no
+      // title yet".  Sync unconditionally — Electron allows setTitle('') too.
       const title = (coreWebView2 as unknown as { DocumentTitle: string }).DocumentTitle;
-      if (title) {
-        const sender = this.getWindowSender() as unknown as {
-          explicitTitle?: boolean;
-          onTitleUpdated?: (title: string, explicitSet: boolean) => void;
-        };
-        const explicitSet = sender?.explicitTitle === true;
-        if (!explicitSet) {
-          (this.getBrowserWindow() as unknown as { Title: string }).Title = title;
-        }
-        sender?.onTitleUpdated?.(title, explicitSet);
+      const sender = this.getWindowSender() as unknown as {
+        explicitTitle?: boolean;
+        onTitleUpdated?: (title: string, explicitSet: boolean) => void;
+      };
+      const explicitSet = sender?.explicitTitle === true;
+      if (!explicitSet) {
+        (this.getBrowserWindow() as unknown as { Title: string }).Title = title;
       }
+      sender?.onTitleUpdated?.(title, explicitSet);
     });
 
     // ── WebMessageReceived → IPC dispatch ──────────────────────────────────────
