@@ -63,7 +63,7 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
             }
         } else if (msg.type === 'message') {
             var listeners = __ipcListeners[msg.channel] || [];
-            for (var i = 0; i < listeners.length; i++) listeners[i].cb({}, msg.args);
+            for (var i = 0; i < listeners.length; i++) listeners[i].cb({}, ...(msg.args || []));
         } else if (msg.type === 'nwwCallback') {
             var args = msg.args || [];
             var wrap = window.__nwwWrapResult || function(x) { return x; };
@@ -115,7 +115,7 @@ export function generateBridgeScript(webPreferences: WebPreferences): string {
 
         once: function(channel, callback) {
             var self = window.ipcRenderer;
-            var wrapped = function(e, args) { self.off(channel, wrapped); callback(e, args); };
+            var wrapped = function(e, ...args) { self.off(channel, wrapped); callback(e, ...args); };
             self.on(channel, wrapped);
         },
 
