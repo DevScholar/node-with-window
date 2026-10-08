@@ -30,6 +30,13 @@ import {
 
 let _nextWindowId = 0;
 
+// The application delegate is a process-wide singleton, not a per-window
+// object. Its ObjC subclass may only be registered once — registering the
+// same name again throws "class already exists" (surfaced when creating a
+// second window). Per-window delegates (window/nav/ipc/scheme) all use
+// `_id`-suffixed names, so only this fixed-name subclass needs the guard.
+let _appDelegateRegistered = false;
+
 /**
  * JxaCocoaWindow — macOS window provider using AppKit + WKWebView via JXA.
  *
@@ -228,16 +235,19 @@ export class JxaCocoaWindow implements IWindowProvider {
       return true;
     };
 
-    ObjC.registerSubclass({
-      name: 'NwjxaAppDelegate',
-      superclass: 'NSObject',
-      methods: {
-        'applicationShouldTerminateAfterLastWindowClosed:': {
-          types: ['bool', ['id']],
-          implementation: impl,
+    if (!_appDelegateRegistered) {
+      ObjC.registerSubclass({
+        name: 'NwjxaAppDelegate',
+        superclass: 'NSObject',
+        methods: {
+          'applicationShouldTerminateAfterLastWindowClosed:': {
+            types: ['bool', ['id']],
+            implementation: impl,
+          },
         },
-      },
-    });
+      });
+      _appDelegateRegistered = true;
+    }
     const delegate = $.NwjxaAppDelegate.alloc.init;
     this.nsApp.setDelegate(delegate);
     this._delegates.push(delegate);
