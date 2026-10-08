@@ -1,5 +1,5 @@
 dist
 dist-examples
 node_modules
-types
+/types
 runtimes
